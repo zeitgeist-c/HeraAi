@@ -1,0 +1,76 @@
+{
+    "setup": {
+        "title": "HeraAi Kurulumu",
+        "tabs": {
+            "api": "API Yönetimi",
+            "general": "Genel Ayarlar",
+            "ai": "Yapay Zeka"
+        },
+        "api": {
+            "keys_management": "API Anahtar Yönetimi",
+            "active": "Aktif",
+            "add_placeholder": "Yeni API Anahtarı Ekle (AIzaSy...)",
+            "add_btn": "Ekle",
+            "description": "Birden fazla anahtar ekleyin. Aktif olanı radyo butonu ile seçin.",
+            "save_btn": "Kaydet ve Devam Et",
+            "saved_success": "Ayarlar kaydedildi!"
+        },
+        "general": {
+            "theme_title": "Görünüm Teması",
+            "theme_system": "Sistem Varsayılanı",
+            "theme_light": "Açık Tema",
+            "theme_dark": "Koyu Tema",
+            "startup_title": "Açılış Davranışı",
+            "startup_resume": "Son Sohbete Devam Et",
+            "startup_new": "Her Seferinde Yeni Sohbet Başlat"
+        },
+        "ai": {
+            "temp_title": "Yaratıcılık Seviyesi (Temperature)",
+            "temp_precise": "Kesin (Daha Az Yanılgı)",
+            "temp_creative": "Yaratıcı (Hikayesel)",
+            "system_prompt_title": "Sistem Komutu (System Prompt)",
+            "system_prompt_placeholder": "Örneğin: Sen kıdemli bir yazılım mimarısın. Her zaman kodu açıklayarak kısa ve net cevaplar ver."
+        }
+    },
+    "chat": {
+        "placeholder": "HeraAi'a istediğini sor...",
+        "powered_by": "Gemini AI tarafından desteklenmektedir",
+        "you": "Sen",
+        "gemini": "HeraAi",
+        "attachment": "Ek",
+        "welcome": "Merhaba! Ben HeraAi. Size nasıl yardımcı olabilirim?",
+        "error_prefix": "Hata:",
+        "history_cleared": "Sohbet geçmişi temizlendi.",
+        "screenshot_blocked": "Bu sayfada ekran kırpma kullanılamaz. Lütfen normal bir web sayfasına gidin.",
+        "screenshot_no_tab": "Aktif sekme bulunamadı.",
+        "file_error": "Dosya yüklenirken bir hata oluştu.",
+        "history_title": "Sohbet Geçmişi",
+        "no_history": "Henüz sohbet geçmişi yok.",
+        "new_chat": "Yeni Sohbet",
+        "tooltips": {
+            "new_chat": "Yeni Sohbet Başlat",
+            "history": "Sohbet Geçmişini Gör",
+            "clear_chat": "Sohbeti Temizle",
+            "settings": "Ayarlar - API Anahtarı Değiştir",
+            "attach_file": "Dosya Ekle (Resim veya PDF)",
+            "copy": "Kopyala",
+            "copied": "Kopyalandı!",
+            "summarize": "Sayfayı Özetle",
+            "read_page": "Bu sayfayı oku",
+            "screenshot": "Ekran Görüntüsü Kırp",
+            "screenshot_hint": "Sayfa üzerinde kırpmak istediğiniz alanı çizin.",
+            "edit": "Düzenle"
+        },
+        "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
+        "reading_page": "Sayfa içeriği okunuyor...",
+        "page_empty": "Sayfadan okunabilecek bir metin bulunamadı.",
+        "summarize_prompt": "Lütfen aşağıdaki web sayfası metnini detaylıca özetle:",
+        "summarize_action": "Bu sayfayı özetle",
+        "prompts": {
+            "summarize": "Özetle",
+            "translate": "Çevir",
+            "explain": "Açıkla",
+            "code": "Kod Açıkla"
+        }
+    }
+}

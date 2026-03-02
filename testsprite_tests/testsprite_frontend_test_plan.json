@@ -1,0 +1,586 @@
+[
+  {
+    "id": "TC001",
+    "title": "Send a chat message and receive a streamed AI response",
+    "description": "Verifies a user can send a message and see the AI response stream and then appear in the conversation.",
+    "category": "Chat with AI",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"message input field\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Hello Gemini, give me a one-sentence fun fact about space.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Hello Gemini, give me a one-sentence fun fact about space.\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI assistant message\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC002",
+    "title": "Send two consecutive messages and confirm both AI replies are appended in order",
+    "description": "Verifies multiple send cycles work and the conversation shows both user messages and corresponding AI replies.",
+    "category": "Chat with AI",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Type \"What is 2+2?\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"What is 2+2?\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI assistant message\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Now give the result as a word only.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Now give the result as a word only.\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC003",
+    "title": "Empty message validation prevents sending",
+    "description": "Verifies clicking Send with an empty input shows the validation error and does not add a new user message bubble.",
+    "category": "Chat with AI",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"message input field\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Please enter a message\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is not visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"new user message in conversation\" is not visible"
+      }
+    ]
+  },
+  {
+    "id": "TC004",
+    "title": "Retry after send failure successfully produces an AI response",
+    "description": "Verifies the error state \"Message failed to send\" can be recovered via Retry and results in a streamed AI reply.",
+    "category": "Chat with AI",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Tell me a short joke.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Message failed to send\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Retry button\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Retry\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI assistant message\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC005",
+    "title": "Message input is cleared after sending",
+    "description": "Verifies that after clicking Send, the input field is cleared (ready for the next message).",
+    "category": "Chat with AI",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Summarize photosynthesis in 5 words.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Summarize photosynthesis in 5 words.\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"message input field\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Summarize photosynthesis in 5 words.\" is not visible in \"message input field\""
+      }
+    ]
+  },
+  {
+    "id": "TC006",
+    "title": "Long message can be sent and response appears",
+    "description": "Verifies a longer user prompt can be submitted and the conversation still renders the user message and an AI response.",
+    "category": "Chat with AI",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Write a concise checklist for planning a weekend trip, including packing, transport, budget, and safety.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Send\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Write a concise checklist for planning a weekend trip, including packing, transport, budget, and safety.\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI assistant message\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC007",
+    "title": "Sending via Enter key triggers message send (if supported)",
+    "description": "Verifies that pressing Enter in the message input sends the message and starts the AI streaming response.",
+    "category": "Chat with AI",
+    "priority": "Low",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Type \"Give me one tip for better sleep.\" into \"message input field\""
+      },
+      {
+        "type": "action",
+        "description": "Press \"Enter\" key"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Give me one tip for better sleep.\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI response streaming indicator\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"AI assistant message\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC008",
+    "title": "Save a new valid API key from Settings (API tab)",
+    "description": "Verifies a user can add an API key and successfully save settings with a visible success notification.",
+    "category": "Settings Management",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Settings\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"API\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Add API key\""
+      },
+      {
+        "type": "action",
+        "description": "Type \"VALID_API_KEY_123456\" into the \"API key\" field"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Settings saved\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC009",
+    "title": "Reject an invalid API key with validation error",
+    "description": "Verifies an invalid API key entry shows a visible validation error and does not show success messaging.",
+    "category": "Settings Management",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"API\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Add API key\""
+      },
+      {
+        "type": "action",
+        "description": "Type \"invalid\" into the \"API key\" field"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Invalid API key\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Settings saved\" is not visible"
+      }
+    ]
+  },
+  {
+    "id": "TC010",
+    "title": "Save API settings with empty API key field shows required validation",
+    "description": "Verifies saving with an empty API key input shows a visible validation message.",
+    "category": "Settings Management",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"API\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Add API key\""
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"API key\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"required\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC011",
+    "title": "Change theme in General tab and confirm UI updates after save",
+    "description": "Verifies changing the theme setting updates the visible UI after saving.",
+    "category": "Settings Management",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"General\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Select \"Dark\" from the \"Theme\" dropdown"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Settings saved\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Dark\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC012",
+    "title": "Switch theme back to Light and confirm UI updates after save",
+    "description": "Verifies switching the theme back to Light persists via save and is visible in the UI.",
+    "category": "Settings Management",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"General\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Select \"Light\" from the \"Theme\" dropdown"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Settings saved\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Light\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC013",
+    "title": "Modify AI behavior settings and save successfully",
+    "description": "Verifies AI behavior settings can be changed and saved with a visible success notification.",
+    "category": "Settings Management",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"AI\" tab"
+      },
+      {
+        "type": "action",
+        "description": "Modify an AI behavior setting (for example, change a dropdown or toggle)"
+      },
+      {
+        "type": "action",
+        "description": "Click \"Save\" button"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Settings saved\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the modified AI behavior setting value is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC014",
+    "title": "Switch between Settings tabs without losing visibility of the Save action",
+    "description": "Verifies the user can move across API, General, and AI tabs and still see the Save control available.",
+    "category": "Settings Management",
+    "priority": "Low",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Settings icon"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"API\" tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Save\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"General\" tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Save\" is visible"
+      },
+      {
+        "type": "action",
+        "description": "Click on \"AI\" tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify element \"Save\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC015",
+    "title": "Show environment error when screen capture is unavailable",
+    "description": "Verifies the app shows a clear error and guidance when screen capture cannot run in the current environment.",
+    "category": "Screen Capture",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Scissors icon"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Screen capture unavailable in current environment\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"install\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"enable\" is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC016",
+    "title": "Confirm crop without selecting an area (validation/guard behavior)",
+    "description": "Verifies the user cannot confirm a crop until an area is selected (or sees a clear prompt if they try).",
+    "category": "Screen Capture",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click Scissors icon"
+      },
+      {
+        "type": "action",
+        "description": "Click Confirm crop"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify text \"Select an area\" is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no image preview is visible in the message composer"
+      }
+    ]
+  }
+]
