@@ -22,7 +22,9 @@
             "theme_dark": "Dark Theme",
             "startup_title": "Startup Behavior",
             "startup_resume": "Resume Last Chat",
-            "startup_new": "Start New Chat Every Time"
+            "startup_new": "Start New Chat Every Time",
+            "language_title": "Language",
+            "accent_color": "Accent Color"
         },
         "ai": {
             "temp_title": "Creativity Level (Temperature)",
@@ -59,7 +61,14 @@
             "read_page": "Read this page",
             "screenshot": "Crop Screenshot",
             "screenshot_hint": "Draw an area on the page to crop.",
-            "edit": "Edit"
+            "edit": "Edit",
+            "crop_confirm": "Confirm",
+            "crop_cancel": "Cancel",
+            "voice_input": "Voice Input",
+            "stop_recording": "Stop Recording",
+            "web_search": "Web Search",
+            "statistics": "Statistics",
+            "shortcuts": "Shortcuts"
         },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
@@ -71,6 +80,34 @@
             "translate": "Translate",
             "explain": "Explain",
             "code": "Explain Code"
-        }
+        },
+        "exported": "Chat history exported!",
+        "imported": "Chat history imported!",
+        "import_error": "Failed to import",
+        "voice_started": "Voice input started...",
+        "voice_error": "Voice input is not supported in this browser"
+    },
+    "stats": {
+        "title": "Usage Statistics",
+        "total_messages": "Total Messages",
+        "total_sessions": "Total Sessions",
+        "last_7_days": "Last 7 Days",
+        "voice_inputs": "Voice Inputs",
+        "screenshots": "Screenshots",
+        "searches": "Searches",
+        "last_active": "Last Active",
+        "never": "Never"
+    },
+    "shortcuts": {
+        "title": "Keyboard Shortcuts",
+        "new_chat": "Start new chat",
+        "send_message": "Send message",
+        "send_multiline": "New line in message",
+        "voice_input": "Toggle voice input",
+        "web_search": "Toggle web search",
+        "coming_soon": "More shortcuts coming soon!"
+    },
+    "common": {
+        "back": "Back"
     }
 }

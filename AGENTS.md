@@ -2,7 +2,37 @@
 
 ## Project Overview
 
-Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using Google's Gemini API with support for multiple languages (i18next).
+Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using dual APIs (Google Gemini Direct & OpenRouter) with support for multiple languages (i18next).
+
+The extension runs in two primary contexts:
+- **Side Panel (UI)**: The main React application (`src/App.jsx`).
+- **Background Service Worker**: Handled by `src/background/service_worker.js` for intercepting extension events (like capturing screen tabs) and relaying them to the frontend.
+
+## API Providers
+
+Hera abstracts two different API backends:
+1. **Google Gemini (Direct)**: Uses `@google/genai` to stream responses directly from Google. Handles multi-modal inputs natively (PDF, Images, Text).
+2. **OpenRouter (REST)**: Acts as a gateway to multiple LLMs (OpenAI, Anthropic, DeepSeek, Meta, etc.) via Server-Sent Events (SSE). It handles capabilities strictly based on model metadata (e.g., some MiniMax models support images, whereas DeepSeek is text-only).
+
+## Core Features & Data Flow
+
+### 1. Storage (`chrome.storage.local`)
+The application relies heavily on local Chrome storage for state persistence. Key variables include:
+- `apiKeys` (Array): Saved API keys.
+- `activeKeyIndex` (Int): Currently selected API key index.
+- `apiProvider` (String): Chosen provider (`google` or `openrouter`).
+- `openRouterKey` (String): Dedicated key for OpenRouter routing.
+- `sessions` (Array): Chat history structured locally.
+- `theme` (String): UI theme (`light`, `dark`, or `system`).
+
+### 2. Screen Capture (Cropping)
+Hera allows users to crop sections of the active website.
+1. User clicks the crop icon in React UI.
+2. `chrome.tabs.captureVisibleTab` takes a screenshot of the active window.
+3. The image is loaded into a `<canvas>` overlay where the user drags a selection box.
+4. The cropped `base64` image is appended directly to the `attachments` array and processed by `fileParsers.js`.
+
+**Limitation Warning:** Chrome security policies prevent screenshots on internal URLs like `chrome://`, `chrome-extension://`, and empty fallback pages.
 
 ## Build / Lint / Test Commands
 
@@ -21,15 +51,18 @@ npm run preview
 
 # Run ESLint
 npm run lint
+
+# Run Suite of TestSprite End-to-End Tests
+npm run test
 ```
 
-### Running a Single Test
+### Testing Setup (Vitest + JSDOM)
 
-This project currently has **no test framework configured**. There are no test scripts in package.json.
+This project uses **Vitest** for its test runner with `@testing-library/react` and `jsdom`. 
 
-To add tests, consider installing:
-- Vitest (matches Vite): `npm install -D vitest @testing-library/react @testing-library/jest-dom jsdom`
-- Jest: `npm install -D jest @testing-library/react`
+Test files map against **TestSprite UI Verification Plans** (found in `testsprite_tests/`). 
+1. Since tests run in Node.js, **Browser Extension APIs** (`global.chrome`) restrict DOM rendering.
+2. We mock `chrome.storage.local.get / set` natively inside `vitest.setup.js` ensuring component behaviors trigger without runtime crashes.
 
 ## Code Style Guidelines
 
@@ -62,16 +95,6 @@ Order imports in the following groups (blank line between groups):
 5. **Internal lib/utils**: `../lib/gemini`, `./fileParsers`
 6. **Styles/assets**: (rarely needed with Tailwind)
 
-```jsx
-// Example import order
-import { useState, useEffect } from 'react'
-import { Settings, Key, Save } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import toast from 'react-hot-toast'
-import { useTranslation } from 'react-i18next'
-import { initGemini, streamChatResponse } from '../lib/gemini'
-```
-
 ### React Patterns
 
 - Use `memo()` for expensive components
@@ -80,46 +103,16 @@ import { initGemini, streamChatResponse } from '../lib/gemini'
 - Destructure props with default values when appropriate
 - Use early returns for conditional rendering
 
-```jsx
-// Good patterns
-function SettingsPanel({ onSave, currentConfig }) {
-  const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState('api')
-
-  const handleAddKey = useCallback(() => {
-    if (!newKey.trim()) return
-    // ...
-  }, [newKey])
-
-  if (!currentConfig) return null
-
-  return ( ... )
-}
-```
-
 ### Error Handling
 
 - Use try/catch for async operations
 - Log errors with `console.error`
-- Provide user-friendly error messages via toast
+- Provide user-friendly error messages via `react-hot-toast` (`toast.error()`)
 - Handle errors at component level or with error boundaries
 
-```jsx
-try {
-  const result = await apiCall()
-  onSuccess(result)
-} catch (error) {
-  console.error("API Error:", error)
-  onError(error.message || "An error occurred")
-}
-```
+### TypeScript & JavaScript
 
-### TypeScript
-
-This project uses **JavaScript only** (no TypeScript). However:
-- Use JSDoc comments for complex functions if needed
-- Keep props well-documented
-- Consider migrating to TypeScript for new features
+This project uses **JavaScript only** (no TypeScript) combined with **JSDoc** definitions for complex module integrations (`gemini.js` & `fileParsers.js`).
 
 ### CSS / Tailwind
 
@@ -130,17 +123,8 @@ This project uses **JavaScript only** (no TypeScript). However:
   - `border`, `input`, `ring`
 - Use `hsl(var(--color))` pattern for theme colors
 
-```jsx
-// Good Tailwind usage
-<div className="flex items-center gap-2 p-4 bg-primary/20 rounded-xl">
-  <Settings className="w-8 h-8 text-primary" />
-  <h1 className="text-2xl font-bold text-foreground">Title</h1>
-</div>
-```
-
 ### ESLint Rules
 
-The project uses ESLint with these rules:
 - Extends: `js/configs.recommended`, `reactHooks.configs.flat.recommended`, `reactRefresh.configs.vite`
 - `no-unused-vars`: Error for unused vars (except those starting with `_` or uppercase)
 - React Hooks: Enforced exhaustive deps and rules of hooks
@@ -153,45 +137,6 @@ Run `npm run lint` before committing.
 - Use the `t()` hook from `useTranslation()`
 - Translation keys should be descriptive and hierarchical
 
-```jsx
-const { t } = useTranslation()
-<p>{t('setup.api.saved_success')}</p>
-```
-
-### Chrome Extension Specifics
-
-- Use `chrome.storage.local` for persistent storage
-- Background scripts go in `src/background/service_worker.js`
-- Manifest V3 format in `manifest.json`
-- Use @crxjs/vite-plugin for CRX packaging
-
-## Project Structure
-
-```
-Hera/
-├── src/
-│   ├── App.jsx              # Main application component
-│   ├── main.jsx             # Entry point
-│   ├── index.css            # Global styles (Tailwind)
-│   ├── i18n.js              # i18next configuration
-│   ├── background/
-│   │   └── service_worker.js
-│   ├── lib/
-│   │   ├── gemini.js        # Gemini API integration
-│   │   └── fileParsers.js  # File parsing utilities
-│   ├── locales/
-│   │   ├── en.json          # English translations
-│   │   └── tr.json          # Turkish translations
-│   └── assets/
-├── public/                  # Static assets
-├── dist/                    # Build output
-├── manifest.json            # Chrome extension manifest
-├── vite.config.js           # Vite configuration
-├── eslint.config.js         # ESLint configuration
-├── tailwind.config.js       # Tailwind configuration
-└── package.json
-```
-
 ## Common Tasks
 
 ### Adding a New Feature
@@ -199,21 +144,14 @@ Hera/
 1. Create component in appropriate directory
 2. Add translations in `locales/en.json` and `locales/tr.json`
 3. Run `npm run lint` to check code
-4. Run `npm run build` to test production build
-
-### Adding Dependencies
-
-```bash
-# Production dependency
-npm install <package-name>
-
-# Dev dependency
-npm install -D <package-name>
-```
+4. Map feature to a new TC (Test Case) scenario inside `src/App.test.jsx`.
+5. Run `npm run test` to guarantee Vitest checks clear before pushing.
+6. Run `npm run build` to test production build.
 
 ### Debugging
 
-- Use `console.log` for development debugging
-- Use `toast.error()` to show user-facing errors
-- Check Chrome DevTools console for extension errors
-- Use `chrome://extensions` to reload extension
+- Use `console.log` for development debugging.
+- Use `toast.error()` to show user-facing errors.
+- Check Chrome DevTools console for extension errors (Right click -> Inspect on the Side Panel).
+- Background worker errors must be viewed explicitly from `chrome://extensions` by clicking **Inspect views: service worker**.
+- If UI is freezing or throwing `undefined` exceptions during tests, check `vitest.setup.js` to ensure the chrome property is successfully mocked.

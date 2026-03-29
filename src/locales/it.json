@@ -1,0 +1,110 @@
+{
+    "setup": {
+        "title": "Configurazione HeraAi",
+        "tabs": {
+            "api": "Gestione API",
+            "general": "Impostazioni Generali",
+            "ai": "Intelligenza Artificiale"
+        },
+        "api": {
+            "keys_management": "Gestione Chiavi API",
+            "active": "Attivo",
+            "add_placeholder": "Aggiungi nuova chiave API (AIzaSy...)",
+            "add_btn": "Aggiungi",
+            "description": "Aggiungi più chiavi. Seleziona quella attiva tramite il pulsante di opzione.",
+            "save_btn": "Salva e Continua",
+            "saved_success": "Impostazioni salvate con successo!"
+        },
+        "general": {
+            "theme_title": "Aspetto",
+            "theme_system": "Predefinito di Sistema",
+            "theme_light": "Tema Chiaro",
+            "theme_dark": "Tema Scuro",
+            "startup_title": "Comportamento all'Avvio",
+            "startup_resume": "Riprendi Ultima Chat",
+            "startup_new": "Avvia Nuova Chat Ogni Volta",
+            "language_title": "Lingua",
+            "accent_colore": "Colore Accento"
+        },
+        "ai": {
+            "temp_title": "Livello di Creatività (Temperature)",
+            "temp_precise": "Preciso (Meno Allucinazioni)",
+            "temp_creative": "Creativo (Stile Storia)",
+            "system_prompt_title": "Istruzione di Sistema",
+            "system_prompt_placeholder": "Esempio: Sei un architetto software senior. Spiega sempre il codice chiaramente e fornisci risposte concise."
+        }
+    },
+    "chat": {
+        "placeholder": "Chiedi qualsiasi cosa a HeraAi...",
+        "powered_by": "Alimentato da Gemini AI",
+        "you": "Tu",
+        "gemini": "HeraAi",
+        "attachment": "Allegato",
+        "welcome": "Ciao! Sono HeraAi. Come posso aiutarti oggi?",
+        "error_prefix": "Errore:",
+        "history_cleared": "Cronologia chat cancellata.",
+        "screenshot_blocked": "Il ritaglio della schermata non può essere usato su questo tipo di pagina. Per favore, naviga su una pagina web normale.",
+        "screenshot_no_tab": "Scheda attiva non trovata.",
+        "file_error": "Si è verificato un errore durante il caricamento del file.",
+        "history_title": "Cronologia Chat",
+        "no_history": "Nessuna cronologia chat trovata.",
+        "new_chat": "Nuova Chat",
+        "tooltips": {
+            "new_chat": "Avvia nuova chat",
+            "history": "Visualizza cronologia",
+            "clear_chat": "Cancella chat",
+            "settings": "Impostazioni - Cambia chiave API",
+            "attach_file": "Allega file (Immagine o PDF)",
+            "copy": "Copia",
+            "copied": "Copiato!",
+            "summarize": "Riepiloga pagina",
+            "read_page": "Leggi questa pagina",
+            "screenshot": "Ritaglia schermata",
+            "screenshot_hint": "Disegna un'area sulla pagina da ritagliare.",
+            "edit": "Modifica",
+            "crop_confirm": "Conferma",
+            "crop_cancel": "Annulla",
+            "voice_input": "Input vocale",
+            "stop_recording": "Ferma registrazione",
+            "web_search": "Ricerca web",
+            "statistics": "Statistiche",
+            "shortcuts": "Scorciatoie"
+        },
+        "extension_error": "Contesto dell'estensione non trovato. Per favore, ricarica.",
+        "reading_page": "Lettura contenuto pagina...",
+        "page_empty": "Impossibile estrarre testo dalla pagina.",
+        "summarize_prompt": "Per favore, riepiloga in dettaglio il seguente contenuto della pagina web:",
+        "summarize_action": "Riepiloga questa pagina",
+        "prompts": {
+            "summarize": "Riepiloga",
+            "translate": "Traduci",
+            "explain": "Spiega",
+            "code": "Spiega codice"
+        },
+        "exported": "Cronologia chat esportata!",
+        "imported": "Cronologia chat importata!",
+        "import_error": "Importazione fallita",
+        "voice_started": "Input vocale avviato...",
+        "voice_error": "L'input vocale non è supportato in questo browser"
+    },
+    "stats": {
+        "title": "Statistiche di Utilizzo",
+        "total_messages": "Messaggi Totali",
+        "total_sessions": "Sessioni Totali",
+        "last_7_days": "Ultimi 7 Giorni",
+        "voice_inputs": "Input Vocali",
+        "screenshots": "Schermate",
+        "searches": "Ricerche",
+        "last_active": "Ultima Attività",
+        "never": "Mai"
+    },
+    "shortcuts": {
+        "title": "Scorciatoie da Tastiera",
+        "new_chat": "Avvia nuova chat",
+        "send_message": "Invia messaggio",
+        "send_multiline": "Nuova riga nel messaggio",
+        "voice_input": "Alterna input vocale",
+        "web_search": "Alterna ricerca web",
+        "coming_soon": "Altre scorciatoie in arrivo!"
+    }
+}

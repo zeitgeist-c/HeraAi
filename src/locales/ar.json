@@ -1,0 +1,110 @@
+{
+    "setup": {
+        "title": "إعداد HeraAi",
+        "tabs": {
+            "api": "إدارة API",
+            "general": "الإعدادات العامة",
+            "ai": "الذكاء الاصطناعي"
+        },
+        "api": {
+            "keys_management": "إدارة مفاتيح API",
+            "active": "نشط",
+            "add_placeholder": "إضافة مفتاح API جديد (AIzaSy...)",
+            "add_btn": "إضافة",
+            "description": "أضف مفاتيح متعددة. حدد النشط عبر زر الاختيار.",
+            "save_btn": "حفظ ومتابعة",
+            "saved_success": "تم حفظ الإعدادات بنجاح!"
+        },
+        "general": {
+            "theme_title": "المظهر",
+            "theme_system": "افتراضي النظام",
+            "theme_light": "السمة الفاتحة",
+            "theme_dark": "السمة الداكنة",
+            "startup_title": "سلوك بدء التشغيل",
+            "startup_resume": "استئناف المحادثة الأخيرة",
+            "startup_new": "بدء محادثة جديدة في كل مرة",
+            "language_title": "اللغة",
+            "accent_color": "لون التمييز"
+        },
+        "ai": {
+            "temp_title": "مستوى الإبداع (Temperature)",
+            "temp_precise": "دقيق (أقل هلوسات)",
+            "temp_creative": "مبدع (قصة)",
+            "system_prompt_title": "تعليمات النظام",
+            "system_prompt_placeholder": "مثال: أنت مهندس برمجيات أول. اشرح الكود دائمًا بوضوح وقدم إجابات موجزة."
+        }
+    },
+    "chat": {
+        "placeholder": "اسأل HeraAi أي شيء...",
+        "powered_by": "مدعوم من Gemini AI",
+        "you": "أنت",
+        "gemini": "HeraAi",
+        "attachment": "مرفق",
+        "welcome": "مرحباً! أنا HeraAi. كيف يمكنني مساعدتك اليوم؟",
+        "error_prefix": "خطأ:",
+        "history_cleared": "تم مسح محفوظات المحادثة.",
+        "screenshot_blocked": "لا يمكن استخدام قصاصة لقطة الشاشة على نوع الصفحة هذه. يرجى الانتقال إلى صفحة ويب عادية.",
+        "screenshot_no_tab": "لم يتم العثور على علامة التبويب النشطة.",
+        "file_error": "حدث خطأ أثناء تحميل الملف.",
+        "history_title": "محادثة التاريخ",
+        "no_history": "لم يتم العثور على محفوظات المحادثة.",
+        "new_chat": "محادثة جديدة",
+        "tooltips": {
+            "new_chat": "بدء محادثة جديدة",
+            "history": "عرض المحفوظات",
+            "clear_chat": "مسح المحادثة",
+            "settings": "الإعدادات - تغيير مفتاح API",
+            "attach_file": "إرفاق ملف (صورة أو PDF)",
+            "copy": "نسخ",
+            "copied": "تم النسخ!",
+            "summarize": "تلخيص الصفحة",
+            "read_page": "قراءة هذه الصفحة",
+            "screenshot": "قص لقطة الشاشة",
+            "screenshot_hint": "ارسم منطقة على الصفحة للقص.",
+            "edit": "تحرير",
+            "crop_confirm": "تأكيد",
+            "crop_cancel": "إلغاء",
+            "voice_input": "الإدخال الصوتي",
+            "stop_recording": "إيقاف التسجيل",
+            "web_search": "بحث الويب",
+            "statistics": "الإحصائيات",
+            "shortcuts": "اختصارات"
+        },
+        "extension_error": "لم يتم العثور على سياق الإضافة. يرجى التحديث.",
+        "reading_page": "قراءة محتوى الصفحة...",
+        "page_empty": "تعذر استخراج نص من الصفحة.",
+        "summarize_prompt": "يرجى تلخيص محتوى صفحة الويب التالي بالتفصيل:",
+        "summarize_action": "تلخيص هذه الصفحة",
+        "prompts": {
+            "summarize": "تلخيص",
+            "translate": "ترجمة",
+            "explain": "شرح",
+            "code": "شرح الكود"
+        },
+        "exported": "تم تصدير محفوظات المحادثة!",
+        "imported": "تم استيراد محفوظات المحادثة!",
+        "import_error": "فشل الاستيراد",
+        "voice_started": "بدأ الإدخال الصوتي...",
+        "voice_error": "الإدخال الصوتي غير مدعوم في هذا المتصفح"
+    },
+    "stats": {
+        "title": "إحصائيات الاستخدام",
+        "total_messages": "إجمالي الرسائل",
+        "total_sessions": "إجمالي الجلسات",
+        "last_7_days": "آخر 7 أيام",
+        "voice_inputs": "المدخلات الصوتية",
+        "screenshots": "لقطات الشاشة",
+        "searches": "عمليات البحث",
+        "last_active": "آخر نشاط",
+        "never": "أبداً"
+    },
+    "shortcuts": {
+        "title": "اختصارات لوحة المفاتيح",
+        "new_chat": "بدء محادثة جديدة",
+        "send_message": "إرسال الرسالة",
+        "send_multiline": "سطر جديد في الرسالة",
+        "voice_input": "تبديل الإدخال الصوتي",
+        "web_search": "تبديل بحث الويب",
+        "coming_soon": "المزيد من الاختصارات قريباً!"
+    }
+}
