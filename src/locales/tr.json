@@ -22,7 +22,9 @@
             "theme_dark": "Koyu Tema",
             "startup_title": "Açılış Davranışı",
             "startup_resume": "Son Sohbete Devam Et",
-            "startup_new": "Her Seferinde Yeni Sohbet Başlat"
+            "startup_new": "Her Seferinde Yeni Sohbet Başlat",
+            "language_title": "Dil",
+            "accent_color": "Vurgu Rengi"
         },
         "ai": {
             "temp_title": "Yaratıcılık Seviyesi (Temperature)",
@@ -59,7 +61,14 @@
             "read_page": "Bu sayfayı oku",
             "screenshot": "Ekran Görüntüsü Kırp",
             "screenshot_hint": "Sayfa üzerinde kırpmak istediğiniz alanı çizin.",
-            "edit": "Düzenle"
+            "edit": "Düzenle",
+            "crop_confirm": "Onayla",
+            "crop_cancel": "İptal",
+            "voice_input": "Sesli Giriş",
+            "stop_recording": "Kaydı Durdur",
+            "web_search": "Web Araması",
+            "statistics": "İstatistikler",
+            "shortcuts": "Kısayollar"
         },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",
@@ -71,6 +80,34 @@
             "translate": "Çevir",
             "explain": "Açıkla",
             "code": "Kod Açıkla"
-        }
+        },
+        "exported": "Sohbet geçmişi dışa aktarıldı!",
+        "imported": "Sohbet geçmişi içe aktarıldı!",
+        "import_error": "İçe aktarma başarısız oldu",
+        "voice_started": "Sesli giriş başladı...",
+        "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor"
+    },
+    "stats": {
+        "title": "Kullanım İstatistikleri",
+        "total_messages": "Toplam Mesaj",
+        "total_sessions": "Toplam Oturum",
+        "last_7_days": "Son 7 Gün",
+        "voice_inputs": "Sesli Giriş",
+        "screenshots": "Ekran Görüntüleri",
+        "searches": "Aramalar",
+        "last_active": "Son Aktif",
+        "never": "Hiç"
+    },
+    "shortcuts": {
+        "title": "Klavye Kısayolları",
+        "new_chat": "Yeni sohbet başlat",
+        "send_message": "Mesaj gönder",
+        "send_multiline": "Mesajda yeni satır",
+        "voice_input": "Sesli girişi aç/kapat",
+        "web_search": "Web aramasını aç/kapat",
+        "coming_soon": "Yakında daha fazla kısayol!"
+    },
+    "common": {
+        "back": "Geri"
     }
 }

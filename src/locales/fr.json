@@ -1,0 +1,110 @@
+{
+    "setup": {
+        "title": "Configuration HeraAi",
+        "tabs": {
+            "api": "Gestion API",
+            "general": "Paramètres Généraux",
+            "ai": "Intelligence Artificielle"
+        },
+        "api": {
+            "keys_management": "Gestion des clés API",
+            "active": "Actif",
+            "add_placeholder": "Ajouter une nouvelle clé API (AIzaSy...)",
+            "add_btn": "Ajouter",
+            "description": "Ajoutez plusieurs clés. Sélectionnez celle active via le bouton radio.",
+            "save_btn": "Enregistrer et Continuer",
+            "saved_success": "Paramètres enregistrés avec succès!"
+        },
+        "general": {
+            "theme_title": "Apparence",
+            "theme_system": "Système par défaut",
+            "theme_light": "Thème Clair",
+            "theme_dark": "Thème Sombre",
+            "startup_title": "Comportement au démarrage",
+            "startup_resume": "Reprendre le dernier chat",
+            "startup_new": "Démarrer un nouveau chat à chaque fois",
+            "language_title": "Langue",
+            "accent_color": "Couleur d'accent"
+        },
+        "ai": {
+            "temp_title": "Niveau de créativité (Temperature)",
+            "temp_precise": "Précis (Moins d'hallucinations)",
+            "temp_creative": "Créatif (Style histoire)",
+            "system_prompt_title": "Instruction système",
+            "system_prompt_placeholder": "Exemple: Vous êtes un architecte logiciel senior. Expliquez toujours le code clairement et donnez des réponses concises."
+        }
+    },
+    "chat": {
+        "placeholder": "Demandez anything à HeraAi...",
+        "powered_by": "Propulsé par Gemini AI",
+        "you": "Vous",
+        "gemini": "HeraAi",
+        "attachment": "Pièce jointe",
+        "welcome": "Bonjour! Je suis HeraAi. Comment puis-je vous aider aujourd'hui?",
+        "error_prefix": "Erreur:",
+        "history_cleared": "Historique du chat effacé.",
+        "screenshot_blocked": "Le recadrage de capture d'écran ne peut pas être utilisé sur ce type de page. Veuillez naviguer vers une page web normale.",
+        "screenshot_no_tab": "Onglet actif introuvable.",
+        "file_error": "Une erreur s'est produite lors du chargement du fichier.",
+        "history_title": "Historique du Chat",
+        "no_history": "Aucun historique de chat trouvé.",
+        "new_chat": "Nouveau Chat",
+        "tooltips": {
+            "new_chat": "Démarrer un nouveau chat",
+            "history": "Voir l'historique",
+            "clear_chat": "Effacer le chat",
+            "settings": "Paramètres - Changer la clé API",
+            "attach_file": "Joindre un fichier (Image ou PDF)",
+            "copy": "Copier",
+            "copied": "Copié!",
+            "summarize": "Résumer la page",
+            "read_page": "Lire cette page",
+            "screenshot": "Recadrer la capture",
+            "screenshot_hint": "Dessinez une zone sur la page à recadrer.",
+            "edit": "Modifier",
+            "crop_confirm": "Confirmer",
+            "crop_cancel": "Annuler",
+            "voice_input": "Entrée vocale",
+            "stop_recording": "Arrêter l'enregistrement",
+            "web_search": "Recherche web",
+            "statistics": "Statistiques",
+            "shortcuts": "Raccourcis"
+        },
+        "extension_error": "Contexte d'extension non trouvé. Veuillez rafraîchir.",
+        "reading_page": "Lecture du contenu de la page...",
+        "page_empty": "Impossible d'extraire le texte de la page.",
+        "summarize_prompt": "Veuillez résumer en détail le contenu suivant de la page web:",
+        "summarize_action": "Résumer cette page",
+        "prompts": {
+            "summarize": "Résumer",
+            "translate": "Traduire",
+            "explain": "Expliquer",
+            "code": "Expliquer le code"
+        },
+        "exported": "Historique du chat exporté!",
+        "imported": "Historique du chat importé!",
+        "import_error": "Échec de l'importation",
+        "voice_started": "Entrée vocale démarrée...",
+        "voice_error": "L'entrée vocale n'est pas supportée dans ce navigateur"
+    },
+    "stats": {
+        "title": "Statistiques d'utilisation",
+        "total_messages": "Messages totaux",
+        "total_sessions": "Sessions totales",
+        "last_7_days": "7 derniers jours",
+        "voice_inputs": "Entrées vocales",
+        "screenshots": "Captures d'écran",
+        "searches": "Recherches",
+        "last_active": "Dernier actif",
+        "never": "Jamais"
+    },
+    "shortcuts": {
+        "title": "Raccourcis clavier",
+        "new_chat": "Démarrer un nouveau chat",
+        "send_message": "Envoyer le message",
+        "send_multiline": "Nouvelle ligne dans le message",
+        "voice_input": "Basculer l'entrée vocale",
+        "web_search": "Basculer la recherche web",
+        "coming_soon": "Plus de raccourcis bientôt!"
+    }
+}
