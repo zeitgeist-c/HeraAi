@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { MessageSquare, Clock, Mic, Scissors, Globe, Trash2, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { getStats } from '../lib/stats'
 
 function StatsPanel({ onClose }) {
+  const { t } = useTranslation()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -14,7 +16,7 @@ function StatsPanel({ onClose }) {
   }, [])
 
   const formatDate = (timestamp) => {
-    if (!timestamp) return 'Never'
+    if (!timestamp) return t('stats.never')
     return new Date(timestamp).toLocaleString()
   }
 
@@ -43,7 +45,7 @@ function StatsPanel({ onClose }) {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold">Usage Statistics</h2>
+          <h2 className="text-xl font-bold">{t('stats.title')}</h2>
         </div>
         <button onClick={onClose} className="p-2 hover:bg-secondary rounded-full">
           <X className="w-5 h-5" />
@@ -55,7 +57,7 @@ function StatsPanel({ onClose }) {
           <div className="bg-card border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <MessageSquare className="w-4 h-4 text-primary" />
-              <span className="text-sm text-muted-foreground">Total Messages</span>
+              <span className="text-sm text-muted-foreground">{t('stats.total_messages')}</span>
             </div>
             <span className="text-2xl font-bold">{stats?.totalMessages || 0}</span>
           </div>
@@ -63,14 +65,14 @@ function StatsPanel({ onClose }) {
           <div className="bg-card border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <Clock className="w-4 h-4 text-primary" />
-              <span className="text-sm text-muted-foreground">Total Sessions</span>
+              <span className="text-sm text-muted-foreground">{t('stats.total_sessions')}</span>
             </div>
             <span className="text-2xl font-bold">{stats?.totalSessions || 0}</span>
           </div>
         </div>
 
         <div className="bg-card border rounded-xl p-4">
-          <span className="text-sm text-muted-foreground block mb-2">Messages (Last 7 Days)</span>
+          <span className="text-sm text-muted-foreground block mb-2">{t('stats.last_7_days')}</span>
           <span className="text-2xl font-bold">{getLast7DaysMessages()}</span>
         </div>
 
@@ -78,7 +80,7 @@ function StatsPanel({ onClose }) {
           <div className="bg-card border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
               <Mic className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">Voice</span>
+              <span className="text-xs text-muted-foreground">{t('stats.voice_inputs')}</span>
             </div>
             <span className="text-lg font-bold">{stats?.voiceInputs || 0}</span>
           </div>
@@ -86,7 +88,7 @@ function StatsPanel({ onClose }) {
           <div className="bg-card border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
               <Scissors className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">Screenshots</span>
+              <span className="text-xs text-muted-foreground">{t('stats.screenshots')}</span>
             </div>
             <span className="text-lg font-bold">{stats?.screenshots || 0}</span>
           </div>
@@ -94,14 +96,14 @@ function StatsPanel({ onClose }) {
           <div className="bg-card border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
               <Globe className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">Searches</span>
+              <span className="text-xs text-muted-foreground">{t('stats.searches')}</span>
             </div>
             <span className="text-lg font-bold">{stats?.searches || 0}</span>
           </div>
         </div>
 
         <div className="bg-card border rounded-xl p-4">
-          <span className="text-sm text-muted-foreground block mb-1">Last Active</span>
+          <span className="text-sm text-muted-foreground block mb-1">{t('stats.last_active')}</span>
           <span className="text-sm font-medium">{formatDate(stats?.lastActive)}</span>
         </div>
       </div>
