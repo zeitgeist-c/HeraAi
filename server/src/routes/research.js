@@ -9,6 +9,12 @@ import { writeEvent, endStream, sendError } from '../utils/sse.js';
 const router = Router();
 
 router.post('/research', researchLimiter, validateResearch, async (req, res) => {
+  if (!config.tavilyApiKey) {
+    return res.status(400).json({
+      error: { code: 'TAVILY_NOT_CONFIGURED', message: 'Web Research kullanmak icin TAVILY_API_KEY gerekli.' },
+    });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');

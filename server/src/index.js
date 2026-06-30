@@ -9,7 +9,7 @@ import visionRoutes from './routes/vision.js';
 
 const app = express();
 
-app.use(cors({ origin: config.corsOrigin.split(',') }));
+app.use(cors({ origin: config.allowedOrigins.split(',') }));
 app.use(express.json({ limit: '5mb' }));
 
 app.use('/api', healthRoutes);
