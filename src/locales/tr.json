@@ -68,7 +68,9 @@
             "stop_recording": "Kaydı Durdur",
             "web_search": "Web Araması",
             "statistics": "İstatistikler",
-            "shortcuts": "Kısayollar"
+            "shortcuts": "Kısayollar",
+            "enable_research": "Web'den Araştır",
+            "disable_research": "Web Research Kapat"
         },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",

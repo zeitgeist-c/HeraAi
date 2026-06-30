@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Settings, Send, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Bot, Download, Upload, Globe, MessageSquare, Keyboard } from 'lucide-react'
+import { Settings, Send, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -10,13 +10,12 @@ import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
 import ShortcutsPanel from './components/ShortcutsPanel'
 import { injectCropOverlay } from './lib/injectCropOverlay'
-import { initGemini, streamChatResponse } from './lib/gemini'
-import { classifyError } from './lib/errorClassifier'
+import { streamChat, streamResearch, streamVision } from './lib/api'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
-import { decryptApiKeys } from './lib/encryption'
+import WebResearchToggle from './components/WebResearchToggle'
 
 function App() {
   const { t } = useTranslation()
@@ -29,7 +28,7 @@ function App() {
   const [showHistory, setShowHistory] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const [enableSearch, setEnableSearch] = useState(false)
+  const [enableResearch, setEnableResearch] = useState(false)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const streamingControllerRef = useRef(null)
@@ -148,35 +147,14 @@ function App() {
 
   useEffect(() => {
     if (chrome && chrome.storage) {
-      chrome.storage.local.get(['geminiApiKey', 'apiKeys', 'activeKeyIndex', 'theme', 'startupBehavior', 'aiTemperature', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId'], async (result) => {
-        let rawKeys = result.apiKeys || []
-        let loadedIndex = result.activeKeyIndex || 0
-
-        if (rawKeys.length === 0 && result.geminiApiKey) {
-          rawKeys = [result.geminiApiKey]
-          loadedIndex = 0
-        }
-
-        // Decrypt keys — handles both legacy plaintext and new encrypted format
-        let loadedKeys = rawKeys
-        try {
-          loadedKeys = await decryptApiKeys(rawKeys)
-        } catch (_e) {
-          // If decryption fails (e.g. key mismatch), fall back to raw
-          loadedKeys = rawKeys
-        }
-
+      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'backendUrl', 'customPrimaryColor', 'language'], (result) => {
         const config = {
-          apiKeys: loadedKeys,
-          activeKeyIndex: loadedIndex,
+          backendUrl: result.backendUrl || 'http://localhost:3001',
           theme: result.theme || 'system',
           startupBehavior: result.startupBehavior || 'resume',
-          aiTemperature: result.aiTemperature ?? 0.7,
           systemInstruction: result.systemInstruction || '',
           customPrimaryColor: result.customPrimaryColor || '#0ea5e9',
-          selectedModel: result.selectedModel || 'gemini-3.1-flash-lite',
           language: result.language || 'tr',
-          apiProvider: 'google'
         }
 
         setAppConfig(config)
@@ -184,12 +162,6 @@ function App() {
 
         if (result.language) {
           i18n.changeLanguage(result.language)
-        }
-
-        if (loadedKeys.length > 0) {
-          initGemini(loadedKeys[loadedIndex])
-        } else {
-          setShowSettings(true)
         }
 
         const welcomeMsg = [{ role: 'model', content: t('chat.welcome') }]
@@ -368,7 +340,7 @@ function App() {
     const userText = actualText || safeInput.trim();
     if ((!userText && attachments.length === 0) || isGenerating) return
 
-    updateStats(enableSearch ? ['message', 'search'] : 'message')
+    updateStats(enableResearch ? ['message', 'search'] : 'message')
 
     const messageAttachments = attachments.map(att => ({
       data: att.data,
@@ -385,59 +357,56 @@ function App() {
 
     setMessages(prev => [...prev, { role: 'model', content: '' }])
 
-    const historyToPass = messages.slice(1);
-
     const controller = new AbortController()
     streamingControllerRef.current = controller
 
     try {
-      const advancedOptions = {
-        aiTemperature: appConfig?.aiTemperature,
-        systemInstruction: appConfig?.systemInstruction,
-        selectedModel: appConfig?.selectedModel,
-        enableSearch: enableSearch,
-        signal: controller.signal
+      const options = {
+        systemInstruction: appConfig?.systemInstruction || '',
       };
 
-      await streamChatResponse(
-        historyToPass,
-        userText,
-        messageAttachments,
-        advancedOptions,
-        (chunk) => {
+      const events = enableResearch
+        ? streamResearch(userText, controller.signal)
+        : attachments.length > 0
+          ? streamVision([...messages.slice(1), userMsg], attachments[0]?.data, options, controller.signal)
+          : streamChat([...messages.slice(1), userMsg], options, controller.signal)
+
+      for await (const evt of events) {
+        if (evt.event === 'chunk') {
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
             newMessages[lastIndex] = {
               ...newMessages[lastIndex],
-              content: newMessages[lastIndex].content + chunk
+              content: newMessages[lastIndex].content + evt.data.text
             };
             return newMessages;
           });
-        },
-        (errorMsg) => {
-          const classified = classifyError(errorMsg)
-          toast.error(classified.userMessage, { duration: 5000 })
+        } else if (evt.event === 'sources') {
+          const sourcesHtml = '\n\n─── Kaynaklar ───\n' + evt.data.sources.map(s => `[${s.index}] ${s.title} → ${s.url}`).join('\n');
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
             newMessages[lastIndex] = {
               ...newMessages[lastIndex],
-              content: newMessages[lastIndex].content + `\n\n**Hata:** ${classified.userMessage}\n\n<details><summary>Teknik Detaylar</summary>\n\`\`\`\n${classified.originalError || errorMsg}\n\`\`\`\n</details>`
+              content: newMessages[lastIndex].content + sourcesHtml
             };
             return newMessages;
           });
+        } else if (evt.event === 'error') {
+          toast.error(evt.data.message, { duration: 5000 })
+          break;
         }
-      )
+      }
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.error("handleSend Error", err)
-      const classified = classifyError(err.message || String(err))
-      toast.error(classified.userMessage)
+      toast.error('Backend\'e bağlanılamadı. Sunucu çalışıyor mu?')
     } finally {
       setIsGenerating(false)
       streamingControllerRef.current = null
     }
-  }, [input, attachments, isGenerating, messages, appConfig, enableSearch])
+  }, [input, attachments, isGenerating, messages, appConfig, enableResearch])
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -583,18 +552,15 @@ function App() {
     )
   }
 
-  if (!appConfig || appConfig.apiKeys.length === 0) {
+  if (!appConfig) {
     return (
       <div className="flex flex-col h-screen bg-background text-foreground overflow-y-auto">
         <SettingsPanel
-          currentConfig={appConfig}
+          currentConfig={{}}
           onSave={(newConfig) => {
             setAppConfig(newConfig)
             applyTheme(newConfig.theme, newConfig.customPrimaryColor)
-            if (newConfig.apiKeys.length > 0) {
-              initGemini(newConfig.apiKeys[newConfig.activeKeyIndex])
-              setShowSettings(false)
-            }
+            setShowSettings(false)
           }}
         />
       </div>
@@ -697,10 +663,7 @@ function App() {
             onSave={(newConfig) => {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
-              if (newConfig.apiKeys.length > 0) {
-                initGemini(newConfig.apiKeys[newConfig.activeKeyIndex])
-                setShowSettings(false)
-              }
+              setShowSettings(false)
             }}
           />
         </div>
@@ -801,15 +764,7 @@ function App() {
             disabled={isGenerating}
           ><Scissors className="w-4 h-4" /></button>
 
-          <button
-            title="Web Search"
-            onClick={() => setEnableSearch(!enableSearch)}
-            className={`flex items-center justify-center p-2 backdrop-blur-sm rounded-xl transition-all border shadow-sm ${
-              enableSearch 
-                ? 'bg-primary/20 border-primary text-primary' 
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50'
-            }`}
-          ><Globe className="w-4 h-4" /></button>
+          <WebResearchToggle enabled={enableResearch} onToggle={() => setEnableResearch(prev => !prev)} disabled={isGenerating} />
         </div>
 
         <div className="relative flex flex-col bg-background/50 backdrop-blur-sm border rounded-xl shadow-md focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-all">
