@@ -20,15 +20,16 @@ class KeyPool {
   constructor(provider, keyValues, cooldowns) {
     this.provider = provider;
     this.cooldowns = cooldowns;
-    this.keys = keyValues.map(k => ({
-      key: k,
-      masked: maskKey(k),
+    this.keys = (keyValues || []).map(k => ({
+      id: k.id,
+      key: k.key,
+      isPrimary: k.isPrimary || false,
+      masked: maskKey(k.key),
       provider,
       failCount: 0,
       lastErrorTime: null,
       cooldownUntil: null,
     }));
-    this.cursor = 0;
   }
 
   isAvailable(key) {
@@ -37,15 +38,8 @@ class KeyPool {
   }
 
   getNextKey() {
-    const total = this.keys.length;
-    if (total === 0) return null;
-
-    for (let i = 0; i < total; i++) {
-      const idx = (this.cursor + i) % total;
-      if (this.isAvailable(this.keys[idx])) {
-        this.cursor = (idx + 1) % total;
-        return this.keys[idx];
-      }
+    for (const entry of this.keys) {
+      if (this.isAvailable(entry)) return entry;
     }
     return null;
   }
@@ -79,16 +73,12 @@ class KeyPool {
   }
 }
 
-function parseKeys(multi, single) {
-  if (multi && typeof multi === 'string') {
-    const parts = multi.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length > 0) return parts;
+function createPool(provider, keysArray, cooldowns) {
+  if (!keysArray || !Array.isArray(keysArray)) {
+    return new KeyPool(provider, [], cooldowns);
   }
-  if (single && typeof single === 'string') {
-    const trimmed = single.trim();
-    if (trimmed) return [trimmed];
-  }
-  return [];
+  const keyValues = keysArray.map(k => ({ id: k.id, key: k.key, isPrimary: k.isPrimary }));
+  return new KeyPool(provider, keyValues, cooldowns);
 }
 
-export { KeyPool, maskKey, parseKeys, ERROR_RETRYABLE, ERROR_NON_RETRYABLE };
+export { KeyPool, maskKey, createPool, ERROR_RETRYABLE, ERROR_NON_RETRYABLE };
