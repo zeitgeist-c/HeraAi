@@ -6,6 +6,7 @@ import healthRoutes from './routes/health.js';
 import chatRoutes from './routes/chat.js';
 import researchRoutes from './routes/research.js';
 import visionRoutes from './routes/vision.js';
+import testKeyRouter from './routes/testKey.js';
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use('/api', healthRoutes);
 app.use('/api', chatRoutes);
 app.use('/api', researchRoutes);
 app.use('/api', visionRoutes);
+app.use('/api', testKeyRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

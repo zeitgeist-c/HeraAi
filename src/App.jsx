@@ -15,6 +15,7 @@ import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
+import { getAllKeysForRequest, updateKeyMetadata } from './lib/keyManager'
 
 function App() {
   const { t } = useTranslation()
@@ -29,6 +30,8 @@ function App() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [enableResearch, setEnableResearch] = useState(false)
   const [activeMode, setActiveMode] = useState(null)
+  const [geminiKeys, setGeminiKeys] = useState([])
+  const [tavilyKeys, setTavilyKeys] = useState([])
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -243,6 +246,21 @@ function App() {
   }, [t, applyTheme])
 
   useEffect(() => {
+    if (!appConfig) return
+    async function loadKeys() {
+      try {
+        const gKeys = await getAllKeysForRequest('gemini')
+        const tKeys = await getAllKeysForRequest('tavily')
+        setGeminiKeys(gKeys)
+        setTavilyKeys(tKeys)
+      } catch (err) {
+        console.error("Failed to load API keys", err)
+      }
+    }
+    loadKeys()
+  }, [appConfig])
+
+  useEffect(() => {
     if (activeSessionId && messages.length > 0) {
       setSessions(prev => {
         const existing = prev.find(s => s.id === activeSessionId)
@@ -378,11 +396,14 @@ function App() {
         systemInstruction: appConfig?.systemInstruction || '',
       };
 
+      const keysForGemini = geminiKeys.length > 0 ? geminiKeys : [{ id: 'inline', key: '', isPrimary: true }]
+      const keysForTavily = tavilyKeys.length > 0 ? tavilyKeys : []
+
       const events = enableResearch
-        ? streamResearch(userText, controller.signal)
+        ? streamResearch(userText, keysForGemini, keysForTavily, controller.signal)
         : attachments.length > 0
-          ? streamVision([...messages.slice(1), userMsg], attachments[0]?.data, options, controller.signal)
-          : streamChat([...messages.slice(1), userMsg], options, controller.signal)
+          ? streamVision([...messages.slice(1), userMsg], attachments[0]?.data, options, keysForGemini, controller.signal)
+          : streamChat([...messages.slice(1), userMsg], options, keysForGemini, controller.signal)
 
       for await (const evt of events) {
         if (evt.event === 'chunk') {
@@ -409,6 +430,33 @@ function App() {
         } else if (evt.event === 'error') {
           toast.error(evt.data.message, { duration: 5000 })
           break;
+        } else if (evt.event === 'key_status') {
+          const { provider, keyId, status } = evt.data
+          if (status === 'cooldown') {
+            const cooldownMs = 60000
+            updateKeyMetadata(provider, keyId, {
+              cooldownUntil: Date.now() + cooldownMs,
+              lastErrorAt: Date.now(),
+              lastErrorType: 'rate_limited',
+            })
+          } else if (status === 'quota_exceeded') {
+            const cooldownMs = 120000
+            updateKeyMetadata(provider, keyId, {
+              cooldownUntil: Date.now() + cooldownMs,
+              lastErrorAt: Date.now(),
+              lastErrorType: 'quota_exceeded',
+            })
+          } else if (status === 'success') {
+            updateKeyMetadata(provider, keyId, {
+              lastSuccessAt: Date.now(),
+              failCount: 0,
+              cooldownUntil: null,
+              lastErrorType: null,
+            })
+          } else if (status === 'error') {
+            const providerName = provider === 'gemini' ? 'Gemini' : 'Tavily'
+            toast.error(`${providerName} key ${keyId} failed`)
+          }
         }
       }
     } catch (err) {
@@ -419,7 +467,7 @@ function App() {
       setGenerating(false)
       streamingControllerRef.current = null
     }
-  }, [input, attachments, isGenerating, messages, appConfig, enableResearch])
+  }, [input, attachments, isGenerating, messages, appConfig, enableResearch, geminiKeys, tavilyKeys])
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -704,6 +752,8 @@ function App() {
             onSave={(newConfig) => {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
+              getAllKeysForRequest('gemini').then(setGeminiKeys)
+              getAllKeysForRequest('tavily').then(setTavilyKeys)
               setShowSettings(false)
             }}
           />

@@ -55,32 +55,48 @@ async function* streamFromEndpoint(endpoint, body, signal) {
   }
 }
 
-export async function* streamChat(messages, options = {}, signal) {
+export async function* streamChat(messages, options = {}, geminiKeys = [], signal) {
   const gen = streamFromEndpoint('/api/chat', {
     messages,
     systemInstruction: options.systemInstruction || '',
+    geminiKeys,
   }, signal);
   for await (const evt of gen) {
     yield evt;
   }
 }
 
-export async function* streamResearch(question, signal) {
-  const gen = streamFromEndpoint('/api/research', { question }, signal);
+export async function* streamResearch(question, geminiKeys = [], tavilyKeys = [], signal) {
+  const gen = streamFromEndpoint('/api/research', {
+    question,
+    geminiKeys,
+    tavilyKeys,
+  }, signal);
   for await (const evt of gen) {
     yield evt;
   }
 }
 
-export async function* streamVision(messages, image, options = {}, signal) {
+export async function* streamVision(messages, image, options = {}, geminiKeys = [], signal) {
   const gen = streamFromEndpoint('/api/vision', {
     messages,
     image: image || undefined,
     systemInstruction: options.systemInstruction || '',
+    geminiKeys,
   }, signal);
   for await (const evt of gen) {
     yield evt;
   }
+}
+
+export async function testKey(provider, key) {
+  const baseUrl = await getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/test-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, key }),
+  });
+  return res.json();
 }
 
 export async function checkHealth() {
