@@ -21,7 +21,6 @@ Object.defineProperty(window, 'matchMedia', {
 // Mock gemini api
 vi.mock('./lib/gemini', () => ({
   initGemini: vi.fn(),
-  initOpenRouter: vi.fn(),
   streamChatResponse: vi.fn(),
 }));
 
@@ -39,11 +38,19 @@ describe('HeraAi App (TestSprite Target Tests)', () => {
     
     // Default Chrome mock behavior for this suite
     global.chrome.storage.local.get.mockImplementation((keys, callback) => {
-      callback(currentStorage);
+      if (typeof callback === 'function') callback(currentStorage);
+      return Promise.resolve(currentStorage);
     });
     global.chrome.storage.local.set.mockImplementation((data, callback) => {
       Object.assign(currentStorage, data);
       if (typeof callback === 'function') callback();
+      return Promise.resolve();
+    });
+    global.chrome.storage.local.remove.mockImplementation((keys, callback) => {
+      const keysArray = Array.isArray(keys) ? keys : [keys];
+      keysArray.forEach(k => delete currentStorage[k]);
+      if (typeof callback === 'function') callback();
+      return Promise.resolve();
     });
     
     // Setup generic user stream response

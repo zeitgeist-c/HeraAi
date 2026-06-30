@@ -10,13 +10,13 @@ import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
 import ShortcutsPanel from './components/ShortcutsPanel'
 import { injectCropOverlay } from './lib/injectCropOverlay'
-import { initGemini, initOpenRouter, streamChatResponse, cancelOpenRouterStream } from './lib/gemini'
-import { initOllama, streamChatResponse as ollamaStreamChat } from './lib/ollama'
+import { initGemini, streamChatResponse } from './lib/gemini'
 import { classifyError } from './lib/errorClassifier'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
+import { decryptApiKeys } from './lib/encryption'
 
 function App() {
   const { t } = useTranslation()
@@ -139,7 +139,7 @@ function App() {
     }
     return () => {
       if (chrome && chrome.runtime && chrome.runtime.onMessage) {
-        chrome.runtime.onMessage.removeEventListener(listener);
+        chrome.runtime.onMessage.removeListener(listener);
       }
     }
   }, [])
@@ -148,13 +148,22 @@ function App() {
 
   useEffect(() => {
     if (chrome && chrome.storage) {
-      chrome.storage.local.get(['geminiApiKey', 'apiKeys', 'activeKeyIndex', 'theme', 'startupBehavior', 'aiTemperature', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'apiProvider', 'openRouterKey'], async (result) => {
-        let loadedKeys = result.apiKeys || []
+      chrome.storage.local.get(['geminiApiKey', 'apiKeys', 'activeKeyIndex', 'theme', 'startupBehavior', 'aiTemperature', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId'], async (result) => {
+        let rawKeys = result.apiKeys || []
         let loadedIndex = result.activeKeyIndex || 0
 
-        if (loadedKeys.length === 0 && result.geminiApiKey) {
-          loadedKeys = [result.geminiApiKey]
+        if (rawKeys.length === 0 && result.geminiApiKey) {
+          rawKeys = [result.geminiApiKey]
           loadedIndex = 0
+        }
+
+        // Decrypt keys — handles both legacy plaintext and new encrypted format
+        let loadedKeys = rawKeys
+        try {
+          loadedKeys = await decryptApiKeys(rawKeys)
+        } catch (_e) {
+          // If decryption fails (e.g. key mismatch), fall back to raw
+          loadedKeys = rawKeys
         }
 
         const config = {
@@ -165,11 +174,9 @@ function App() {
           aiTemperature: result.aiTemperature ?? 0.7,
           systemInstruction: result.systemInstruction || '',
           customPrimaryColor: result.customPrimaryColor || '#0ea5e9',
-          selectedModel: result.selectedModel || 'gemini-2.5-flash',
+          selectedModel: result.selectedModel || 'gemini-3.1-flash-lite',
           language: result.language || 'tr',
-          apiProvider: result.apiProvider || 'google',
-          openRouterKey: result.openRouterKey || '',
-          ollamaKey: result.ollamaKey || ''
+          apiProvider: 'google'
         }
 
         setAppConfig(config)
@@ -179,11 +186,7 @@ function App() {
           i18n.changeLanguage(result.language)
         }
 
-        if (result.apiProvider === 'openrouter' && result.openRouterKey) {
-          initOpenRouter(result.openRouterKey)
-        } else if (result.apiProvider === 'ollama' && result.ollamaKey) {
-          initOllama(result.ollamaKey)
-        } else if (loadedKeys.length > 0) {
+        if (loadedKeys.length > 0) {
           initGemini(loadedKeys[loadedIndex])
         } else {
           setShowSettings(true)
@@ -365,8 +368,7 @@ function App() {
     const userText = actualText || safeInput.trim();
     if ((!userText && attachments.length === 0) || isGenerating) return
 
-    updateStats('message')
-    if (enableSearch) updateStats('search')
+    updateStats(enableSearch ? ['message', 'search'] : 'message')
 
     const messageAttachments = attachments.map(att => ({
       data: att.data,
@@ -397,71 +399,36 @@ function App() {
         signal: controller.signal
       };
 
-      const apiProvider = appConfig?.apiProvider || 'google'
-      
-      if (apiProvider === 'ollama') {
-        await ollamaStreamChat(
-          historyToPass,
-          userText,
-          messageAttachments,
-          advancedOptions,
-          (chunk) => {
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastIndex = newMessages.length - 1;
-              newMessages[lastIndex] = {
-                ...newMessages[lastIndex],
-                content: newMessages[lastIndex].content + chunk
-              };
-              return newMessages;
-            });
-          },
-          (errorMsg) => {
-            const classified = classifyError(errorMsg)
-            toast.error(classified.userMessage, { duration: 5000 })
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastIndex = newMessages.length - 1;
-              newMessages[lastIndex] = {
-                ...newMessages[lastIndex],
-                content: newMessages[lastIndex].content + `\n\n**Hata:** ${classified.userMessage}\n\n<details><summary>Teknik Detaylar</summary>\n\`\`\`\n${classified.originalError || errorMsg}\n\`\`\`\n</details>`
-              };
-              return newMessages;
-            });
-          }
-        )
-      } else {
-        await streamChatResponse(
-          historyToPass,
-          userText,
-          messageAttachments,
-          advancedOptions,
-          (chunk) => {
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastIndex = newMessages.length - 1;
-              newMessages[lastIndex] = {
-                ...newMessages[lastIndex],
-                content: newMessages[lastIndex].content + chunk
-              };
-              return newMessages;
-            });
-          },
-          (errorMsg) => {
-            const classified = classifyError(errorMsg)
-            toast.error(classified.userMessage, { duration: 5000 })
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastIndex = newMessages.length - 1;
-              newMessages[lastIndex] = {
-                ...newMessages[lastIndex],
-                content: newMessages[lastIndex].content + `\n\n**Hata:** ${classified.userMessage}\n\n<details><summary>Teknik Detaylar</summary>\n\`\`\`\n${classified.originalError || errorMsg}\n\`\`\`\n</details>`
-              };
-              return newMessages;
-            });
-          }
-        )
-      }
+      await streamChatResponse(
+        historyToPass,
+        userText,
+        messageAttachments,
+        advancedOptions,
+        (chunk) => {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastIndex = newMessages.length - 1;
+            newMessages[lastIndex] = {
+              ...newMessages[lastIndex],
+              content: newMessages[lastIndex].content + chunk
+            };
+            return newMessages;
+          });
+        },
+        (errorMsg) => {
+          const classified = classifyError(errorMsg)
+          toast.error(classified.userMessage, { duration: 5000 })
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastIndex = newMessages.length - 1;
+            newMessages[lastIndex] = {
+              ...newMessages[lastIndex],
+              content: newMessages[lastIndex].content + `\n\n**Hata:** ${classified.userMessage}\n\n<details><summary>Teknik Detaylar</summary>\n\`\`\`\n${classified.originalError || errorMsg}\n\`\`\`\n</details>`
+            };
+            return newMessages;
+          });
+        }
+      )
     } catch (err) {
       console.error("handleSend Error", err)
       const classified = classifyError(err.message || String(err))
@@ -483,36 +450,6 @@ function App() {
     const files = Array.from(e.target.files)
     if (!files.length) return
 
-    const selectedModel = appConfig?.selectedModel || ''
-    const apiProvider = appConfig?.apiProvider || 'google'
-    
-    console.log("File upload - Provider:", apiProvider, "Model:", selectedModel)
-    
-    // Model desteği kontrolü - sadece GPT/Claude/Gemini resim destekler
-    const supportsImage = apiProvider === 'google' || 
-      selectedModel.includes('gpt') || 
-      selectedModel.includes('claude') ||
-      selectedModel.includes('gemini') ||
-      selectedModel.startsWith('google/')
-    
-    const supportsPdf = apiProvider === 'google' || selectedModel.startsWith('google/')
-    
-    for (const file of files) {
-      console.log("File type:", file.type, "Name:", file.name)
-      
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-      const isImage = file.type.startsWith('image/')
-      
-      if (isPdf && !supportsPdf) {
-        toast.error('Bu model PDF desteklemiyor. Google Gemini kullanın.')
-        return
-      }
-      if (isImage && !supportsImage) {
-        toast.error('Bu model resim desteklemiyor. GPT-4o, Claude veya Gemini kullanın.')
-        return
-      }
-    }
-
     setIsGenerating(true)
 
     const newAttachments = []
@@ -521,10 +458,9 @@ function App() {
         const base64 = await fileToBase64(file)
         newAttachments.push({
           name: file.name,
-          mimeType: file.type, // File'dan direkt mime type al
+          mimeType: file.type,
           data: base64
         })
-        console.log("Attachment added:", file.name, file.type)
       } catch (err) {
         console.error("File processing error", err)
         toast.error(t('chat.file_error'))
@@ -534,7 +470,7 @@ function App() {
     setAttachments(prev => [...prev, ...newAttachments])
     setIsGenerating(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [t, appConfig])
+  }, [t])
 
   const handleScreenshot = useCallback(async () => {
     try {
@@ -565,189 +501,14 @@ function App() {
 
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (translations = {}) => {
-          const { confirm = '✔', cancel = '✖' } = translations;
-          const MAX_Z_INDEX = '2147483647';
-          const PRIMARY_COLOR = '#0ea5e9';
-          const DESTRUCTIVE_COLOR = '#ef4444';
-          
-          if (document.getElementById('heraai-crop-overlay')) {
-            document.getElementById('heraai-crop-overlay').remove();
-          }
-
-          const overlay = document.createElement('div');
-          overlay.id = 'heraai-crop-overlay';
-          Object.assign(overlay.style, {
-            position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-            zIndex: MAX_Z_INDEX, cursor: 'crosshair', pointerEvents: 'auto',
-            backgroundColor: 'rgba(0,0,0,0.4)', userSelect: 'none'
-          });
-
-          const selection = document.createElement('div');
-          Object.assign(selection.style, {
-            position: 'absolute', border: `2px dashed ${PRIMARY_COLOR}`,
-            backgroundColor: 'transparent', display: 'none', cursor: 'move',
-            boxShadow: `0 0 0 9999px rgba(0,0,0,0.5)`
-          });
-
-          const btnContainer = document.createElement('div');
-          Object.assign(btnContainer.style, {
-            position: 'absolute', bottom: '-40px', right: '0', display: 'flex', gap: '8px', zIndex: '2'
-          });
-
-          const btnConfirm = document.createElement('button');
-          btnConfirm.innerHTML = confirm;
-          Object.assign(btnConfirm.style, {
-            padding: '6px 14px', background: PRIMARY_COLOR, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', fontFamily: 'sans-serif'
-          });
-
-          const btnCancel = document.createElement('button');
-          btnCancel.innerHTML = cancel;
-          Object.assign(btnCancel.style, {
-            padding: '6px 14px', background: DESTRUCTIVE_COLOR, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', fontFamily: 'sans-serif'
-          });
-
-          btnContainer.appendChild(btnCancel);
-          btnContainer.appendChild(btnConfirm);
-          selection.appendChild(btnContainer);
-
-          const handles = ['nw', 'ne', 'sw', 'se'].map(pos => {
-            const handle = document.createElement('div');
-            Object.assign(handle.style, {
-              position: 'absolute', width: '10px', height: '10px', backgroundColor: PRIMARY_COLOR, border: '1px solid #fff', cursor: `${pos}-resize`, zIndex: '1'
-            });
-            if (pos.includes('n')) handle.style.top = '-5px';
-            if (pos.includes('s')) handle.style.bottom = '-5px';
-            if (pos.includes('w')) handle.style.left = '-5px';
-            if (pos.includes('e')) handle.style.right = '-5px';
-            selection.appendChild(handle);
-            return { el: handle, pos };
-          });
-
-          overlay.appendChild(selection);
-          document.body.appendChild(overlay);
-
-          let startX, startY, isDrawing = false, isDragging = false, isResizing = null;
-          let rect = { x: 0, y: 0, w: 0, h: 0 };
-
-          const updateSelection = () => {
-            selection.style.left = rect.x + 'px';
-            selection.style.top = rect.y + 'px';
-            selection.style.width = rect.w + 'px';
-            selection.style.height = rect.h + 'px';
-          };
-
-          overlay.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            if (e.target === btnConfirm || e.target === btnCancel) return;
-
-            const handle = handles.find(h => h.el === e.target);
-            if (handle) {
-              isResizing = handle.pos;
-              startX = e.clientX; startY = e.clientY;
-              return;
-            }
-
-            if (e.target === selection) {
-              isDragging = true;
-              startX = e.clientX; startY = e.clientY;
-              return;
-            }
-
-            isDrawing = true;
-            startX = e.clientX; startY = e.clientY;
-            rect = { x: startX, y: startY, w: 0, h: 0 };
-            selection.style.display = 'block';
-            updateSelection();
-          });
-
-          const mousemove = (e) => {
-            if (isDrawing) {
-              rect.x = Math.min(startX, e.clientX);
-              rect.y = Math.min(startY, e.clientY);
-              rect.w = Math.abs(e.clientX - startX);
-              rect.h = Math.abs(e.clientY - startY);
-              updateSelection();
-            } else if (isDragging) {
-              const dx = e.clientX - startX;
-              const dy = e.clientY - startY;
-              rect.x += dx;
-              rect.y += dy;
-              startX = e.clientX; startY = e.clientY;
-              updateSelection();
-            } else if (isResizing) {
-              const dx = e.clientX - startX;
-              const dy = e.clientY - startY;
-              if (isResizing.includes('e')) { rect.w += dx; }
-              if (isResizing.includes('w')) { rect.x += dx; rect.w -= dx; }
-              if (isResizing.includes('s')) { rect.h += dy; }
-              if (isResizing.includes('n')) { rect.y += dy; rect.h -= dy; }
-              startX = e.clientX; startY = e.clientY;
-
-              if (rect.w < 0) { rect.x += rect.w; rect.w = Math.abs(rect.w); isResizing = isResizing.replace('e', 'W').replace('w', 'e').toLowerCase(); }
-              if (rect.h < 0) { rect.y += rect.h; rect.h = Math.abs(rect.h); isResizing = isResizing.replace('n', 'S').replace('s', 'n').toLowerCase(); }
-
-              updateSelection();
-            }
-          };
-
-          const mouseup = () => {
-            isDrawing = false;
-            isDragging = false;
-            isResizing = null;
-          };
-
-          window.addEventListener('mousemove', mousemove);
-          window.addEventListener('mouseup', mouseup);
-
-          const cleanup = () => {
-            window.removeEventListener('mousemove', mousemove);
-            window.removeEventListener('mouseup', mouseup);
-            if (document.body.contains(overlay)) {
-              document.body.removeChild(overlay);
-            }
-          };
-
-          btnCancel.onclick = (e) => {
-            e.stopPropagation();
-            cleanup();
-          };
-
-          btnConfirm.onclick = (e) => {
-            e.stopPropagation();
-            if (rect.w < 10 || rect.h < 10) {
-              cleanup();
-              return;
-            }
-
-            selection.style.boxShadow = 'none';
-            selection.style.border = 'none';
-            btnContainer.style.display = 'none';
-            handles.forEach(h => h.el.style.display = 'none');
-
-            setTimeout(() => {
-              chrome.runtime.sendMessage({
-                type: 'HERAAI_CROP_DONE',
-                coords: {
-                  x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-                  pixelRatio: window.devicePixelRatio
-                }
-              }).catch(() => {
-                chrome.storage.local.set({
-                  heraaiCropData: {
-                    x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-                    pixelRatio: window.devicePixelRatio
-                  }
-                });
-              });
-              cleanup();
-            }, 50);
-          };
-        },
-        args: [{ 
-          confirm: t('chat.tooltips.crop_confirm'), 
-          cancel: t('chat.tooltips.crop_cancel') 
-        }]
+        func: injectCropOverlay,
+        args: [
+          {
+            confirm: t('chat.tooltips.crop_confirm'),
+            cancel: t('chat.tooltips.crop_cancel')
+          },
+          appConfig?.customPrimaryColor || '#0ea5e9'
+        ]
       });
 
       toast(t('chat.tooltips.screenshot_hint') || 'Sayfa üzerinde kırpmak istediğiniz alanı çizin.');
@@ -760,7 +521,7 @@ function App() {
         toast.error(t('chat.file_error') || 'Ekran kırpma başlatılamadı.');
       }
     }
-  }, [t])
+  }, [t, appConfig])
 
   const removeAttachment = useCallback((index) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
@@ -822,7 +583,7 @@ function App() {
     )
   }
 
-  if (!appConfig || (appConfig.apiKeys.length === 0 && !appConfig.openRouterKey && !appConfig.ollamaKey)) {
+  if (!appConfig || appConfig.apiKeys.length === 0) {
     return (
       <div className="flex flex-col h-screen bg-background text-foreground overflow-y-auto">
         <SettingsPanel
@@ -830,13 +591,7 @@ function App() {
           onSave={(newConfig) => {
             setAppConfig(newConfig)
             applyTheme(newConfig.theme, newConfig.customPrimaryColor)
-            if (newConfig.apiProvider === 'openrouter' && newConfig.openRouterKey) {
-              initOpenRouter(newConfig.openRouterKey)
-              setShowSettings(false)
-            } else if (newConfig.apiProvider === 'ollama' && newConfig.ollamaKey) {
-              initOllama(newConfig.ollamaKey)
-              setShowSettings(false)
-            } else if (newConfig.apiKeys.length > 0) {
+            if (newConfig.apiKeys.length > 0) {
               initGemini(newConfig.apiKeys[newConfig.activeKeyIndex])
               setShowSettings(false)
             }
@@ -942,12 +697,9 @@ function App() {
             onSave={(newConfig) => {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
-              if (newConfig.apiProvider === 'openrouter' && newConfig.openRouterKey) {
-                initOpenRouter(newConfig.openRouterKey)
-              } else if (newConfig.apiProvider === 'ollama' && newConfig.ollamaKey) {
-                initOllama(newConfig.ollamaKey)
-              } else if (newConfig.apiKeys.length > 0) {
+              if (newConfig.apiKeys.length > 0) {
                 initGemini(newConfig.apiKeys[newConfig.activeKeyIndex])
+                setShowSettings(false)
               }
             }}
           />
