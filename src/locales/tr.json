@@ -91,11 +91,11 @@
         "title": "Kullanım İstatistikleri",
         "total_messages": "Toplam Mesaj",
         "total_sessions": "Toplam Oturum",
-        "last_7_days": "Son 7 Gün",
-        "voice_inputs": "Sesli Giriş",
+        "last_7_days": "Son 7 Gündeki Mesajlar",
+        "voice_inputs": "Ses",
         "screenshots": "Ekran Görüntüleri",
         "searches": "Aramalar",
-        "last_active": "Son Aktif",
+        "last_active": "Son Etkinlik",
         "never": "Hiç"
     },
     "shortcuts": {
