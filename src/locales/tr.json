@@ -13,7 +13,16 @@
             "add_btn": "Ekle",
             "description": "Birden fazla anahtar ekleyin. Aktif olanı radyo butonu ile seçin.",
             "save_btn": "Kaydet ve Devam Et",
-            "saved_success": "Ayarlar kaydedildi!"
+            "saved_success": "Ayarlar kaydedildi!",
+            "provider": "AI Sağlayıcı",
+            "provider_info": "Google Gemini (gemini-3.1-flash-lite) — Backend üzerinden",
+            "backend_url": "Backend URL",
+            "test_connection": "Bağlantıyı Test Et",
+            "connected": "Bağlı",
+            "no_connection": "Bağlantı Yok",
+            "security_note": "API key'ler backend tarafında saklanır. Frontend'de hiçbir API key bulunmaz.",
+            "connection_success": "Backend bağlantısı başarılı!",
+            "connection_failed": "Backend bağlantısı başarısız."
         },
         "general": {
             "theme_title": "Görünüm Teması",
@@ -70,7 +79,10 @@
             "statistics": "İstatistikler",
             "shortcuts": "Kısayollar",
             "enable_research": "Web'den Araştır",
-            "disable_research": "Web Research Kapat"
+            "disable_research": "Web Research Kapat",
+            "export": "Sohbeti Dışa Aktar",
+            "close": "Kapat",
+            "copy_code": "Kodu kopyala"
         },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",
@@ -88,14 +100,22 @@
         "import_error": "İçe aktarma başarısız oldu",
         "voice_started": "Sesli giriş başladı...",
         "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor",
-        "new_messages": "Yeni mesajlar"
-    },
-    "quick_actions": {
-        "crop": "Kırp",
-        "web": "Web",
-        "translate": "Çevir",
-        "summarize": "Özet",
-        "explain": "Açıkla"
+        "new_messages": "Yeni mesajlar",
+        "sources_label": "Kaynaklar",
+        "connection_error": "Backend'e bağlanılamadı. Sunucu çalışıyor mu?",
+        "cancelled": "İstek iptal edildi",
+        "quick_actions": {
+            "crop": "Kırp",
+            "web": "Web",
+            "translate": "Çevir",
+            "summarize": "Özet",
+            "explain": "Açıkla",
+            "crop_tooltip": "Ekrandan alan seç",
+            "web_tooltip": "Web'de araştır",
+            "translate_tooltip": "Seçili metni veya görseli çevir",
+            "summarize_tooltip": "İçeriği özetle",
+            "explain_tooltip": "İçeriği açıkla"
+        }
     },
     "stats": {
         "title": "Kullanım İstatistikleri",

@@ -129,8 +129,9 @@ describe('HeraAi App (TestSprite Target Tests)', () => {
     // Change URL
     fireEvent.change(urlInput, { target: { value: 'http://localhost:4000' } });
     
-    // Click Kaydet (Save)
-    const saveBtn = screen.getByText(/Kaydet/i);
+    // Click save button
+    const saveBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-save'));
+    expect(saveBtn).toBeInTheDocument();
     fireEvent.click(saveBtn);
     
     // Should close settings

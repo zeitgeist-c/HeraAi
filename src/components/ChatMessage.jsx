@@ -36,7 +36,7 @@ function CodeBlock({ className, children, ...props }) {
         <button
           onClick={handleCopyCode}
           className="flex items-center gap-1.5 hover:text-foreground transition-colors"
-          aria-label="Copy code"
+          aria-label={t('chat.tooltips.copy_code')}
         >
           {codeCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
           {codeCopied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}
@@ -86,7 +86,7 @@ const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
                   onClick={onCancel}
                   className="px-2.5 py-1 text-xs bg-destructive/15 text-destructive rounded-md hover:bg-destructive/25 transition-colors"
                 >
-                  {t('chat.tooltips.stop_recording') || 'İptal'}
+                  {t('chat.tooltips.stop_recording')}
                 </button>
               </div>
             )}
@@ -142,11 +142,11 @@ const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
           {!isBot && message.content && (
             <button
               onClick={() => onEdit && onEdit(message.content)}
-              title={t('chat.tooltips.edit') || 'Edit and Resend'}
+              title={t('chat.tooltips.edit')}
               className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary bg-secondary/60 hover:bg-primary/10 border border-border/50 rounded-md px-2 py-1 transition-all"
             >
               <Pencil className="w-3 h-3" />
-              {t('chat.tooltips.edit') || 'Düzenle'}
+              {t('chat.tooltips.edit')}
             </button>
           )}
         </div>

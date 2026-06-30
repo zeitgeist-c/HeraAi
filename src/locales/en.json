@@ -13,7 +13,16 @@
             "add_btn": "Add",
             "description": "Add multiple keys. Select the active one via radio button.",
             "save_btn": "Save and Continue",
-            "saved_success": "Settings saved successfully!"
+            "saved_success": "Settings saved successfully!",
+            "provider": "AI Provider",
+            "provider_info": "Google Gemini (gemini-3.1-flash-lite) — via Backend",
+            "backend_url": "Backend URL",
+            "test_connection": "Test Connection",
+            "connected": "Connected",
+            "no_connection": "No Connection",
+            "security_note": "API keys are stored on the backend. No API key exists in the frontend.",
+            "connection_success": "Backend connection successful!",
+            "connection_failed": "Backend connection failed."
         },
         "general": {
             "theme_title": "Appearance Theme",
@@ -70,7 +79,10 @@
             "statistics": "Statistics",
             "shortcuts": "Shortcuts",
             "enable_research": "Web Research",
-            "disable_research": "Disable Web Research"
+            "disable_research": "Disable Web Research",
+            "export": "Export Chat",
+            "close": "Close",
+            "copy_code": "Copy code"
         },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
@@ -88,14 +100,22 @@
         "import_error": "Failed to import",
         "voice_started": "Voice input started...",
         "voice_error": "Voice input is not supported in this browser",
-        "new_messages": "New messages"
-    },
-    "quick_actions": {
-        "crop": "Crop",
-        "web": "Web",
-        "translate": "Translate",
-        "summarize": "Summarize",
-        "explain": "Explain"
+        "new_messages": "New messages",
+        "sources_label": "Sources",
+        "connection_error": "Cannot connect to backend. Is the server running?",
+        "cancelled": "Request cancelled",
+        "quick_actions": {
+            "crop": "Crop",
+            "web": "Web",
+            "translate": "Translate",
+            "summarize": "Summarize",
+            "explain": "Explain",
+            "crop_tooltip": "Select an area on screen",
+            "web_tooltip": "Search the web",
+            "translate_tooltip": "Translate selected text or image",
+            "summarize_tooltip": "Summarize the content",
+            "explain_tooltip": "Explain the content"
+        }
     },
     "stats": {
         "title": "Usage Statistics",
