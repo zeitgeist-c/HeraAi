@@ -68,7 +68,9 @@
             "stop_recording": "Stop Recording",
             "web_search": "Web Search",
             "statistics": "Statistics",
-            "shortcuts": "Shortcuts"
+            "shortcuts": "Shortcuts",
+            "enable_research": "Web Research",
+            "disable_research": "Disable Web Research"
         },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
