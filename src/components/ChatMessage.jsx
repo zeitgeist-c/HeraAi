@@ -51,7 +51,7 @@ function CodeBlock({ className, children, ...props }) {
   )
 }
 
-const ChatMessage = memo(({ message, onEdit }) => {
+const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
   const [copied, setCopied] = useState(false)
@@ -73,42 +73,62 @@ const ChatMessage = memo(({ message, onEdit }) => {
         <span className="text-xs font-semibold text-muted-foreground">
           {isBot ? t('chat.gemini') : t('chat.you')}
         </span>
-        <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-secondary prose-pre:p-0 w-full overflow-hidden break-words text-sm text-foreground">
-          {isBot ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeSanitize]}
-              components={{
-                code({ inline, className, children, ...props }) {
-                  if (!inline && className) {
-                    return <CodeBlock className={className} {...props}>{children}</CodeBlock>
-                  }
-                  return (
-                    <code className="bg-secondary px-1.5 py-0.5 rounded text-[0.85em] font-mono text-primary" {...props}>
-                      {children}
-                    </code>
-                  )
-                }
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          ) : (
-            <div className="whitespace-pre-wrap flex flex-col gap-2">
-              <span>{message.content}</span>
-              {message.attachments && message.attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {message.attachments.map((att, idx) => (
-                    <div key={idx} className="flex items-center gap-1 bg-secondary/50 px-2 py-1 rounded text-xs border border-border">
-                      {att.mimeType.startsWith('image/') ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                      <span className="truncate max-w-[120px]">{att.name || t('chat.attachment')}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+
+        {isBot && isPending && !message.content ? (
+          <div className="flex flex-col gap-3 min-h-[72px]">
+            <div className="space-y-2">
+              <div className="h-3 bg-muted-foreground/15 rounded w-3/4 animate-pulse" />
+              <div className="h-3 bg-muted-foreground/15 rounded w-1/2 animate-pulse" />
             </div>
-          )}
-        </div>
+            {onCancel && (
+              <div className="flex justify-end">
+                <button
+                  onClick={onCancel}
+                  className="px-2.5 py-1 text-xs bg-destructive/15 text-destructive rounded-md hover:bg-destructive/25 transition-colors"
+                >
+                  {t('chat.tooltips.stop_recording') || 'İptal'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-secondary prose-pre:p-0 w-full overflow-hidden break-words text-sm text-foreground">
+            {isBot ? (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeSanitize]}
+                components={{
+                  code({ inline, className, children, ...props }) {
+                    if (!inline && className) {
+                      return <CodeBlock className={className} {...props}>{children}</CodeBlock>
+                    }
+                    return (
+                      <code className="bg-secondary px-1.5 py-0.5 rounded text-[0.85em] font-mono text-primary" {...props}>
+                        {children}
+                      </code>
+                    )
+                  }
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            ) : (
+              <div className="whitespace-pre-wrap flex flex-col gap-2">
+                <span>{message.content}</span>
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {message.attachments.map((att, idx) => (
+                      <div key={idx} className="flex items-center gap-1 bg-secondary/50 px-2 py-1 rounded text-xs border border-border">
+                        {att.mimeType.startsWith('image/') ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
+                        <span className="truncate max-w-[120px]">{att.name || t('chat.attachment')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pt-1">
           <button
