@@ -8,16 +8,6 @@ import { checkHealth } from '../lib/api'
 const AVAILABLE_LANGUAGES = [
   { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
   { code: 'en', name: 'English', flag: '🇬🇧' },
-  { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
-  { code: 'fr', name: 'Français', flag: '🇫🇷' },
-  { code: 'es', name: 'Español', flag: '🇪🇸' },
-  { code: 'ru', name: 'Русский', flag: '🇷🇺' },
-  { code: 'ar', name: 'العربية', flag: '🇸🇦' },
-  { code: 'zh', name: '中文', flag: '🇨🇳' },
-  { code: 'ja', name: '日本語', flag: '🇯🇵' },
-  { code: 'ko', name: '한국어', flag: '🇰🇷' },
-  { code: 'pt', name: 'Português', flag: '🇵🇹' },
-  { code: 'it', name: 'Italiano', flag: '🇮🇹' },
 ]
 
 function SettingsPanel({ onSave, currentConfig, onClose }) {
@@ -46,14 +36,14 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
       const ok = await checkHealth()
       if (ok) {
         setConnectionStatus('connected')
-        toast.success('Backend bağlantısı başarılı!')
+        toast.success(t('setup.api.connection_success'))
       } else {
         setConnectionStatus('failed')
-        toast.error('Backend bağlantısı başarısız.')
+        toast.error(t('setup.api.connection_failed'))
       }
     } catch {
       setConnectionStatus('failed')
-      toast.error('Backend bağlantısı başarısız.')
+      toast.error(t('setup.api.connection_failed'))
     } finally {
       setTestingConnection(false)
     }
@@ -72,7 +62,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
 
     chrome.storage.local.set({ ...newConfig, apiProvider: 'google' }, () => {
       onSave(newConfig)
-      toast.success(t('setup.api.saved_success') || 'Settings saved!')
+      toast.success(t('setup.api.saved_success'))
     })
   }
 
@@ -85,7 +75,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
             className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span className="text-sm">{t('common.back') || 'Geri'}</span>
+            <span className="text-sm">{t('common.back')}</span>
           </button>
         )}
         
@@ -101,13 +91,13 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
             onClick={() => setActiveTab('api')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'api' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Server className="w-3.5 h-3.5" /> Sunucu
+            <Server className="w-3.5 h-3.5" /> {t('setup.tabs.api')}
           </button>
           <button
             onClick={() => setActiveTab('settings')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'settings' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Sparkles className="w-3.5 h-3.5" /> Ayarlar
+            <Sparkles className="w-3.5 h-3.5" /> {t('setup.tabs.general')}
           </button>
         </div>
 
@@ -117,17 +107,17 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
               <div className="flex flex-col gap-3">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Globe className="w-4 h-4 text-primary" />
-                  AI Sağlayıcı
+                  {t('setup.api.provider')}
                 </label>
                 <div className="p-2.5 rounded-lg border border-sky-500/30 bg-sky-500/5 text-sm text-muted-foreground">
-                  Google Gemini (gemini-3.1-flash-lite) — Backend üzerinden
+                  {t('setup.api.provider_info')}
                 </div>
               </div>
 
               <div className="flex flex-col gap-3">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Server className="w-4 h-4 text-primary" />
-                  Backend URL
+                  {t('setup.api.backend_url')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -148,21 +138,21 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
                     className="h-9 px-3 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {testingConnection ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                    Bağlantıyı Test Et
+                    {t('setup.api.test_connection')}
                   </button>
                   {connectionStatus === 'connected' && (
                     <span className="flex items-center gap-1 text-xs text-green-500">
-                      <CheckCircle className="w-3.5 h-3.5" /> Bağlı
+                      <CheckCircle className="w-3.5 h-3.5" /> {t('setup.api.connected')}
                     </span>
                   )}
                   {connectionStatus === 'failed' && (
                     <span className="flex items-center gap-1 text-xs text-red-500">
-                      <XCircle className="w-3.5 h-3.5" /> Bağlantı Yok
+                      <XCircle className="w-3.5 h-3.5" /> {t('setup.api.no_connection')}
                     </span>
                   )}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  API key'ler backend tarafında saklanır. Frontend'de hiçbir API key bulunmaz.
+                  {t('setup.api.security_note')}
                 </p>
               </div>
             </div>
@@ -172,13 +162,13 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
             <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
               <div className="flex flex-col gap-3">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  Tema
+                  {t('setup.general.theme_title')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'system', label: 'Sistem' },
-                    { id: 'light', label: 'Açık' },
-                    { id: 'dark', label: 'Koyu' }
+                    { id: 'system', label: t('setup.general.theme_system') },
+                    { id: 'light', label: t('setup.general.theme_light') },
+                    { id: 'dark', label: t('setup.general.theme_dark') }
                   ].map(opt => (
                     <button
                       key={opt.id}
@@ -193,7 +183,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
 
               <div className="flex flex-col gap-3">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  Dil
+                  {t('setup.general.language_title')}
                 </label>
                 <select
                   value={selectedLanguage}
@@ -208,12 +198,12 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
 
               <div className="flex flex-col gap-3">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  Sistem Talimatı
+                  {t('setup.ai.system_prompt_title')}
                 </label>
                 <textarea
                   value={systemInstruction}
                   onChange={(e) => setSystemInstruction(e.target.value)}
-                  placeholder="AI nasıl davranmalı, kim olmalı..."
+                  placeholder={t('setup.ai.system_prompt_placeholder')}
                   className="min-h-[80px] w-full resize-y rounded-lg border border-input bg-background/50 px-3 py-2 text-sm"
                 />
               </div>
@@ -226,7 +216,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
           className="inline-flex items-center justify-center rounded-lg text-sm font-bold transition-all bg-sky-500 text-white hover:bg-sky-600 h-10 px-4 gap-2 shadow-md"
         >
           <Save className="w-4 h-4" />
-          Kaydet
+          {t('setup.api.save_btn')}
         </button>
       </div>
     </div>
