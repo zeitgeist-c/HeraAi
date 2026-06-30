@@ -11,10 +11,6 @@ export const ErrorType = {
         codes: ['rate_limit', '429', 'too_many'],
         userMessage: 'Çok fazla istek. Lütfen biraz bekleyin.'
     },
-    OLLAMA_USAGE_LIMIT: {
-        codes: ['usage', 'limit', 'exceeded', 'quota', '429', 'too_many_requests', 'rate_limit'],
-        userMessage: 'Ollama Cloud ücretsiz kullanım sınırı aşıldı. Daha sonra tekrar deneyin veya Pro plan düşünün.'
-    },
     MODEL_NOT_FOUND: {
         codes: ['model_not_found', 'unknown_model', '404'],
         userMessage: 'Model bulunamadı. Farklı bir model seçin.'

@@ -1,10 +1,15 @@
-const MAX_Z_INDEX = '2147483647';
-const PRIMARY_COLOR = '#0ea5e9';
-const DESTRUCTIVE_COLOR = '#ef4444';
-
-export function injectCropOverlay(translations = {}) {
+/**
+ * Injects a crop selection overlay into the active tab's page.
+ * @param {object} translations - { confirm, cancel } button labels
+ * @param {string} primaryColor - Hex color for the selection border (defaults to sky-500)
+ */
+export function injectCropOverlay(translations = {}, primaryColor = '#0ea5e9') {
+  // Scope all constants inside so they're accessible during chrome.scripting.executeScript serialization
+  const MAX_Z_INDEX = '2147483647';
+  const PRIMARY_COLOR = primaryColor || '#0ea5e9';
+  const DESTRUCTIVE_COLOR = '#ef4444';
   const { confirm = '✔', cancel = '✖' } = translations;
-  
+
   if (document.getElementById('heraai-crop-overlay')) {
     document.getElementById('heraai-crop-overlay').remove();
   }
