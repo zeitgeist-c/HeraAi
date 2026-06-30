@@ -87,7 +87,15 @@
         "imported": "Sohbet geçmişi içe aktarıldı!",
         "import_error": "İçe aktarma başarısız oldu",
         "voice_started": "Sesli giriş başladı...",
-        "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor"
+        "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor",
+        "new_messages": "Yeni mesajlar"
+    },
+    "quick_actions": {
+        "crop": "Kırp",
+        "web": "Web",
+        "translate": "Çevir",
+        "summarize": "Özet",
+        "explain": "Açıkla"
     },
     "stats": {
         "title": "Kullanım İstatistikleri",

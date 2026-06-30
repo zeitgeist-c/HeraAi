@@ -43,13 +43,29 @@ cp .env.example .env
 Required variables in `.env`:
 
 | Variable | Required | Purpose |
-|---|---|---|
-| `GEMINI_API_KEY` | **Yes** | Normal chat and vision/translate operations. Get one from [Google AI Studio](https://aistudio.google.com/apikey). |
-| `TAVILY_API_KEY` | No (see note) | Required only for Web Research mode. Get one from [Tavily](https://tavily.com). |
+|---|---|---|---|
+| `GEMINI_API_KEYS` | **Yes** | Gemini API key(s). Comma-separated for multiple keys (e.g., `key1,key2`). Backward compatible: `GEMINI_API_KEY` also works. Get one from [Google AI Studio](https://aistudio.google.com/apikey). |
+| `TAVILY_API_KEYS` | No (see note) | Required only for Web Research mode. Comma-separated for multiple keys. Backward compatible: `TAVILY_API_KEY`. Get one from [Tavily](https://tavily.com). |
 | `PORT` | No | Server port (default: 3001) |
 | `ALLOWED_ORIGINS` | No | CORS origins, comma-separated (default: `http://localhost:5173,chrome-extension://*`) |
+| `COOLDOWN_RATE_LIMIT` | No | Cooldown for 429 rate limits in ms (default: 60000) |
+| `COOLDOWN_QUOTA` | No | Cooldown for quota exceeded in ms (default: 3600000) |
+| `COOLDOWN_TIMEOUT` | No | Cooldown for timeouts in ms (default: 30000) |
+| `COOLDOWN_SERVER_ERROR` | No | Cooldown for 5xx errors in ms (default: 60000) |
 
-> **Note:** If `TAVILY_API_KEY` is not set, the server will still start, but the Web Research endpoint (`/api/research`) will return an error. Chat and Vision will work normally.
+> **Note:** If no Tavily keys are configured, the server will still start, but the Web Research endpoint (`/api/research`) will return an error. Chat and Vision will work normally.
+
+### Multi-Key Fallback
+
+When multiple API keys are configured, HeraAi uses a **round-robin with cooldown** system:
+
+1. **Round-robin selection**: Each request picks the next available key.
+2. **Cooldown periods**: Failed keys enter a cooldown based on error type (429→60s, quota→1h, timeout→30s, 5xx→60s).
+3. **Retryable errors only**: 429 rate limits, 5xx server errors, and timeouts trigger a retry with the next key. 400, 401, 403, and safety blocks are not retried.
+4. **Stream safety**: Once an SSE stream starts, errors are sent as `error` events — no key switching mid-stream.
+5. **Each key tried at most once** per request.
+
+This enables basic redundancy and rate-limit mitigation without complex coordination.
 
 ### Start the Backend
 
@@ -119,7 +135,11 @@ server/             Express backend
     index.js          App entry point
     config.js         Env config with validation
     routes/           API endpoints (health, chat, research, vision)
-    services/         Gemini AI & Tavily wrappers
+    services/
+      gemini.js         Gemini AI with key pool fallback
+      tavily.js         Tavily search with key pool fallback
+      contextBuilder.js Build research context from search results
+      keyPool.js        Round-robin key pool with cooldowns
     middleware/       Rate limiter, error handler, validation
     utils/            SSE helpers, timeout
   .env.example        Template for environment variables

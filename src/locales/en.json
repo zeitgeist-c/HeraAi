@@ -87,7 +87,15 @@
         "imported": "Chat history imported!",
         "import_error": "Failed to import",
         "voice_started": "Voice input started...",
-        "voice_error": "Voice input is not supported in this browser"
+        "voice_error": "Voice input is not supported in this browser",
+        "new_messages": "New messages"
+    },
+    "quick_actions": {
+        "crop": "Crop",
+        "web": "Web",
+        "translate": "Translate",
+        "summarize": "Summarize",
+        "explain": "Explain"
     },
     "stats": {
         "title": "Usage Statistics",

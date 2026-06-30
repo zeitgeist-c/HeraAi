@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Settings, Send, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import { Settings, Send, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Globe, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -15,7 +15,6 @@ import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
-import WebResearchToggle from './components/WebResearchToggle'
 
 function App() {
   const { t } = useTranslation()
@@ -29,13 +28,21 @@ function App() {
   const [showStats, setShowStats] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [enableResearch, setEnableResearch] = useState(false)
+  const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const streamingControllerRef = useRef(null)
   const cropProcessingRef = useRef(false)
+  const autoScrollRef = useRef(true)
+  const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
-  const [isGenerating, setIsGenerating] = useState(false)
+  const [isGenerating, setIsGeneratingState] = useState(false)
+  const isGeneratingRef = useRef(false)
+  const setGenerating = useCallback((val) => {
+    setIsGeneratingState(val)
+    isGeneratingRef.current = val
+  }, [])
 
   const applyTheme = useCallback((themeValue, customPrimaryColor) => {
     const root = document.documentElement;
@@ -119,7 +126,7 @@ function App() {
       if (msg.type === 'HERAAI_CROP_DONE' && !cropProcessingRef.current) {
         cropProcessingRef.current = true;
         try {
-          setIsGenerating(true);
+          setGenerating(true);
           const attachment = await captureScreenshot(msg.coords);
           if (attachment) {
             setAttachments(prev => [...prev, attachment]);
@@ -128,7 +135,7 @@ function App() {
           console.error("Screenshot error", err);
           toast.error('Error taking screenshot');
         } finally {
-          setIsGenerating(false);
+          setGenerating(false);
           cropProcessingRef.current = false;
         }
       }
@@ -164,7 +171,7 @@ function App() {
           i18n.changeLanguage(result.language)
         }
 
-        const welcomeMsg = [{ role: 'model', content: t('chat.welcome') }]
+        const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
 
         if (result.sessions && result.sessions.length > 0) {
           setSessions(result.sessions)
@@ -223,7 +230,7 @@ function App() {
     } else {
       setIsLoading(false)
       const id = Date.now().toString()
-      const welcomeMsg = [{ role: 'model', content: t('chat.welcome') }]
+      const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
       setActiveSessionId(id)
       setSessions([{ id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
       setMessages(welcomeMsg)
@@ -253,15 +260,16 @@ function App() {
         return newArr
       })
     }
-
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
   }, [messages, activeSessionId, generateTitle])
+
+  useLayoutEffect(() => {
+    if (!scrollRef.current || !autoScrollRef.current) return
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [messages])
 
   const startNewSession = useCallback(() => {
     const id = Date.now().toString()
-    const welcomeMsg = [{ role: 'model', content: t('chat.welcome') }]
+    const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
     setActiveSessionId(id)
     setSessions(prev => [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
     setMessages(welcomeMsg)
@@ -348,14 +356,14 @@ function App() {
       name: att.name
     }))
 
-    const userMsg = { role: 'user', content: userText, attachments: messageAttachments }
+    const userMsg = { id: msgIdCounter.current++, role: 'user', content: userText, attachments: messageAttachments }
 
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setAttachments([])
-    setIsGenerating(true)
+    setGenerating(true)
 
-    setMessages(prev => [...prev, { role: 'model', content: '' }])
+    setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'model', content: '' }])
 
     const controller = new AbortController()
     streamingControllerRef.current = controller
@@ -403,7 +411,7 @@ function App() {
       console.error("handleSend Error", err)
       toast.error('Backend\'e bağlanılamadı. Sunucu çalışıyor mu?')
     } finally {
-      setIsGenerating(false)
+      setGenerating(false)
       streamingControllerRef.current = null
     }
   }, [input, attachments, isGenerating, messages, appConfig, enableResearch])
@@ -419,7 +427,7 @@ function App() {
     const files = Array.from(e.target.files)
     if (!files.length) return
 
-    setIsGenerating(true)
+    setGenerating(true)
 
     const newAttachments = []
     for (const file of files) {
@@ -437,7 +445,7 @@ function App() {
     }
 
     setAttachments(prev => [...prev, ...newAttachments])
-    setIsGenerating(false)
+    setGenerating(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [t])
 
@@ -504,7 +512,7 @@ function App() {
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile();
         if (file) {
-          setIsGenerating(true);
+          setGenerating(true);
           try {
             const base64 = await fileToBase64(file);
             setAttachments(prev => [...prev, {
@@ -516,7 +524,7 @@ function App() {
             console.error("Paste error", err);
             toast.error(t('chat.file_error'));
           } finally {
-            setIsGenerating(false);
+            setGenerating(false);
           }
         }
       }
@@ -527,9 +535,36 @@ function App() {
     if (streamingControllerRef.current) {
       streamingControllerRef.current.abort()
       streamingControllerRef.current = null
-      setIsGenerating(false)
+      setGenerating(false)
       toast.success('İstek iptal edildi')
     }
+  }, [])
+
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    autoScrollRef.current = true
+    setShowScrollDownBtn(false)
+  }, [])
+
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container) return
+
+    const onScroll = () => {
+      const threshold = 80
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+      autoScrollRef.current = nearBottom
+      if (nearBottom) {
+        setShowScrollDownBtn(false)
+      } else {
+        setShowScrollDownBtn(prev => isGeneratingRef.current || prev ? true : false)
+      }
+    }
+
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => container.removeEventListener('scroll', onScroll)
   }, [])
 
   useEffect(() => {
@@ -669,39 +704,37 @@ function App() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
-        {messages.map((msg, idx) => (
-          <ChatMessage
-            key={idx}
-            message={msg}
-            onEdit={(text) => {
-              setInput(text)
-              setTimeout(() => {
-                const textarea = document.querySelector('textarea')
-                if (textarea) { textarea.focus(); textarea.setSelectionRange(text.length, text.length) }
-              }, 50)
-            }}
-          />
-        ))}
-        {isGenerating && (
-          <div className="flex gap-3 p-4 bg-muted/50 rounded-lg">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Bot className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 space-y-2 py-1">
-              <div className="flex items-center gap-2">
-                <div className="h-2 bg-muted-foreground/20 rounded w-1/4 animate-pulse"></div>
-                <button
-                  onClick={cancelStream}
-                  className="px-2 py-0.5 text-xs bg-destructive/20 text-destructive rounded hover:bg-destructive/30 transition-colors ml-auto"
-                >
-                  İptal
-                </button>
-              </div>
-              <div className="h-2 bg-muted-foreground/20 rounded w-1/2 animate-pulse"></div>
-            </div>
+      <main className="flex-1 overflow-y-auto relative" ref={scrollRef}>
+        {showScrollDownBtn && (
+          <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
+            <button
+              onClick={() => scrollToBottom()}
+              className="pointer-events-auto flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:bg-primary/90 transition-all animate-in fade-in"
+            >
+              ↓ {t('chat.new_messages') || 'Yeni mesajlar'}
+            </button>
           </div>
         )}
+        <div className="p-4 space-y-4">
+          {messages.map((msg, idx) => {
+            const isLastAssistant = idx === messages.length - 1 && msg.role === 'model'
+            return (
+              <ChatMessage
+                key={msg.id ?? idx}
+                message={msg}
+                isPending={isLastAssistant && isGenerating}
+                onCancel={isLastAssistant ? cancelStream : undefined}
+                onEdit={(text) => {
+                  setInput(text)
+                  setTimeout(() => {
+                    const textarea = document.querySelector('textarea')
+                    if (textarea) { textarea.focus(); textarea.setSelectionRange(text.length, text.length) }
+                  }, 50)
+                }}
+              />
+            )
+          })}
+        </div>
       </main>
 
       <div className="p-4 bg-background border-t shadow-sm shrink-0">
@@ -726,45 +759,70 @@ function App() {
           </div>
         )}
 
-        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-hide">
+        <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 scrollbar-hide">
           <button
-            title={t('chat.prompts.summarize') || 'Summarize'}
-            onClick={() => {
-              const p = (t('chat.prompts.summarize') || 'Summarize') + ':\n' + input;
-              setInput('');
-              handleSend(p);
-            }}
-            className="flex items-center justify-center p-2 bg-secondary/80 hover:bg-primary/20 hover:text-primary backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm"
-          ><FileText className="w-4 h-4" /></button>
+            title={t('chat.tooltips.screenshot') || 'Ekrandan alan seç'}
+            onClick={handleScreenshot}
+            disabled={isGenerating}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Scissors className="w-3.5 h-3.5" />
+            <span>{t('chat.quick_actions.crop') || 'Kırp'}</span>
+          </button>
 
           <button
-            title={t('chat.prompts.translate') || 'Translate'}
+            title={enableResearch ? (t('chat.tooltips.disable_research') || 'Web araştırmasını kapat') : (t('chat.tooltips.enable_research') || 'Web\'de araştır')}
+            onClick={() => setEnableResearch(prev => !prev)}
+            disabled={isGenerating}
+            aria-pressed={enableResearch}
+            className={`flex items-center gap-1 px-2.5 py-1.5 backdrop-blur-sm rounded-xl transition-all border shadow-sm text-xs font-medium active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              enableResearch
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>{t('chat.quick_actions.web') || 'Web'}</span>
+          </button>
+
+          <button
+            title={t('chat.prompts.translate') || 'Seçili metni/görseli çevir'}
             onClick={() => {
               const p = (t('chat.prompts.translate') || 'Translate') + ':\n' + input;
               setInput('');
               handleSend(p);
             }}
-            className="flex items-center justify-center p-2 bg-secondary/80 hover:bg-primary/20 hover:text-primary backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm"
-          ><Languages className="w-4 h-4" /></button>
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+          >
+            <Languages className="w-3.5 h-3.5" />
+            <span>{t('chat.quick_actions.translate') || 'Çevir'}</span>
+          </button>
 
           <button
-            title={t('chat.prompts.explain') || 'Explain'}
+            title={t('chat.tooltips.summarize') || 'İçeriği özetle'}
+            onClick={() => {
+              const p = (t('chat.prompts.summarize') || 'Summarize') + ':\n' + input;
+              setInput('');
+              handleSend(p);
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>{t('chat.quick_actions.summarize') || 'Özet'}</span>
+          </button>
+
+          <button
+            title={t('chat.prompts.explain') || 'İçeriği açıkla'}
             onClick={() => {
               const p = (t('chat.prompts.explain') || 'Explain') + ':\n' + input;
               setInput('');
               handleSend(p);
             }}
-            className="flex items-center justify-center p-2 bg-secondary/80 hover:bg-primary/20 hover:text-primary backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm"
-          ><Lightbulb className="w-4 h-4" /></button>
-
-          <button
-            title={t('chat.tooltips.screenshot') || 'Screenshot'}
-            onClick={handleScreenshot}
-            className="flex items-center justify-center p-2 bg-secondary/80 hover:bg-primary/20 hover:text-primary backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm"
-            disabled={isGenerating}
-          ><Scissors className="w-4 h-4" /></button>
-
-          <WebResearchToggle enabled={enableResearch} onToggle={() => setEnableResearch(prev => !prev)} disabled={isGenerating} />
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+          >
+            <Lightbulb className="w-3.5 h-3.5" />
+            <span>{t('chat.quick_actions.explain') || 'Açıkla'}</span>
+          </button>
         </div>
 
         <div className="relative flex flex-col bg-background/50 backdrop-blur-sm border rounded-xl shadow-md focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-all">
