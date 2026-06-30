@@ -28,6 +28,7 @@ function App() {
   const [showStats, setShowStats] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [enableResearch, setEnableResearch] = useState(false)
+  const [activeMode, setActiveMode] = useState(null)
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -133,7 +134,7 @@ function App() {
           }
         } catch (err) {
           console.error("Screenshot error", err);
-          toast.error('Error taking screenshot');
+          toast.error(t('chat.file_error'))
         } finally {
           setGenerating(false);
           cropProcessingRef.current = false;
@@ -150,7 +151,11 @@ function App() {
     }
   }, [])
 
-
+  useEffect(() => {
+    if (!isGenerating && activeMode && activeMode !== 'web') {
+      setActiveMode(null);
+    }
+  }, [isGenerating, activeMode])
 
   useEffect(() => {
     if (chrome && chrome.storage) {
@@ -190,7 +195,7 @@ function App() {
 
         } else if (result.chatHistory && result.chatHistory.length > 1) {
           const id = Date.now().toString()
-          const newSession = { id, title: t('chat.history_title') || 'Migrated Chat', updatedAt: Date.now(), messages: result.chatHistory }
+          const newSession = { id, title: t('chat.history_title'), updatedAt: Date.now(), messages: result.chatHistory }
           setSessions([newSession])
 
           if (config.startupBehavior === 'resume') {
@@ -314,11 +319,11 @@ function App() {
 
   const handleExport = useCallback(() => {
     if (sessions.length === 0) {
-      toast.error(t('chat.no_history') || 'No history to export')
+      toast.error(t('chat.no_history'))
       return
     }
     exportSessions(sessions)
-    toast.success('Chat history exported!')
+    toast.success(t('chat.exported'))
   }, [sessions, t])
 
   const handleImport = useCallback(async (e) => {
@@ -335,12 +340,12 @@ function App() {
           chrome.storage.local.set({ sessions: importedSessions, activeSessionId: importedSessions[0].id })
         }
       }
-      toast.success('Chat history imported!')
+      toast.success(t('chat.imported'))
     } catch (err) {
-      toast.error(err.message || 'Failed to import')
+      toast.error(err.message || t('chat.import_error'))
     }
     e.target.value = ''
-  }, [])
+  }, [t])
 
   const handleSend = useCallback(async (directActionText = null) => {
     const actualText = typeof directActionText === 'string' ? directActionText : null;
@@ -391,7 +396,7 @@ function App() {
             return newMessages;
           });
         } else if (evt.event === 'sources') {
-          const sourcesHtml = '\n\n─── Kaynaklar ───\n' + evt.data.sources.map(s => `[${s.index}] ${s.title} → ${s.url}`).join('\n');
+          const sourcesHtml = '\n\n─── ' + t('chat.sources_label') + ' ───\n' + evt.data.sources.map(s => `[${s.index}] ${s.title} → ${s.url}`).join('\n');
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
@@ -409,7 +414,7 @@ function App() {
     } catch (err) {
       if (err.name === 'AbortError') return;
       console.error("handleSend Error", err)
-      toast.error('Backend\'e bağlanılamadı. Sunucu çalışıyor mu?')
+      toast.error(t('chat.connection_error'))
     } finally {
       setGenerating(false)
       streamingControllerRef.current = null
@@ -457,14 +462,14 @@ function App() {
       const targetWindow = windows.find(w => w.type === 'normal')
       
       if (!targetWindow) {
-        toast.error(t('chat.screenshot_no_tab') || 'Aktif pencere bulunamadı.');
+        toast.error(t('chat.screenshot_no_tab'));
         return;
       }
-      
+
       const [tab] = await chrome.tabs.query({ active: true, windowId: targetWindow.id });
 
       if (!tab || !tab.id) {
-        toast.error(t('chat.screenshot_no_tab') || 'Aktif sekme bulunamadı.');
+        toast.error(t('chat.screenshot_no_tab'));
         return;
       }
 
@@ -472,7 +477,7 @@ function App() {
       const blocked = url.startsWith('chrome://') || url.startsWith('about:') ||
         url.startsWith('edge://') || url === '';
       if (blocked) {
-        toast.error(t('chat.screenshot_blocked') || 'Bu sayfa türünde ekran kırpma kullanılamaz. Lütfen normal bir web sayfasına gidin.');
+        toast.error(t('chat.screenshot_blocked'));
         return;
       }
 
@@ -488,14 +493,15 @@ function App() {
         ]
       });
 
-      toast(t('chat.tooltips.screenshot_hint') || 'Sayfa üzerinde kırpmak istediğiniz alanı çizin.');
+      toast(t('chat.tooltips.screenshot_hint'));
+      setActiveMode('crop')
     } catch (e) {
       console.error('Initiate screenshot error', e);
       const msg = e?.message || '';
       if (msg.includes('Cannot access') || msg.includes('chrome://')) {
-        toast.error(t('chat.screenshot_blocked') || 'Bu sayfa türünde ekran kırpma kullanılamaz.');
+        toast.error(t('chat.screenshot_blocked'));
       } else {
-        toast.error(t('chat.file_error') || 'Ekran kırpma başlatılamadı.');
+        toast.error(t('chat.file_error'));
       }
     }
   }, [t, appConfig])
@@ -536,7 +542,7 @@ function App() {
       streamingControllerRef.current.abort()
       streamingControllerRef.current = null
       setGenerating(false)
-      toast.success('İstek iptal edildi')
+      toast.success(t('chat.cancelled'))
     }
   }, [])
 
@@ -623,14 +629,14 @@ function App() {
         </div>
         <div className="flex items-center gap-1">
           <button
-            title={t('chat.tooltips.new_chat') || "New Chat"}
+            title={t('chat.tooltips.new_chat')}
             onClick={startNewSession}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
             <MessageSquarePlus className="w-4 h-4" />
           </button>
           <button
-            title={t('chat.tooltips.history') || "History"}
+            title={t('chat.tooltips.history')}
             onClick={() => setShowHistory(true)}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
@@ -644,7 +650,7 @@ function App() {
             <Trash2 className="w-4 h-4" />
           </button>
           <button
-            title="Export Chat"
+            title={t('chat.tooltips.export')}
             onClick={handleExport}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
@@ -660,21 +666,21 @@ function App() {
             />
           </label>
           <button
-            title={t('chat.tooltips.settings') || 'Settings'}
+            title={t('chat.tooltips.settings')}
             onClick={() => setShowSettings(true)}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
             <Settings className="w-4 h-4" />
           </button>
           <button
-            title={t('chat.tooltips.statistics') || 'Statistics'}
+            title={t('chat.tooltips.statistics')}
             onClick={() => setShowStats(true)}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
             <MessageSquare className="w-4 h-4" />
           </button>
           <button
-            title={t('chat.tooltips.shortcuts') || 'Shortcuts'}
+            title={t('chat.tooltips.shortcuts')}
             onClick={() => setShowShortcuts(true)}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
           >
@@ -688,7 +694,7 @@ function App() {
           <button
             onClick={() => setShowSettings(false)}
             className="absolute top-4 right-4 p-2 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground z-50 transition-colors"
-            title="Close"
+            title={t('chat.tooltips.close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -711,7 +717,7 @@ function App() {
               onClick={() => scrollToBottom()}
               className="pointer-events-auto flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:bg-primary/90 transition-all animate-in fade-in"
             >
-              ↓ {t('chat.new_messages') || 'Yeni mesajlar'}
+              ↓ {t('chat.new_messages')}
             </button>
           </div>
         )}
@@ -761,67 +767,102 @@ function App() {
 
         <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 scrollbar-hide">
           <button
-            title={t('chat.tooltips.screenshot') || 'Ekrandan alan seç'}
+            type="button"
+            title={t('chat.quick_actions.crop_tooltip')}
+            aria-label={t('chat.quick_actions.crop_tooltip')}
+            aria-pressed={activeMode === 'crop'}
             onClick={handleScreenshot}
             disabled={isGenerating}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeMode === 'crop'
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
           >
-            <Scissors className="w-3.5 h-3.5" />
-            <span>{t('chat.quick_actions.crop') || 'Kırp'}</span>
+            <Scissors className="w-4 h-4" />
           </button>
 
           <button
-            title={enableResearch ? (t('chat.tooltips.disable_research') || 'Web araştırmasını kapat') : (t('chat.tooltips.enable_research') || 'Web\'de araştır')}
-            onClick={() => setEnableResearch(prev => !prev)}
-            disabled={isGenerating}
+            type="button"
+            title={t('chat.quick_actions.web_tooltip')}
+            aria-label={t('chat.quick_actions.web_tooltip')}
             aria-pressed={enableResearch}
-            className={`flex items-center gap-1 px-2.5 py-1.5 backdrop-blur-sm rounded-xl transition-all border shadow-sm text-xs font-medium active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+            onClick={() => {
+              const next = !enableResearch;
+              setEnableResearch(next);
+              setActiveMode(next ? 'web' : null);
+            }}
+            disabled={isGenerating}
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
               enableResearch
                 ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
                 : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
             }`}
           >
-            <Globe className="w-3.5 h-3.5" />
-            <span>{t('chat.quick_actions.web') || 'Web'}</span>
+            <Globe className="w-4 h-4" />
           </button>
 
           <button
-            title={t('chat.prompts.translate') || 'Seçili metni/görseli çevir'}
+            type="button"
+            title={t('chat.quick_actions.translate_tooltip')}
+            aria-label={t('chat.quick_actions.translate_tooltip')}
+            aria-pressed={activeMode === 'translate'}
             onClick={() => {
-              const p = (t('chat.prompts.translate') || 'Translate') + ':\n' + input;
+              setActiveMode('translate');
+              const p = t('chat.prompts.translate') + ':\n' + input;
               setInput('');
               handleSend(p);
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+            disabled={isGenerating}
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeMode === 'translate'
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
           >
-            <Languages className="w-3.5 h-3.5" />
-            <span>{t('chat.quick_actions.translate') || 'Çevir'}</span>
+            <Languages className="w-4 h-4" />
           </button>
 
           <button
-            title={t('chat.tooltips.summarize') || 'İçeriği özetle'}
+            type="button"
+            title={t('chat.quick_actions.summarize_tooltip')}
+            aria-label={t('chat.quick_actions.summarize_tooltip')}
+            aria-pressed={activeMode === 'summarize'}
             onClick={() => {
-              const p = (t('chat.prompts.summarize') || 'Summarize') + ':\n' + input;
+              setActiveMode('summarize');
+              const p = t('chat.prompts.summarize') + ':\n' + input;
               setInput('');
               handleSend(p);
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+            disabled={isGenerating}
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeMode === 'summarize'
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
           >
-            <FileText className="w-3.5 h-3.5" />
-            <span>{t('chat.quick_actions.summarize') || 'Özet'}</span>
+            <FileText className="w-4 h-4" />
           </button>
 
           <button
-            title={t('chat.prompts.explain') || 'İçeriği açıkla'}
+            type="button"
+            title={t('chat.quick_actions.explain_tooltip')}
+            aria-label={t('chat.quick_actions.explain_tooltip')}
+            aria-pressed={activeMode === 'explain'}
             onClick={() => {
-              const p = (t('chat.prompts.explain') || 'Explain') + ':\n' + input;
+              setActiveMode('explain');
+              const p = t('chat.prompts.explain') + ':\n' + input;
               setInput('');
               handleSend(p);
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-secondary/80 hover:bg-primary/20 hover:text-primary active:scale-95 backdrop-blur-sm rounded-xl transition-all border border-border/50 shadow-sm text-xs font-medium text-muted-foreground"
+            disabled={isGenerating}
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeMode === 'explain'
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
           >
-            <Lightbulb className="w-3.5 h-3.5" />
-            <span>{t('chat.quick_actions.explain') || 'Açıkla'}</span>
+            <Lightbulb className="w-4 h-4" />
           </button>
         </div>
 
