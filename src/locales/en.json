@@ -15,18 +15,11 @@
             "save_btn": "Save and Continue",
             "saved_success": "Settings saved successfully!",
             "provider": "AI Provider",
-            "provider_info": "Google Gemini (gemini-3.1-flash-lite) — via Backend",
-            "backend_url": "Backend URL",
-            "test_connection": "Test Connection",
-            "connected": "Connected",
-            "no_connection": "No Connection",
-            "security_note": "API keys are stored in your browser. They are sent to the backend per request and are never logged.",
-            "connection_success": "Backend connection successful!",
-            "connection_failed": "Backend connection failed."
+            "provider_info": "Google Gemini (gemini-3.1-flash-lite) runs directly in the extension",
+            "security_note": "API keys are stored in your browser and sent directly to the selected provider."
         },
         "keys": {
             "title": "API Keys",
-            "backend_tab": "Backend",
             "keys_tab": "Keys",
             "gemini_section": "Gemini API Keys",
             "tavily_section": "Tavily Search API Keys",
@@ -106,7 +99,9 @@
             "disable_research": "Disable Web Research",
             "export": "Export Chat",
             "close": "Close",
-            "copy_code": "Copy code"
+            "copy_code": "Copy code",
+            "retry": "Regenerate response",
+            "stop": "Stop"
         },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
@@ -117,7 +112,8 @@
             "summarize": "Summarize",
             "translate": "Translate",
             "explain": "Explain",
-            "code": "Explain Code"
+            "code": "Explain Code",
+            "ocr": "Extract only the visible text from the attached image or images. Do not add explanations, summaries, translations, interpretations, or any text that is not visible. Preserve headings, paragraphs, lists, line order, and reading order as closely as possible. Mark every unreadable section as [unreadable]. If there is more than one image, process them in attachment order and separate the results with the headings Image 1, Image 2, and so on."
         },
         "exported": "Chat history exported!",
         "imported": "Chat history imported!",
@@ -126,16 +122,23 @@
         "voice_error": "Voice input is not supported in this browser",
         "new_messages": "New messages",
         "sources_label": "Sources",
-        "connection_error": "Cannot connect to backend. Is the server running?",
+        "status": {
+            "thinking": "Thinking...",
+            "cancelled": "Cancelled",
+            "error": "Response failed"
+        },
+        "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",
         "quick_actions": {
             "crop": "Crop",
             "web": "Web",
+            "ocr": "Extract Text",
             "translate": "Translate",
             "summarize": "Summarize",
             "explain": "Explain",
             "crop_tooltip": "Select an area on screen",
             "web_tooltip": "Search the web",
+            "ocr_tooltip": "Extract text from attached images",
             "translate_tooltip": "Translate selected text or image",
             "summarize_tooltip": "Summarize the content",
             "explain_tooltip": "Explain the content"
