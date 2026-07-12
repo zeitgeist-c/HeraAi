@@ -11,7 +11,9 @@
         "contextMenus"
     ],
     "host_permissions": [
-        "<all_urls>"
+        "<all_urls>",
+        "https://generativelanguage.googleapis.com/*",
+        "https://api.tavily.com/*"
     ],
     "background": {
         "service_worker": "src/background/service_worker.js",
