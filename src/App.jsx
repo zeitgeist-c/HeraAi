@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import { Settings, Send, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Globe, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
+import { Settings, Send, Square, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Globe, ScanText, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -16,6 +16,94 @@ import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
 import { getAllKeysForRequest, updateKeyMetadata } from './lib/keyManager'
+
+function appendToInputValue(current, text) {
+  const safeCurrent = typeof current === 'string' ? current : ''
+  const safeText = typeof text === 'string' ? text.trim() : ''
+  if (!safeText) return safeCurrent
+  const separator = safeCurrent.trim() ? '\n' : ''
+  return `${safeCurrent}${separator}${safeText}`
+}
+
+const SCROLL_BOTTOM_THRESHOLD_PX = 96
+const REQUEST_TIMEOUT_MS = 90_000
+
+function normalizeConversationMessages(messages) {
+  const normalized = []
+
+  for (const message of messages || []) {
+    if (!message || (message.role !== 'user' && message.role !== 'model')) continue
+
+    const content = typeof message.content === 'string' ? message.content.trim() : ''
+    const hasAttachments = Array.isArray(message.attachments) && message.attachments.length > 0
+    const isEmptyUiState = (
+      message.role === 'model' &&
+      ['thinking', 'streaming', 'cancelled_empty'].includes(message.status)
+    )
+    const isEmptyError = message.role === 'model' && message.status === 'error' && !content
+    if (isEmptyUiState || isEmptyError) continue
+    if (!content && !hasAttachments) continue
+
+    if (message.role === 'model' && normalized.length === 0) continue
+    normalized.push(message)
+  }
+
+  return normalized
+}
+
+function getScrollDistanceFromBottom(element) {
+  if (!element) return 0
+  return element.scrollHeight - element.scrollTop - element.clientHeight
+}
+
+function isScrollNearBottom(element) {
+  return getScrollDistanceFromBottom(element) <= SCROLL_BOTTOM_THRESHOLD_PX
+}
+
+function clampScrollTop(element, nextTop) {
+  const maxTop = Math.max(0, element.scrollHeight - element.clientHeight)
+  return Math.min(Math.max(0, nextTop), maxTop)
+}
+
+function createUserMessage({ id, content, attachments, mode }) {
+  return {
+    id,
+    role: 'user',
+    content,
+    attachments,
+    mode
+  }
+}
+
+function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
+  return {
+    id,
+    requestId,
+    userMessageId,
+    startedAt,
+    role: 'model',
+    content: '',
+    status: 'thinking',
+    sources: []
+  }
+}
+
+function finalizeAssistantMessage(message, { content, status, sources }) {
+  return {
+    ...message,
+    content,
+    status,
+    sources
+  }
+}
+
+function markAssistantError(message, content = '') {
+  return finalizeAssistantMessage(message, {
+    content,
+    status: 'error',
+    sources: Array.isArray(message.sources) ? message.sources : []
+  })
+}
 
 function App() {
   const { t } = useTranslation()
@@ -36,16 +124,67 @@ function App() {
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const streamingControllerRef = useRef(null)
+  const streamBufferRef = useRef('')
+  const streamFlushTimerRef = useRef(null)
+  const streamTargetMessageIdRef = useRef(null)
+  const streamAbortReasonRef = useRef(null)
+  const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
   const autoScrollRef = useRef(true)
+  const forceScrollToBottomRef = useRef(false)
   const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
+  const hasImageAttachment = attachments.some(att => (
+    att?.mimeType?.startsWith('image/') && att?.data
+  ))
   const [isGenerating, setIsGeneratingState] = useState(false)
   const isGeneratingRef = useRef(false)
   const setGenerating = useCallback((val) => {
     setIsGeneratingState(val)
     isGeneratingRef.current = val
+  }, [])
+
+  const scheduleScrollToBottom = useCallback(() => {
+    const run = () => {
+      scheduledScrollFrameRef.current = null
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+      autoScrollRef.current = true
+      forceScrollToBottomRef.current = false
+      setShowScrollDownBtn(false)
+    }
+
+    if (typeof window.requestAnimationFrame === 'function') {
+      if (scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(scheduledScrollFrameRef.current)
+      }
+      scheduledScrollFrameRef.current = window.requestAnimationFrame(run)
+      return
+    }
+
+    run()
+  }, [])
+
+  const stickToBottomOnNextRender = useCallback(() => {
+    autoScrollRef.current = true
+    forceScrollToBottomRef.current = true
+    setShowScrollDownBtn(false)
+    scheduleScrollToBottom()
+  }, [scheduleScrollToBottom])
+
+  const scrollChatBy = useCallback((deltaY) => {
+    const container = scrollRef.current
+    if (!container || !deltaY) return
+    container.scrollTop = clampScrollTop(container, container.scrollTop + deltaY)
+    const nearBottom = isScrollNearBottom(container)
+    if (!nearBottom && scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(scheduledScrollFrameRef.current)
+      scheduledScrollFrameRef.current = null
+    }
+    autoScrollRef.current = nearBottom
+    setShowScrollDownBtn(prev => nearBottom ? false : (isGeneratingRef.current || prev))
   }, [])
 
   const applyTheme = useCallback((themeValue, customPrimaryColor) => {
@@ -98,9 +237,74 @@ function App() {
     return t('chat.new_chat')
   }, [t])
 
-  const captureScreenshot = async (coords) => {
+  const persistCurrentSession = useCallback((nextMessages) => {
+    if (!activeSessionId || !nextMessages?.length) return
+
+    setSessions(prev => {
+      const existing = prev.find(s => s.id === activeSessionId)
+
+      if (nextMessages.length === 1 && nextMessages[0].role === 'model' && !existing) {
+        return prev
+      }
+
+      const others = prev.filter(s => s.id !== activeSessionId)
+      const newArr = [...others, {
+        id: activeSessionId,
+        title: generateTitle(nextMessages),
+        updatedAt: Date.now(),
+        messages: nextMessages
+      }]
+
+      if (chrome && chrome.storage) {
+        chrome.storage.local.set({ sessions: newArr, activeSessionId })
+      }
+
+      return newArr
+    })
+  }, [activeSessionId, generateTitle])
+
+  const appendAssistantTextToMessage = useCallback((messageId, text) => {
+    if (!text || messageId == null) return
+
+    setMessages(prev => prev.map(message => (
+      message.id === messageId && message.role === 'model'
+        ? { ...message, content: `${message.content || ''}${text}` }
+        : message
+    )))
+  }, [])
+
+  const flushAssistantBuffer = useCallback((messageId = streamTargetMessageIdRef.current, onFlushed) => {
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current)
+      streamFlushTimerRef.current = null
+    }
+
+    const bufferedText = streamBufferRef.current
+    streamBufferRef.current = ''
+    if (onFlushed) {
+      onFlushed(bufferedText)
+      return
+    }
+    appendAssistantTextToMessage(messageId, bufferedText)
+  }, [appendAssistantTextToMessage])
+
+  const queueAssistantText = useCallback((messageId, text) => {
+    if (!text || messageId == null) return
+
+    streamBufferRef.current += text
+    if (streamFlushTimerRef.current) return
+
+    streamFlushTimerRef.current = setTimeout(() => {
+      streamFlushTimerRef.current = null
+      const bufferedText = streamBufferRef.current
+      streamBufferRef.current = ''
+      appendAssistantTextToMessage(messageId, bufferedText)
+    }, 120)
+  }, [appendAssistantTextToMessage])
+
+  const captureScreenshot = useCallback(async (coords) => {
     if (!coords) return null;
-    const { x, y, width, height, pixelRatio } = coords;
+    const { x, y, width, height, pixelRatio, viewportWidth, viewportHeight } = coords;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) return null;
 
@@ -109,12 +313,19 @@ function App() {
     img.src = dataUrl;
     await new Promise(res => img.onload = res);
 
+    const scaleX = viewportWidth ? img.naturalWidth / viewportWidth : pixelRatio;
+    const scaleY = viewportHeight ? img.naturalHeight / viewportHeight : pixelRatio;
+    const sourceX = Math.max(0, Math.round(x * scaleX));
+    const sourceY = Math.max(0, Math.round(y * scaleY));
+    const sourceWidth = Math.min(img.naturalWidth - sourceX, Math.round(width * scaleX));
+    const sourceHeight = Math.min(img.naturalHeight - sourceY, Math.round(height * scaleY));
+
     const canvas = document.createElement('canvas');
-    canvas.width = width * pixelRatio;
-    canvas.height = height * pixelRatio;
+    canvas.width = sourceWidth;
+    canvas.height = sourceHeight;
     const ctx = canvas.getContext('2d');
 
-    ctx.drawImage(img, x * pixelRatio, y * pixelRatio, width * pixelRatio, height * pixelRatio, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
     const croppedDataUrl = canvas.toDataURL('image/png');
     const base64Data = croppedDataUrl.split(',')[1];
 
@@ -123,7 +334,7 @@ function App() {
       mimeType: 'image/png',
       data: base64Data
     };
-  }
+  }, [])
 
   useEffect(() => {
     const listener = async (msg) => {
@@ -152,7 +363,7 @@ function App() {
         chrome.runtime.onMessage.removeListener(listener);
       }
     }
-  }, [])
+  }, [captureScreenshot, setGenerating, t])
 
   useEffect(() => {
     if (!isGenerating && activeMode && activeMode !== 'web') {
@@ -162,9 +373,8 @@ function App() {
 
   useEffect(() => {
     if (chrome && chrome.storage) {
-      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'backendUrl', 'customPrimaryColor', 'language'], (result) => {
+      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'customPrimaryColor', 'language', 'selectedText'], (result) => {
         const config = {
-          backendUrl: result.backendUrl || 'http://localhost:3001',
           theme: result.theme || 'system',
           startupBehavior: result.startupBehavior || 'resume',
           systemInstruction: result.systemInstruction || '',
@@ -218,14 +428,16 @@ function App() {
           setMessages(welcomeMsg)
         }
         setIsLoading(false)
+
+        if (result.selectedText) {
+          setInput(prev => appendToInputValue(prev, result.selectedText))
+          chrome.storage.local.remove(['selectedText'])
+        }
       })
 
       const storageListener = (changes, namespace) => {
         if (namespace === 'local' && changes.selectedText && changes.selectedText.newValue) {
-          setInput(prev => {
-            const sep = prev.trim() ? '\n' : '';
-            return prev + sep + changes.selectedText.newValue;
-          });
+          setInput(prev => appendToInputValue(prev, changes.selectedText.newValue));
           chrome.storage.local.remove(['selectedText']);
         }
       };
@@ -260,71 +472,81 @@ function App() {
     loadKeys()
   }, [appConfig])
 
-  useEffect(() => {
-    if (activeSessionId && messages.length > 0) {
-      setSessions(prev => {
-        const existing = prev.find(s => s.id === activeSessionId)
-        const others = prev.filter(s => s.id !== activeSessionId)
-
-        if (messages.length === 1 && messages[0].role === 'model' && !existing) {
-          return prev;
-        }
-
-        const newArr = [...others, {
-          id: activeSessionId,
-          title: generateTitle(messages),
-          updatedAt: Date.now(),
-          messages: messages
-        }]
-
-        if (chrome && chrome.storage) {
-          chrome.storage.local.set({ sessions: newArr, activeSessionId })
-        }
-        return newArr
-      })
-    }
-  }, [messages, activeSessionId, generateTitle])
-
   useLayoutEffect(() => {
-    if (!scrollRef.current || !autoScrollRef.current) return
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const container = scrollRef.current
+    if (!container) return
+
+    if (forceScrollToBottomRef.current || autoScrollRef.current) {
+      container.scrollTop = container.scrollHeight
+      forceScrollToBottomRef.current = false
+      autoScrollRef.current = true
+      setShowScrollDownBtn(false)
+      return
+    }
+
+    setShowScrollDownBtn(true)
   }, [messages])
 
   const startNewSession = useCallback(() => {
     const id = Date.now().toString()
     const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
     setActiveSessionId(id)
-    setSessions(prev => [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
+    setSessions(prev => {
+      const next = [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }]
+      if (chrome && chrome.storage) {
+        chrome.storage.local.set({ sessions: next, activeSessionId: id })
+      }
+      return next
+    })
     setMessages(welcomeMsg)
     setShowHistory(false)
-  }, [t])
+    stickToBottomOnNextRender()
+  }, [stickToBottomOnNextRender, t])
 
   const loadSession = useCallback((id) => {
     const session = sessions.find(s => s.id === id)
     if (session) {
       setActiveSessionId(id)
       setMessages(session.messages)
+      stickToBottomOnNextRender()
       if (chrome && chrome.storage) {
         chrome.storage.local.set({ activeSessionId: id })
       }
     }
     setShowHistory(false)
-  }, [sessions])
+  }, [sessions, stickToBottomOnNextRender])
 
   const deleteSession = useCallback((id) => {
-    setSessions(prev => {
-      const newArr = prev.filter(s => s.id !== id)
-      if (chrome && chrome.storage) {
-        chrome.storage.local.set({ sessions: newArr })
+    const remainingSessions = sessions.filter(s => s.id !== id)
+    let nextSessions = remainingSessions
+    let nextActiveSessionId = activeSessionId
+    let nextMessages = messages
+
+    if (activeSessionId === id) {
+      if (remainingSessions.length > 0) {
+        const nextSession = remainingSessions[0]
+        nextActiveSessionId = nextSession.id
+        nextMessages = nextSession.messages || []
+      } else {
+        const newId = Date.now().toString()
+        const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
+        const newSession = { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
+        nextSessions = [newSession]
+        nextActiveSessionId = newId
+        nextMessages = welcomeMsg
       }
-      return newArr
-    })
-    if (activeSessionId === id && sessions.length > 1) {
-      startNewSession()
-    } else if (sessions.length <= 1) {
-      startNewSession()
     }
-  }, [activeSessionId, sessions, startNewSession])
+
+    setSessions(nextSessions)
+    setActiveSessionId(nextActiveSessionId)
+    if (activeSessionId === id) {
+      setMessages(nextMessages)
+      stickToBottomOnNextRender()
+    }
+    if (chrome && chrome.storage) {
+      chrome.storage.local.set({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
+    }
+  }, [activeSessionId, messages, sessions, stickToBottomOnNextRender, t])
 
   const clearHistory = useCallback(() => {
     setSessions([])
@@ -354,6 +576,7 @@ function App() {
       if (importedSessions.length > 0) {
         setActiveSessionId(importedSessions[0].id)
         setMessages(importedSessions[0].messages || [])
+        stickToBottomOnNextRender()
         if (chrome && chrome.storage) {
           chrome.storage.local.set({ sessions: importedSessions, activeSessionId: importedSessions[0].id })
         }
@@ -363,15 +586,13 @@ function App() {
       toast.error(err.message || t('chat.import_error'))
     }
     e.target.value = ''
-  }, [t])
+  }, [stickToBottomOnNextRender, t])
 
-  const handleSend = useCallback(async (directActionText = null) => {
+  const handleSend = useCallback(async (directActionText = null, actionOptions = {}) => {
     const actualText = typeof directActionText === 'string' ? directActionText : null;
     const safeInput = typeof input === 'string' ? input : '';
     const userText = actualText || safeInput.trim();
-    if ((!userText && attachments.length === 0) || isGenerating) return
-
-    updateStats(enableResearch ? ['message', 'search'] : 'message')
+    if ((!userText && attachments.length === 0) || isGeneratingRef.current) return
 
     const messageAttachments = attachments.map(att => ({
       data: att.data,
@@ -379,55 +600,89 @@ function App() {
       name: att.name
     }))
 
-    const userMsg = { id: msgIdCounter.current++, role: 'user', content: userText, attachments: messageAttachments }
+    const automaticMode = enableResearch ? 'web' : (attachments.length > 0 ? 'vision' : 'chat')
+    const supportedModes = new Set(['chat', 'vision', 'web'])
+    const mode = supportedModes.has(actionOptions?.modeOverride)
+      ? actionOptions.modeOverride
+      : automaticMode
+    updateStats(mode === 'web' ? ['message', 'search'] : 'message')
+    const userMessageId = msgIdCounter.current++
+    const assistantMessageId = msgIdCounter.current++
+    const requestId = `${Date.now()}-${assistantMessageId}`
+    const startedAt = Date.now()
+    const userMsg = createUserMessage({
+      id: userMessageId,
+      content: userText,
+      attachments: messageAttachments,
+      mode
+    })
+    const assistantMsg = createAssistantMessage({
+      id: assistantMessageId,
+      requestId,
+      userMessageId,
+      startedAt
+    })
+    const baseMessages = normalizeConversationMessages(messages)
+    const requestMessages = [...baseMessages, userMsg]
+    let shouldDropEmptyAssistant = false
+    let finalMessages = null
+    let assistantContent = ''
+    let assistantSources = []
+    let assistantStatus = 'done'
+    let requestTimedOut = false
 
-    setMessages(prev => [...prev, userMsg])
+    streamTargetMessageIdRef.current = assistantMessageId
+    streamAbortReasonRef.current = null
+    streamBufferRef.current = ''
+    setGenerating(true)
+    stickToBottomOnNextRender()
+    setMessages(prev => [...prev, userMsg, assistantMsg])
     setInput('')
     setAttachments([])
-    setGenerating(true)
-
-    setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'model', content: '' }])
 
     const controller = new AbortController()
     streamingControllerRef.current = controller
+    const requestTimeoutId = window.setTimeout(() => {
+      requestTimedOut = true
+      streamAbortReasonRef.current = 'timeout'
+      controller.abort()
+    }, REQUEST_TIMEOUT_MS)
 
     try {
-      const options = {
+      const requestOptions = {
         systemInstruction: appConfig?.systemInstruction || '',
+        language: appConfig?.language || i18n.language || 'tr',
       };
 
-      const keysForGemini = geminiKeys.length > 0 ? geminiKeys : [{ id: 'inline', key: '', isPrimary: true }]
+      const keysForGemini = geminiKeys.length > 0 ? geminiKeys : []
       const keysForTavily = tavilyKeys.length > 0 ? tavilyKeys : []
 
-      const events = enableResearch
-        ? streamResearch(userText, keysForGemini, keysForTavily, controller.signal)
-        : attachments.length > 0
-          ? streamVision([...messages.slice(1), userMsg], attachments[0]?.data, options, keysForGemini, controller.signal)
-          : streamChat([...messages.slice(1), userMsg], options, keysForGemini, controller.signal)
+      const events = mode === 'web'
+        ? streamResearch(requestMessages, keysForGemini, keysForTavily, controller.signal)
+        : mode === 'vision'
+          ? streamVision(requestMessages, null, requestOptions, keysForGemini, controller.signal)
+          : streamChat(requestMessages, requestOptions, keysForGemini, controller.signal)
 
       for await (const evt of events) {
         if (evt.event === 'chunk') {
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastIndex = newMessages.length - 1;
-            newMessages[lastIndex] = {
-              ...newMessages[lastIndex],
-              content: newMessages[lastIndex].content + evt.data.text
-            };
-            return newMessages;
-          });
+          const chunkText = evt.data.text || ''
+          assistantContent += chunkText
+          assistantStatus = 'streaming'
+          setMessages(prev => prev.map(message => (
+            message.id === assistantMessageId && message.role === 'model'
+              ? { ...message, status: 'streaming' }
+              : message
+          )))
+          queueAssistantText(assistantMessageId, chunkText)
         } else if (evt.event === 'sources') {
-          const sourcesHtml = '\n\n─── ' + t('chat.sources_label') + ' ───\n' + evt.data.sources.map(s => `[${s.index}] ${s.title} → ${s.url}`).join('\n');
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastIndex = newMessages.length - 1;
-            newMessages[lastIndex] = {
-              ...newMessages[lastIndex],
-              content: newMessages[lastIndex].content + sourcesHtml
-            };
-            return newMessages;
-          });
+          assistantSources = evt.data.sources || []
+          setMessages(prev => prev.map(message => (
+            message.id === assistantMessageId && message.role === 'model'
+              ? { ...message, sources: assistantSources }
+              : message
+          )))
         } else if (evt.event === 'error') {
+          assistantStatus = 'error'
           toast.error(evt.data.message, { duration: 5000 })
           break;
         } else if (evt.event === 'key_status') {
@@ -460,14 +715,66 @@ function App() {
         }
       }
     } catch (err) {
-      if (err.name === 'AbortError') return;
-      console.error("handleSend Error", err)
-      toast.error(t('chat.connection_error'))
+      if (err.name === 'AbortError') {
+        if (requestTimedOut || streamAbortReasonRef.current === 'timeout') {
+          assistantStatus = 'error'
+          toast.error(t('chat.connection_error'))
+        } else {
+          assistantStatus = assistantContent ? 'cancelled' : 'cancelled_empty'
+          shouldDropEmptyAssistant = !assistantContent
+        }
+      } else {
+        assistantStatus = 'error'
+        console.error("handleSend Error", err)
+        toast.error(t('chat.connection_error'))
+      }
     } finally {
+      window.clearTimeout(requestTimeoutId)
+      let bufferedText = ''
+      flushAssistantBuffer(assistantMessageId, (text) => {
+        bufferedText = text
+      })
+      if (bufferedText && !assistantContent.endsWith(bufferedText)) {
+        assistantContent += bufferedText
+      }
+
+      if (assistantStatus === 'streaming') {
+        assistantStatus = 'done'
+      }
+
+      setMessages(prev => {
+        let next = prev.map(message => {
+          if (message.id !== assistantMessageId || message.role !== 'model') return message
+          return assistantStatus === 'error'
+            ? markAssistantError({ ...message, sources: assistantSources }, assistantContent)
+            : finalizeAssistantMessage(message, {
+              content: assistantContent,
+              status: assistantStatus,
+              sources: assistantSources
+            })
+        })
+
+        if (shouldDropEmptyAssistant) {
+          next = next.filter(message => (
+            message.id !== assistantMessageId || message.role !== 'model' || message.content
+          ))
+        }
+
+        return next
+      })
+
+      const shouldPersistAssistant = assistantContent || (assistantStatus !== 'error' && assistantStatus !== 'cancelled_empty')
+      finalMessages = shouldPersistAssistant
+        ? [...baseMessages, userMsg, { ...assistantMsg, content: assistantContent, status: assistantStatus, sources: assistantSources }]
+        : [...baseMessages, userMsg]
+      persistCurrentSession(finalMessages)
       setGenerating(false)
       streamingControllerRef.current = null
+      streamTargetMessageIdRef.current = null
+      streamAbortReasonRef.current = null
     }
-  }, [input, attachments, isGenerating, messages, appConfig, enableResearch, geminiKeys, tavilyKeys])
+  }, [input, attachments, messages, appConfig, enableResearch, geminiKeys, tavilyKeys, queueAssistantText, flushAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, t])
+
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -500,7 +807,7 @@ function App() {
     setAttachments(prev => [...prev, ...newAttachments])
     setGenerating(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [t])
+  }, [t, setGenerating])
 
   const handleScreenshot = useCallback(async () => {
     try {
@@ -583,43 +890,74 @@ function App() {
         }
       }
     }
-  }, [t])
+  }, [t, setGenerating])
 
   const cancelStream = useCallback(() => {
     if (streamingControllerRef.current) {
+      const targetId = streamTargetMessageIdRef.current
+      streamAbortReasonRef.current = 'user'
       streamingControllerRef.current.abort()
       streamingControllerRef.current = null
       setGenerating(false)
+      if (targetId != null) {
+        setMessages(prev => prev.map(message => (
+          message.id === targetId && message.role === 'model'
+            ? { ...message, status: message.content ? 'cancelled' : 'cancelled_empty' }
+            : message
+        )))
+      }
       toast.success(t('chat.cancelled'))
     }
-  }, [])
+  }, [setGenerating, t])
 
   const scrollToBottom = useCallback((smooth = false) => {
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
     autoScrollRef.current = true
+    forceScrollToBottomRef.current = false
     setShowScrollDownBtn(false)
   }, [])
 
-  useEffect(() => {
-    const container = scrollRef.current
-    if (!container) return
-
-    const onScroll = () => {
-      const threshold = 80
-      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
-      autoScrollRef.current = nearBottom
-      if (nearBottom) {
-        setShowScrollDownBtn(false)
-      } else {
-        setShowScrollDownBtn(prev => isGeneratingRef.current || prev ? true : false)
+  const handleEditMessage = useCallback((text) => {
+    setInput(text)
+    setTimeout(() => {
+      const textarea = document.querySelector('textarea')
+      if (textarea) {
+        textarea.focus()
+        textarea.setSelectionRange(text.length, text.length)
       }
-    }
-
-    container.addEventListener('scroll', onScroll, { passive: true })
-    return () => container.removeEventListener('scroll', onScroll)
+    }, 50)
   }, [])
+
+  const handleRetryMessage = useCallback((message) => {
+    if (!message?.content || isGeneratingRef.current) return
+    handleSend(message.content)
+  }, [handleSend])
+
+  const handleChatScroll = useCallback((event) => {
+    const container = event.currentTarget
+    const nearBottom = isScrollNearBottom(container)
+    if (!nearBottom && scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(scheduledScrollFrameRef.current)
+      scheduledScrollFrameRef.current = null
+    }
+    autoScrollRef.current = nearBottom
+    if (nearBottom) {
+      setShowScrollDownBtn(false)
+    } else {
+      setShowScrollDownBtn(prev => isGeneratingRef.current || prev ? true : false)
+    }
+  }, [])
+
+  const handleComposerWheel = useCallback((event) => {
+    const container = scrollRef.current
+    if (!container || !event.deltaY) return
+    const canScroll = container.scrollHeight > container.clientHeight
+    if (!canScroll) return
+    event.preventDefault()
+    scrollChatBy(event.deltaY)
+  }, [scrollChatBy])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -669,7 +1007,7 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+    <div className="flex flex-col h-screen min-h-0 bg-background text-foreground overflow-hidden">
       <header className="flex items-center justify-between px-4 py-3 border-b bg-background/95 backdrop-blur z-10 shrink-0 shadow-sm">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-primary" />
@@ -738,7 +1076,7 @@ function App() {
       </header>
 
       {showSettings && (
-        <div className="absolute inset-0 z-50 bg-background overflow-y-auto animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-50 bg-background overflow-y-auto">
           <button
             onClick={() => setShowSettings(false)}
             className="absolute top-4 right-4 p-2 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground z-50 transition-colors"
@@ -760,18 +1098,18 @@ function App() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto relative" ref={scrollRef}>
+      <main className="flex-1 min-h-0 overflow-y-auto relative" ref={scrollRef} onScroll={handleChatScroll}>
         {showScrollDownBtn && (
           <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
             <button
               onClick={() => scrollToBottom()}
-              className="pointer-events-auto flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:bg-primary/90 transition-all animate-in fade-in"
+              className="pointer-events-auto flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:bg-primary/90"
             >
               ↓ {t('chat.new_messages')}
             </button>
           </div>
         )}
-        <div className="p-4 space-y-4">
+        <div className="p-4 pb-8 space-y-4">
           {messages.map((msg, idx) => {
             const isLastAssistant = idx === messages.length - 1 && msg.role === 'model'
             return (
@@ -779,21 +1117,15 @@ function App() {
                 key={msg.id ?? idx}
                 message={msg}
                 isPending={isLastAssistant && isGenerating}
-                onCancel={isLastAssistant ? cancelStream : undefined}
-                onEdit={(text) => {
-                  setInput(text)
-                  setTimeout(() => {
-                    const textarea = document.querySelector('textarea')
-                    if (textarea) { textarea.focus(); textarea.setSelectionRange(text.length, text.length) }
-                  }, 50)
-                }}
+                onEdit={handleEditMessage}
+                onRetry={handleRetryMessage}
               />
             )
           })}
         </div>
       </main>
 
-      <div className="p-4 bg-background border-t shadow-sm shrink-0">
+      <div className="p-4 bg-background border-t shadow-sm shrink-0" onWheel={handleComposerWheel}>
         {attachments.length > 0 && (
           <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
             {attachments.map((att, idx) => (
@@ -806,7 +1138,7 @@ function App() {
                 <span className="text-xs truncate">{att.name}</span>
                 <button
                   onClick={() => removeAttachment(idx)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-background/80 hover:bg-destructive hover:text-destructive-foreground opacity-0 group-hover:opacity-100 transition-all"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-background/80 hover:bg-destructive hover:text-destructive-foreground opacity-0 group-hover:opacity-100"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -815,7 +1147,7 @@ function App() {
           </div>
         )}
 
-        <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 scrollbar-hide">
+        <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1 scrollbar-hide">
           <button
             type="button"
             title={t('chat.quick_actions.crop_tooltip')}
@@ -850,6 +1182,26 @@ function App() {
             }`}
           >
             <Globe className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            title={t('chat.quick_actions.ocr_tooltip')}
+            aria-label={t('chat.quick_actions.ocr_tooltip')}
+            aria-pressed={activeMode === 'ocr'}
+            onClick={() => {
+              setActiveMode('ocr');
+              setInput('');
+              handleSend(t('chat.prompts.ocr'), { modeOverride: 'vision' });
+            }}
+            disabled={isGenerating || !hasImageAttachment}
+            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeMode === 'ocr'
+                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
+                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
+            }`}
+          >
+            <ScanText className="w-4 h-4" />
           </button>
 
           <button
@@ -916,7 +1268,7 @@ function App() {
           </button>
         </div>
 
-        <div className="relative flex flex-col bg-background/50 backdrop-blur-sm border rounded-xl shadow-md focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-all">
+        <div className="relative flex flex-col bg-background/50 backdrop-blur-sm border rounded-xl shadow-md focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary">
           <textarea
             value={typeof input === 'string' ? input : ''}
             onChange={(e) => setInput(e.target.value)}
@@ -946,11 +1298,16 @@ function App() {
               </button>
             </div>
             <button
-              onClick={handleSend}
-              disabled={(!input.trim() && attachments.length === 0) || isGenerating}
-              className="flex items-center justify-center p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none transition-all shadow-sm"
+              onClick={() => isGenerating ? cancelStream() : handleSend()}
+              disabled={!isGenerating && (!input.trim() && attachments.length === 0)}
+              title={isGenerating ? t('chat.tooltips.stop') : ''}
+            className={`flex items-center justify-center p-2 rounded-lg shadow-sm ${
+              isGenerating
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
+              } disabled:opacity-50 disabled:pointer-events-none`}
             >
-              <Send className="w-4 h-4" />
+              {isGenerating ? <Square className="w-4 h-4" /> : <Send className="w-4 h-4" />}
             </button>
           </div>
         </div>

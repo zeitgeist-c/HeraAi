@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react'
 
 const App = lazy(() => import('./App.jsx'))
 
-function LoadingFallback() {
+export function LoadingFallback() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
       <Loader2 className="w-8 h-8 text-primary animate-spin" />
