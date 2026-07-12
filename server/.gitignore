@@ -1,7 +1,0 @@
-node_modules/
-.env
-dist/
-
-# Generated files
-server_output.txt
-
