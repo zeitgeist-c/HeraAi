@@ -169,14 +169,18 @@ export function injectCropOverlay(translations = {}, primaryColor = '#0ea5e9') {
         type: 'HERAAI_CROP_DONE',
         coords: {
           x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-          pixelRatio: window.devicePixelRatio
+          pixelRatio: window.devicePixelRatio,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight
         }
       }).catch(() => {
         // Fallback: use storage
         chrome.storage.local.set({
           heraaiCropData: {
             x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-            pixelRatio: window.devicePixelRatio
+            pixelRatio: window.devicePixelRatio,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight
           }
         });
       });

@@ -37,17 +37,4 @@ export default [
       'no-constant-binary-expression': 'off',
     },
   },
-  {
-    files: ['server/**/*.js'],
-    languageOptions: {
-      globals: {
-        ...globals.node,
-        process: 'readonly',
-      },
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-    },
-  },
 ]
