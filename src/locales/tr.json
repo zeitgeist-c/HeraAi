@@ -15,18 +15,16 @@
             "save_btn": "Kaydet ve Devam Et",
             "saved_success": "Ayarlar kaydedildi!",
             "provider": "AI Sağlayıcı",
-            "provider_info": "Google Gemini (gemini-3.1-flash-lite) — Backend üzerinden",
-            "backend_url": "Backend URL",
+            "provider_info": "Google Gemini (gemini-3.1-flash-lite) dogrudan eklenti icinde calisir",
             "test_connection": "Bağlantıyı Test Et",
             "connected": "Bağlı",
             "no_connection": "Bağlantı Yok",
-            "security_note": "API anahtarları tarayıcınızda saklanır. Her istekte backend'e gönderilir ve asla günlüğe kaydedilmez.",
-            "connection_success": "Backend bağlantısı başarılı!",
-            "connection_failed": "Backend bağlantısı başarısız."
+            "security_note": "API anahtarlari tarayicinizda saklanir ve dogrudan secili servise gonderilir.",
+            "connection_success": "API baglantisi basarili!",
+            "connection_failed": "API baglantisi basarisiz."
         },
         "keys": {
             "title": "API Anahtarları",
-            "backend_tab": "Backend",
             "keys_tab": "Anahtarlar",
             "gemini_section": "Gemini API Anahtarları",
             "tavily_section": "Tavily Arama API Anahtarları",
@@ -106,7 +104,9 @@
             "disable_research": "Web Research Kapat",
             "export": "Sohbeti Dışa Aktar",
             "close": "Kapat",
-            "copy_code": "Kodu kopyala"
+            "copy_code": "Kodu kopyala",
+            "retry": "Yeniden yanıt oluştur",
+            "stop": "Durdur"
         },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",
@@ -117,7 +117,8 @@
             "summarize": "Özetle",
             "translate": "Çevir",
             "explain": "Açıkla",
-            "code": "Kod Açıkla"
+            "code": "Kod Açıkla",
+            "ocr": "Ekli görsel veya görsellerde yalnızca görünen metni yaz. Açıklama, özet, çeviri, yorum veya görselde görünmeyen hiçbir metin ekleme. Başlıkları, paragrafları, listeleri, satır sırasını ve okuma düzenini mümkün olduğunca koru. Okunamayan her bölümü [okunamadı] olarak belirt. Birden fazla görsel varsa ek sırasına göre işle ve sonuçları Görsel 1, Görsel 2 ve devam eden başlıklarla ayır."
         },
         "exported": "Sohbet geçmişi dışa aktarıldı!",
         "imported": "Sohbet geçmişi içe aktarıldı!",
@@ -126,11 +127,17 @@
         "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor",
         "new_messages": "Yeni mesajlar",
         "sources_label": "Kaynaklar",
-        "connection_error": "Backend'e bağlanılamadı. Sunucu çalışıyor mu?",
+        "status": {
+            "thinking": "Düşünüyor...",
+            "cancelled": "İptal edildi",
+            "error": "Yanıt alınamadı"
+        },
+        "connection_error": "AI istegi basarisiz oldu. API anahtarinizi ve baglantinizi kontrol edin.",
         "cancelled": "İstek iptal edildi",
         "quick_actions": {
             "crop": "Kırp",
             "web": "Web",
+            "ocr": "Metni Çıkar",
             "translate": "Çevir",
             "summarize": "Özet",
             "explain": "Açıkla",

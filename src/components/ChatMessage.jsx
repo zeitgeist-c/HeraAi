@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { Bot, User, Copy, Check, Image as ImageIcon, FileText, Pencil } from 'lucide-react'
+import { Bot, User, Copy, Check, RefreshCw, Image as ImageIcon, FileText, Pencil } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -51,10 +51,11 @@ function CodeBlock({ className, children, ...props }) {
   )
 }
 
-const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
+const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
   const [copied, setCopied] = useState(false)
+  const sources = Array.isArray(message.sources) ? message.sources : []
 
   const handleCopyMessage = () => {
     const text = message.content || ''
@@ -65,35 +66,59 @@ const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
   }
 
   return (
-    <div className={`group flex gap-3 p-4 ${isBot ? 'bg-muted/50 rounded-lg' : ''} relative`}>
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isBot ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'}`}>
-        {isBot ? <Bot className="w-5 h-5" /> : <User className="w-5 h-5" />}
+    <div className={`group flex gap-2.5 px-4 py-2.5 ${isBot ? 'bg-muted/50 rounded-lg' : ''} relative`}>
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isBot ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'}`}>
+        {isBot ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
       </div>
-      <div className="flex-1 min-w-0 flex flex-col pt-1 space-y-2">
-        <span className="text-xs font-semibold text-muted-foreground">
-          {isBot ? t('chat.gemini') : t('chat.you')}
-        </span>
+      <div className="flex-1 min-w-0 flex flex-col space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-muted-foreground">
+            {isBot ? t('chat.gemini') : t('chat.you')}
+          </span>
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+            {isBot && message.content && (
+              <button onClick={handleCopyMessage}
+                title={t('chat.tooltips.copy')}
+                aria-label={t('chat.tooltips.copy')}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            )}
+            {!isBot && message.content && (
+              <>
+                <button onClick={() => onRetry?.(message)}
+                  title={t('chat.tooltips.retry')}
+                  aria-label={t('chat.tooltips.retry')}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => onEdit?.(message.content)}
+                  title={t('chat.tooltips.edit')}
+                  aria-label={t('chat.tooltips.edit')}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
         {isBot && isPending && !message.content ? (
-          <div className="flex flex-col gap-3 min-h-[72px]">
-            <div className="space-y-2">
-              <div className="h-3 bg-muted-foreground/15 rounded w-3/4 animate-pulse" />
-              <div className="h-3 bg-muted-foreground/15 rounded w-1/2 animate-pulse" />
-            </div>
-            {onCancel && (
-              <div className="flex justify-end">
-                <button
-                  onClick={onCancel}
-                  className="px-2.5 py-1 text-xs bg-destructive/15 text-destructive rounded-md hover:bg-destructive/25 transition-colors"
-                >
-                  {t('chat.tooltips.stop_recording')}
-                </button>
-              </div>
-            )}
+          <div className="space-y-1.5 min-h-[28px] pt-0.5">
+            <div className="h-2.5 bg-muted-foreground/15 rounded w-3/4" />
+            <div className="h-2.5 bg-muted-foreground/15 rounded w-1/2" />
+            <span className="text-[11px] text-muted-foreground">{t('chat.status.thinking')}</span>
           </div>
         ) : (
           <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-secondary prose-pre:p-0 w-full overflow-hidden break-words text-sm text-foreground">
-            {isBot ? (
+            {isBot && isPending ? (
+              <div className="whitespace-pre-wrap">
+                {message.content}
+              </div>
+            ) : isBot ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeSanitize]}
@@ -130,29 +155,54 @@ const ChatMessage = memo(({ message, onEdit, isPending, onCancel }) => {
           </div>
         )}
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pt-1">
-          <button
-            onClick={handleCopyMessage}
-            title={t('chat.tooltips.copy')}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground bg-secondary/60 hover:bg-secondary border border-border/50 rounded-md px-2 py-1 transition-all"
-          >
-            {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-            {copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}
-          </button>
-          {!isBot && message.content && (
-            <button
-              onClick={() => onEdit && onEdit(message.content)}
-              title={t('chat.tooltips.edit')}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary bg-secondary/60 hover:bg-primary/10 border border-border/50 rounded-md px-2 py-1 transition-all"
-            >
-              <Pencil className="w-3 h-3" />
-              {t('chat.tooltips.edit')}
-            </button>
-          )}
-        </div>
+        {isBot && message.status === 'cancelled' && (
+          <span className="text-[11px] text-muted-foreground">{t('chat.status.cancelled')}</span>
+        )}
+
+        {isBot && message.status === 'error' && (
+          <span className="text-[11px] text-destructive">{t('chat.status.error')}</span>
+        )}
+
+        {isBot && sources.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold text-muted-foreground">{t('chat.sources_label')}</span>
+            <div className="flex flex-col gap-1.5">
+              {sources.map((source) => (
+                <a
+                  key={`${source.index}-${source.url}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-xs text-foreground no-underline hover:bg-secondary"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                    {source.index}
+                  </span>
+                  <span className="truncate">{source.title || source.url}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )
-})
+}
 
-export default ChatMessage
+function areMessagesEqual(prevProps, nextProps) {
+  const prevMessage = prevProps.message
+  const nextMessage = nextProps.message
+
+  return (
+    prevMessage.id === nextMessage.id &&
+    prevMessage.role === nextMessage.role &&
+    prevMessage.content === nextMessage.content &&
+    prevMessage.status === nextMessage.status &&
+    prevMessage.sources === nextMessage.sources &&
+    prevProps.isPending === nextProps.isPending &&
+    prevMessage.attachments === nextMessage.attachments
+  )
+}
+
+export default memo(ChatMessage, areMessagesEqual)
