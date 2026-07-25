@@ -1,7 +1,18 @@
-// Allows users to open the side panel by clicking on the action toolbar icon
-chrome.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
-    .catch((error) => console.error(error));
+const openHeraTab = () => chrome.tabs.create({
+    url: chrome.runtime.getURL('index.html')
+});
+
+// Prefer the native side panel. Browsers without this Chrome-specific API
+// open Hera in a regular extension tab instead.
+if (chrome.sidePanel?.setPanelBehavior) {
+    Promise.resolve(
+        chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+    ).catch((error) => console.error(error));
+} else {
+    chrome.action.onClicked.addListener(() => {
+        openHeraTab().catch((error) => console.error(error));
+    });
+}
 
 // Create a context menu item on installation
 chrome.runtime.onInstalled.addListener(() => {
@@ -20,6 +31,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                 chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {
                     // Writing to storage is enough for the side panel to pick up later.
                 });
+            } else {
+                openHeraTab().catch((error) => console.error(error));
             }
         });
     }

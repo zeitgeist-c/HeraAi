@@ -1,12 +1,13 @@
 {
   "name": "heraai",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "package": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File setup/build-installer.ps1",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",

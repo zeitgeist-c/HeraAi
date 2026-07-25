@@ -10,12 +10,12 @@ import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
 import ShortcutsPanel from './components/ShortcutsPanel'
 import { injectCropOverlay } from './lib/injectCropOverlay'
-import { streamChat, streamResearch, streamVision } from './lib/api'
+import { streamChat, streamResearch, streamVision, MODELS, DEFAULT_MODEL } from './lib/api'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
-import { getAllKeysForRequest, updateKeyMetadata } from './lib/keyManager'
+import { resolveKeysForRequest, updateKeyMetadata } from './lib/keyManager'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -27,6 +27,12 @@ function appendToInputValue(current, text) {
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 96
 const REQUEST_TIMEOUT_MS = 90_000
+const MODEL_LABELS = {
+  'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
+  'gemini-3.5-flash': 'Gemini 3.5 Flash',
+  'gemini-3.6-flash': 'Gemini 3.6 Flash',
+  'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+}
 
 function normalizeConversationMessages(messages) {
   const normalized = []
@@ -118,8 +124,7 @@ function App() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [enableResearch, setEnableResearch] = useState(false)
   const [activeMode, setActiveMode] = useState(null)
-  const [geminiKeys, setGeminiKeys] = useState([])
-  const [tavilyKeys, setTavilyKeys] = useState([])
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -132,6 +137,7 @@ function App() {
   const cropProcessingRef = useRef(false)
   const autoScrollRef = useRef(true)
   const forceScrollToBottomRef = useRef(false)
+  const prevIsGeneratingRef = useRef(false)
   const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
@@ -366,14 +372,15 @@ function App() {
   }, [captureScreenshot, setGenerating, t])
 
   useEffect(() => {
-    if (!isGenerating && activeMode && activeMode !== 'web') {
+    if (prevIsGeneratingRef.current && !isGenerating && activeMode && activeMode !== 'web') {
       setActiveMode(null);
     }
+    prevIsGeneratingRef.current = isGenerating;
   }, [isGenerating, activeMode])
 
   useEffect(() => {
     if (chrome && chrome.storage) {
-      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'customPrimaryColor', 'language', 'selectedText'], (result) => {
+      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'customPrimaryColor', 'language', 'selectedText', 'selectedModel'], (result) => {
         const config = {
           theme: result.theme || 'system',
           startupBehavior: result.startupBehavior || 'resume',
@@ -387,6 +394,12 @@ function App() {
 
         if (result.language) {
           i18n.changeLanguage(result.language)
+        }
+
+        if (result.selectedModel && MODELS.includes(result.selectedModel)) {
+          setSelectedModel(result.selectedModel)
+        } else {
+          setSelectedModel(DEFAULT_MODEL)
         }
 
         const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
@@ -456,21 +469,6 @@ function App() {
       setMessages(welcomeMsg)
     }
   }, [t, applyTheme])
-
-  useEffect(() => {
-    if (!appConfig) return
-    async function loadKeys() {
-      try {
-        const gKeys = await getAllKeysForRequest('gemini')
-        const tKeys = await getAllKeysForRequest('tavily')
-        setGeminiKeys(gKeys)
-        setTavilyKeys(tKeys)
-      } catch (err) {
-        console.error("Failed to load API keys", err)
-      }
-    }
-    loadKeys()
-  }, [appConfig])
 
   useLayoutEffect(() => {
     const container = scrollRef.current
@@ -594,17 +592,34 @@ function App() {
     const userText = actualText || safeInput.trim();
     if ((!userText && attachments.length === 0) || isGeneratingRef.current) return
 
+    const automaticMode = enableResearch ? 'web' : (attachments.length > 0 ? 'vision' : 'chat')
+    const supportedModes = new Set(['chat', 'vision', 'web'])
+    const mode = supportedModes.has(actionOptions?.modeOverride)
+      ? actionOptions.modeOverride
+      : automaticMode
+
+    const geminiResolved = await resolveKeysForRequest('gemini')
+    if (geminiResolved.allInCooldown) {
+      const timeStr = new Date(geminiResolved.earliestCooldownEnd).toLocaleTimeString()
+      toast.error(t('chat.all_keys_cooldown', { time: timeStr }))
+      return
+    }
+    let tavilyResolved = null
+    if (mode === 'web') {
+      tavilyResolved = await resolveKeysForRequest('tavily')
+      if (tavilyResolved.allInCooldown) {
+        const timeStr = new Date(tavilyResolved.earliestCooldownEnd).toLocaleTimeString()
+        toast.error(t('chat.all_keys_cooldown', { time: timeStr }))
+        return
+      }
+    }
+
     const messageAttachments = attachments.map(att => ({
       data: att.data,
       mimeType: att.mimeType,
       name: att.name
     }))
 
-    const automaticMode = enableResearch ? 'web' : (attachments.length > 0 ? 'vision' : 'chat')
-    const supportedModes = new Set(['chat', 'vision', 'web'])
-    const mode = supportedModes.has(actionOptions?.modeOverride)
-      ? actionOptions.modeOverride
-      : automaticMode
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')
     const userMessageId = msgIdCounter.current++
     const assistantMessageId = msgIdCounter.current++
@@ -654,14 +669,14 @@ function App() {
         language: appConfig?.language || i18n.language || 'tr',
       };
 
-      const keysForGemini = geminiKeys.length > 0 ? geminiKeys : []
-      const keysForTavily = tavilyKeys.length > 0 ? tavilyKeys : []
+      const keysForGemini = geminiResolved.keys
+      const keysForTavily = tavilyResolved ? tavilyResolved.keys : []
 
       const events = mode === 'web'
-        ? streamResearch(requestMessages, keysForGemini, keysForTavily, controller.signal)
+        ? streamResearch(requestMessages, keysForGemini, keysForTavily, controller.signal, selectedModel)
         : mode === 'vision'
-          ? streamVision(requestMessages, null, requestOptions, keysForGemini, controller.signal)
-          : streamChat(requestMessages, requestOptions, keysForGemini, controller.signal)
+          ? streamVision(requestMessages, null, requestOptions, keysForGemini, controller.signal, selectedModel)
+          : streamChat(requestMessages, requestOptions, keysForGemini, controller.signal, selectedModel)
 
       for await (const evt of events) {
         if (evt.event === 'chunk') {
@@ -709,8 +724,10 @@ function App() {
               lastErrorType: null,
             })
           } else if (status === 'error') {
-            const providerName = provider === 'gemini' ? 'Gemini' : 'Tavily'
-            toast.error(`${providerName} key ${keyId} failed`)
+            updateKeyMetadata(provider, keyId, {
+              lastErrorAt: Date.now(),
+              lastErrorType: 'invalid',
+            })
           }
         }
       }
@@ -773,7 +790,7 @@ function App() {
       streamTargetMessageIdRef.current = null
       streamAbortReasonRef.current = null
     }
-  }, [input, attachments, messages, appConfig, enableResearch, geminiKeys, tavilyKeys, queueAssistantText, flushAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, t])
+  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, flushAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, t])
 
 
   const handleKeyDown = useCallback((e) => {
@@ -1008,12 +1025,30 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen min-h-0 bg-background text-foreground overflow-hidden">
-      <header className="flex items-center justify-between px-4 py-3 border-b bg-background/95 backdrop-blur z-10 shrink-0 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h1 className="font-semibold text-base tracking-tight">HeraAi</h1>
+      <header className="flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b bg-background/95 backdrop-blur z-10 shrink-0 shadow-sm">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="w-5 h-5 text-primary shrink-0" />
+          <h1 className="font-semibold text-base tracking-tight shrink-0">HeraAi</h1>
+          <select
+            data-testid="model-selector"
+            aria-label={t('chat.tooltips.model_selector')}
+            title={t('chat.tooltips.model_selector')}
+            value={selectedModel}
+            onChange={(e) => {
+              const next = e.target.value
+              setSelectedModel(next)
+              if (chrome && chrome.storage) {
+                chrome.storage.local.set({ selectedModel: next })
+              }
+            }}
+            className="h-7 max-w-[110px] text-[11px] rounded-md border border-input bg-background/50 px-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary shrink-0"
+          >
+            {MODELS.map((modelId) => (
+              <option key={modelId} value={modelId}>{MODEL_LABELS[modelId] || modelId}</option>
+            ))}
+          </select>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
             title={t('chat.tooltips.new_chat')}
             onClick={startNewSession}
@@ -1090,8 +1125,6 @@ function App() {
             onSave={(newConfig) => {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
-              getAllKeysForRequest('gemini').then(setGeminiKeys)
-              getAllKeysForRequest('tavily').then(setTavilyKeys)
               setShowSettings(false)
             }}
           />
