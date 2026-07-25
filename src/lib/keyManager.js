@@ -8,7 +8,7 @@ function getStorageKey(provider) {
 
 function maskKey(key) {
   if (!key || key.length <= 8) return '***';
-  return key.slice(0, 4) + '...' + key.slice(-3);
+  return key.slice(0, 4) + '...' + key.slice(-4);
 }
 
 function generateId() {
@@ -38,8 +38,15 @@ function writeStorage(key, data) {
 }
 
 export async function getKeys(provider) {
-  const entries = await readStorage(getStorageKey(provider));
-  return entries.map(({ key, ...rest }) => rest);
+  const storageKey = getStorageKey(provider);
+  const entries = await readStorage(storageKey);
+  return entries
+    .map(({ key, ...rest }) => rest)
+    .sort((a, b) => {
+      if (a.isPrimary && !b.isPrimary) return -1;
+      if (!a.isPrimary && b.isPrimary) return 1;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
 }
 
 export async function getRawKey(provider, id) {
@@ -140,4 +147,42 @@ export async function getAllKeysForRequest(provider) {
   });
 
   return sorted.map(e => ({ id: e.id, key: e.key, isPrimary: e.isPrimary }));
+}
+
+export async function resolveKeysForRequest(provider) {
+  const entries = await readStorage(getStorageKey(provider));
+  const now = Date.now();
+
+  const available = [];
+  const inCooldown = [];
+
+  for (const entry of entries) {
+    if (entry.cooldownUntil && entry.cooldownUntil > now) {
+      inCooldown.push(entry);
+    } else {
+      available.push(entry);
+    }
+  }
+
+  if (available.length === 0) {
+    return {
+      keys: [],
+      allInCooldown: entries.length > 0,
+      earliestCooldownEnd: inCooldown.length > 0
+        ? Math.min(...inCooldown.map(e => e.cooldownUntil))
+        : null,
+    };
+  }
+
+  available.sort((a, b) => {
+    if (a.isPrimary && !b.isPrimary) return -1;
+    if (!a.isPrimary && b.isPrimary) return 1;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
+  return {
+    keys: available.map(e => ({ id: e.id, key: e.key, isPrimary: e.isPrimary })),
+    allInCooldown: false,
+    earliestCooldownEnd: null,
+  };
 }

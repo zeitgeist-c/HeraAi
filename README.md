@@ -53,7 +53,11 @@ This creates `release/HeraAi-extension.zip`. Share that zip with the target mach
 4. Optional: add a Tavily API key for Web Research mode.
 5. Save settings.
 
-Multiple keys are supported. HeraAi tries the primary key first and can fall back to other saved keys when a provider rate limit or temporary error is detected.
+Keys are stored only in `chrome.storage.local` on this device (`chrome.storage.sync` is never used). Real key values are masked in the UI as `AIza...xYz9`. Add as many keys as you want for each provider; the first key you add becomes the primary, and the rest are fallback keys.
+
+Fallback behavior is primary-first, not round-robin: the primary key is used on every request. If the primary returns a rate limit (429), quota exhaustion, timeout, or other transient provider error, HeraAi tries the next available fallback key for that request, then resumes the primary once its cooldown clears. Invalid keys, policy/safety refusals, and bad request errors do not trigger fallback.
+
+If every key for a required provider is in cooldown at the same time, the request is blocked and HeraAi shows the earliest retry time instead of failing silently.
 
 ## Web Research Mode
 
@@ -62,7 +66,11 @@ Use the globe button in the chat input area.
 - Off: Gemini answers from the chat context.
 - On: Tavily searches the web, then Gemini writes an answer using the search results and sources.
 
-If Tavily is not configured, normal chat still works.
+Tavily is only contacted when Web Research is on. Translate, Summarize, Explain, Vision and OCR all use Gemini only. If no Tavily key is configured, normal chat still works; only Web Research is unavailable.
+
+## Personal Use Notice
+
+HeraAi is intended for personal or local use. API keys live in the browser on the machine where they are entered. Do not embed your own API key in a packaged distribution or share it with others; each user should add their own keys from Settings.
 
 ## Available Scripts
 
