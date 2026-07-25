@@ -31,6 +31,7 @@
             "add_placeholder": "API anahtarınızı yapıştırın...",
             "add_btn": "Anahtar Ekle",
             "test_btn": "Test Et",
+            "test_all_btn": "Tümünü Test Et",
             "testing": "Test ediliyor...",
             "delete_btn": "Sil",
             "set_primary": "Birincil Yap",
@@ -44,7 +45,23 @@
             "empty_error": "Lütfen bir API anahtarı girin",
             "add_failed": "Anahtar eklenemedi",
             "last_used": "Son kullanım",
-            "cooldown_until": "Bekleme süresi"
+            "cooldown_until": "Bekleme süresi",
+            "security_warning": "API anahtarları yalnızca bu cihazdaki tarayıcı depolamasında saklanır. Kişisel kullanım içindir. Anahtarlarınızı kimseyle paylaşmayın.",
+            "show_key": "Göster",
+            "hide_key": "Gizle",
+            "status_success": "Başarılı",
+            "status_pending": "Bekliyor",
+            "status_rate_limited": "Rate Limit",
+            "status_quota_exceeded": "Kota Dolu",
+            "status_invalid": "Geçersiz",
+            "last_error": "Son hata: {{minutes}} dk önce",
+            "test_invalid": "Geçersiz anahtar",
+            "test_quota": "Kota dolmuş olabilir",
+            "test_rate_limit": "Rate limit",
+            "test_network": "Bağlantı hatası",
+            "test_timeout": "Timeout",
+            "test_unknown": "Test başarısız",
+            "test_all_progress": "Test ediliyor {{done}}/{{total}}"
         },
         "general": {
             "theme_title": "Görünüm Teması",
@@ -106,7 +123,8 @@
             "close": "Kapat",
             "copy_code": "Kodu kopyala",
             "retry": "Yeniden yanıt oluştur",
-            "stop": "Durdur"
+            "stop": "Durdur",
+            "model_selector": "AI Modeli"
         },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",
@@ -126,6 +144,7 @@
         "voice_started": "Sesli giriş başladı...",
         "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor",
         "new_messages": "Yeni mesajlar",
+        "all_keys_cooldown": "Tüm API anahtarları rate limit sonrası beklemede. En erken deneme: {{time}}",
         "sources_label": "Kaynaklar",
         "status": {
             "thinking": "Düşünüyor...",
@@ -143,6 +162,7 @@
             "explain": "Açıkla",
             "crop_tooltip": "Ekrandan alan seç",
             "web_tooltip": "Web'de araştır",
+            "ocr_tooltip": "Ekli görselden metin çıkar",
             "translate_tooltip": "Seçili metni veya görseli çevir",
             "summarize_tooltip": "İçeriği özetle",
             "explain_tooltip": "İçeriği açıkla"

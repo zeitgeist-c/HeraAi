@@ -23,6 +23,13 @@ vi.mock('./lib/api', () => ({
   streamResearch: vi.fn(),
   streamVision: vi.fn(),
   testKey: vi.fn(),
+  MODELS: [
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+  ],
+  DEFAULT_MODEL: 'gemini-3.1-flash-lite',
 }));
 
 async function* mockStream(events) {
@@ -556,12 +563,13 @@ describe('HeraAi App', () => {
     });
   });
 
-  it('should not render model selector or active page context controls', async () => {
+  it('renders only the model selector select and no active page context controls', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    expect(document.querySelector('select')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('select')).toHaveLength(1);
+    expect(document.querySelector('select[data-testid="model-selector"]')).toBeInTheDocument();
     expect(document.querySelector('svg.lucide-book-open')).not.toBeInTheDocument();
   });
 
@@ -696,10 +704,10 @@ describe('HeraAi App', () => {
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="text"]').length).toBeGreaterThan(0);
+      expect(document.querySelectorAll('input[type="password"]').length).toBeGreaterThan(0);
     });
 
-    const geminiInput = document.querySelectorAll('input[type="text"]')[0];
+    const geminiInput = document.querySelectorAll('input[type="password"]')[0];
     fireEvent.change(geminiInput, { target: { value: 'AIza-test-key-123456' } });
 
     const addBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.match(/Add Key|Anahtar Ekle/i));
@@ -737,7 +745,7 @@ describe('HeraAi App', () => {
     const ocrButton = buttons[2];
 
     expect(ocrButton).toBeDisabled();
-    expect(ocrButton).toHaveAttribute('title', expect.stringMatching(/Ekli görsellerden metni çıkar|Extract text from attached images/i));
+    expect(ocrButton).toHaveAttribute('title', expect.stringMatching(/Ekli görselden metin çıkar|Extract text from image/i));
     expect(ocrButton).toHaveAttribute('aria-label', ocrButton.title);
     expect(buttons.every(Boolean)).toBe(true);
     expect(buttons.map(button => Array.from(document.querySelectorAll('button')).indexOf(button)))
@@ -812,5 +820,252 @@ describe('HeraAi App', () => {
       controlled.finish();
     });
     expect(await screen.findByText('Extracted OCR text')).toBeInTheDocument();
+  });
+
+  it('renders Gemini and Tavily key inputs as type=password', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    expect(document.querySelectorAll('input[type="text"]').length).toBe(0);
+  });
+
+  it('toggles a Gemini password input to text and back via the eye button', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    const geminiInput = document.querySelectorAll('input[type="password"]')[0];
+    const eyeBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-eye'));
+    fireEvent.click(eyeBtn);
+
+    expect(geminiInput.type).toBe('text');
+
+    fireEvent.click(eyeBtn);
+    expect(geminiInput.type).toBe('password');
+  });
+
+  it('shows the security warning banner inside the API tab', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    expect(await screen.findByText(/API keys are stored in this browser|API anahtarları yalnızca bu cihazdaki/i)).toBeInTheDocument();
+  });
+
+  it('writes a quota_exceeded status marker when a Tavily key test reports quota exhausted', async () => {
+    api.testKey.mockResolvedValueOnce({ success: false, provider: 'tavily', errorType: 'quota' });
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    const tavilyInput = document.querySelectorAll('input[type="password"]')[1];
+    fireEvent.change(tavilyInput, { target: { value: 'tvly-test-key-abcdefg1234' } });
+
+    const addButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.textContent?.match(/Add Key|Anahtar Ekle/i));
+    fireEvent.click(addButtons[1]);
+
+    await waitFor(() => {
+      expect(currentStorage.tavilyApiKeys).toHaveLength(1);
+    });
+
+    const testButtons = await waitFor(() => {
+      const btns = Array.from(document.querySelectorAll('button')).filter(btn => {
+        const txt = (btn.textContent || '').trim();
+        return txt === 'Test' || txt === 'Test Et';
+      });
+      expect(btns.length).toBeGreaterThan(0);
+      return btns;
+    });
+    fireEvent.click(testButtons[0]);
+
+    await waitFor(() => {
+      const entry = currentStorage.tavilyApiKeys[0];
+      expect(entry.lastErrorType).toBe('quota_exceeded');
+      expect(entry.lastErrorAt).toBeGreaterThan(0);
+    });
+  });
+
+  it('blocks the request with a cooldown signal when every Gemini key is in cooldown', async () => {
+    currentStorage.geminiApiKeys = [{
+      id: 'k1',
+      key: 'AIza-cooldown-aaaaaaaaaaaa',
+      masked: 'AIza...aaaa',
+      isPrimary: true,
+      createdAt: Date.now(),
+      lastUsedAt: null,
+      lastSuccessAt: null,
+      lastErrorAt: Date.now() - 10000,
+      lastErrorType: 'rate_limited',
+      cooldownUntil: Date.now() + 90000,
+      failCount: 1,
+    }];
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea') || screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'please answer while all keys are rate-limited' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => {
+      expect(api.streamChat).not.toHaveBeenCalled();
+    });
+
+    const main = document.querySelector('main');
+    expect(main?.textContent || '').not.toContain('please answer while all keys are rate-limited');
+  });
+
+  it('calls testKey once per saved Gemini key when clicking Test All', async () => {
+    api.testKey.mockResolvedValue({ success: true, provider: 'gemini' });
+
+    currentStorage.geminiApiKeys = [
+      { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
+      { id: 'k2', key: 'AIza-bbbbbbbbbbbbbb-key2', masked: 'AIza...key2', isPrimary: false, createdAt: 2000 },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    const testAllBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.match(/Test All|Tümünü Test Et/i));
+    fireEvent.click(testAllBtn);
+
+    await waitFor(() => {
+      expect(api.testKey).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('moves a chosen Gemini key above the previous primary when clicking Set as Primary', async () => {
+    currentStorage.geminiApiKeys = [
+      { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
+      { id: 'k2', key: 'AIza-bbbbbbbbbbbbbb-key2', masked: 'AIza...key2', isPrimary: false, createdAt: 2000 },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    const keyRows = () => Array.from(document.querySelectorAll('span.text-sm.font-mono'));
+
+    await waitFor(() => {
+      expect(keyRows()).toHaveLength(2);
+    });
+    expect(keyRows().map(el => el.textContent)).toEqual(['AIza...key1', 'AIza...key2']);
+
+    const setPrimaryButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.textContent?.match(/Set as Primary|Birincil Yap/i));
+    expect(setPrimaryButtons).toHaveLength(1);
+    fireEvent.click(setPrimaryButtons[0]);
+
+    await waitFor(() => {
+      expect(keyRows().map(el => el.textContent)).toEqual(['AIza...key2', 'AIza...key1']);
+    });
+  });
+
+  it('shows the Pending status pill for a freshly added Gemini key', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
+    fireEvent.click(settingsBtn);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    });
+
+    const geminiInput = document.querySelectorAll('input[type="password"]')[0];
+    fireEvent.change(geminiInput, { target: { value: 'AIza-freshly-added-key-AAAA' } });
+
+    const addBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.match(/Add Key|Anahtar Ekle/i));
+    fireEvent.click(addBtn);
+
+    expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
+  });
+
+  it('renders a model selector in the header with the 4 supported model ids', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const modelSelect = document.querySelector('select[data-testid="model-selector"]');
+    expect(modelSelect).toBeInTheDocument();
+
+    const optionValues = Array.from(modelSelect.options).map(opt => opt.value);
+    expect(optionValues).toEqual([
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+    ]);
+  });
+
+  it('defaults the selected model to DEFAULT_MODEL when storage has none', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const modelSelect = document.querySelector('select[data-testid="model-selector"]');
+    expect(modelSelect.value).toBe('gemini-3.1-flash-lite');
+  });
+
+  it('passes the chosen model into streamChat on the next send', async () => {
+    api.streamChat.mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'ok' } }]));
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const modelSelect = document.querySelector('select[data-testid="model-selector"]');
+    fireEvent.change(modelSelect, { target: { value: 'gemini-3.5-flash' } });
+
+    expect(modelSelect.value).toBe('gemini-3.5-flash');
+
+    const input = document.querySelector('textarea') || screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'hello with custom model' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.5-flash');
+
+    expect(currentStorage.selectedModel).toBe('gemini-3.5-flash');
   });
 });

@@ -26,6 +26,7 @@
             "add_placeholder": "Paste your API key...",
             "add_btn": "Add Key",
             "test_btn": "Test",
+            "test_all_btn": "Test All",
             "testing": "Testing...",
             "delete_btn": "Delete",
             "set_primary": "Set as Primary",
@@ -39,7 +40,23 @@
             "empty_error": "Please enter an API key",
             "add_failed": "Failed to add key",
             "last_used": "Last used",
-            "cooldown_until": "Cooldown until"
+            "cooldown_until": "Cooldown until",
+            "security_warning": "API keys are stored in this browser's local storage on this device only. Suitable for personal use. Do not share your keys with anyone.",
+            "show_key": "Show",
+            "hide_key": "Hide",
+            "status_success": "Success",
+            "status_pending": "Pending",
+            "status_rate_limited": "Rate Limited",
+            "status_quota_exceeded": "Quota Exhausted",
+            "status_invalid": "Invalid",
+            "last_error": "Last error: {{minutes}} min ago",
+            "test_invalid": "Invalid key",
+            "test_quota": "Quota may be exhausted",
+            "test_rate_limit": "Rate limited",
+            "test_network": "Connection error",
+            "test_timeout": "Timeout",
+            "test_unknown": "Test failed",
+            "test_all_progress": "Testing {{done}}/{{total}}"
         },
         "general": {
             "theme_title": "Appearance Theme",
@@ -101,7 +118,8 @@
             "close": "Close",
             "copy_code": "Copy code",
             "retry": "Regenerate response",
-            "stop": "Stop"
+            "stop": "Stop",
+            "model_selector": "AI Model"
         },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
@@ -121,6 +139,7 @@
         "voice_started": "Voice input started...",
         "voice_error": "Voice input is not supported in this browser",
         "new_messages": "New messages",
+        "all_keys_cooldown": "All API keys are waiting after rate limits. Earliest retry: {{time}}",
         "sources_label": "Sources",
         "status": {
             "thinking": "Thinking...",
@@ -138,7 +157,7 @@
             "explain": "Explain",
             "crop_tooltip": "Select an area on screen",
             "web_tooltip": "Search the web",
-            "ocr_tooltip": "Extract text from attached images",
+            "ocr_tooltip": "Extract text from image",
             "translate_tooltip": "Translate selected text or image",
             "summarize_tooltip": "Summarize the content",
             "explain_tooltip": "Explain the content"

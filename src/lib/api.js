@@ -1,6 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+export const MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+]
 const GEMINI_TIMEOUT_MS = 30000
 const TAVILY_TIMEOUT_MS = 15000
 const RESEARCH_CONTEXT_TURNS = 6
@@ -45,6 +51,27 @@ function classifyTavilyStatus(status) {
   if (status === 401 || status === 403) return 'error'
   if (status >= 500) return 'cooldown'
   return 'error'
+}
+
+function testKeyErrorType(provider, err) {
+  if (err?.name === 'AbortError') return 'timeout'
+  if (provider === 'gemini') {
+    const status = err?.status || err?.code || 0
+    const msg = err?.message || ''
+    if (status === 429 || msg.includes('RATE_LIMIT') || msg.includes('rate_limit')) return 'rate_limit'
+    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('exhausted')) return 'quota'
+    if (status === 400 || status === 401 || status === 403 || msg.includes('API_KEY_INVALID')) return 'invalid'
+    if (msg.includes('SAFETY') || msg.includes('blocked') || msg.includes('safety')) return 'invalid'
+    return 'network'
+  }
+  if (provider === 'tavily') {
+    const status = err?.status || 0
+    if (status === 429) return 'rate_limit'
+    if (status === 401 || status === 403) return 'invalid'
+    if (status >= 500) return 'network'
+    return 'network'
+  }
+  return 'network'
 }
 
 function toGeminiHistory(messages) {
@@ -157,33 +184,35 @@ async function* streamGeminiWithFallback(keys, createRequest, signal) {
     }
   }
 
-  console.error('Gemini keys exhausted:', lastError)
+  console.error('Gemini keys exhausted')
   yield { event: 'error', data: { message: 'Tum Gemini anahtarlari denendi ancak yanit alinamadi.' } }
 }
 
-export async function* streamChat(messages, options = {}, geminiKeys = [], signal) {
+export async function* streamChat(messages, options = {}, geminiKeys = [], signal, model) {
   const lastMsg = messages[messages.length - 1]
+  const modelId = model || DEFAULT_MODEL
 
   yield* streamGeminiWithFallback(geminiKeys, async (genAI) => {
-    const model = genAI.getGenerativeModel({
-      model: DEFAULT_MODEL,
+    const genModel = genAI.getGenerativeModel({
+      model: modelId,
       ...(options.systemInstruction?.trim() ? { systemInstruction: options.systemInstruction.trim() } : {}),
     })
-    const chat = model.startChat({ history: toGeminiHistory(messages) })
+    const chat = genModel.startChat({ history: toGeminiHistory(messages) })
     const result = await chat.sendMessageStream(lastMsg?.content || '')
     return result.stream
   }, signal)
 }
 
-export async function* streamVision(messages, image, options = {}, geminiKeys = [], signal) {
+export async function* streamVision(messages, image, options = {}, geminiKeys = [], signal, model) {
   const lastMsg = messages[messages.length - 1]
+  const modelId = model || DEFAULT_MODEL
 
   yield* streamGeminiWithFallback(geminiKeys, async (genAI) => {
-    const model = genAI.getGenerativeModel({
-      model: DEFAULT_MODEL,
+    const genModel = genAI.getGenerativeModel({
+      model: modelId,
       ...(options.systemInstruction?.trim() ? { systemInstruction: options.systemInstruction.trim() } : {}),
     })
-    const chat = model.startChat({ history: toGeminiHistory(messages) })
+    const chat = genModel.startChat({ history: toGeminiHistory(messages) })
     const result = await chat.sendMessageStream(toVisionParts(lastMsg, image))
     return result.stream
   }, signal)
@@ -310,10 +339,11 @@ Son kullanici sorusu:
 ${question}`
 }
 
-async function generateResearchQuery(conversationMessages, question, geminiKeys, signal) {
+async function generateResearchQuery(conversationMessages, question, geminiKeys, signal, model) {
   const fallbackQuery = buildFallbackResearchQuery(conversationMessages, question)
   const context = buildConversationContext(conversationMessages)
   const entries = validKeys(geminiKeys)
+  const modelId = model || DEFAULT_MODEL
 
   if (entries.length === 0) {
     return { query: fallbackQuery, context, keyStatuses: [] }
@@ -324,9 +354,9 @@ async function generateResearchQuery(conversationMessages, question, geminiKeys,
     try {
       throwIfAborted(signal)
       const genAI = new GoogleGenerativeAI(entry.key.trim())
-      const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL })
+      const genModel = genAI.getGenerativeModel({ model: modelId })
       const result = await withTimeout(
-        model.generateContent(buildResearchQueryPrompt(context, question)),
+        genModel.generateContent(buildResearchQueryPrompt(context, question)),
         GEMINI_TIMEOUT_MS
       )
       const text = sanitizeResearchQuery(result?.response?.text?.() || '')
@@ -364,7 +394,7 @@ Web arama sonuclari:
 ${context}`
 }
 
-export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], signal) {
+export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], signal, model) {
   const conversationMessages = Array.isArray(input)
     ? normalizeTextMessages(input)
     : normalizeTextMessages([{ role: 'user', content: input }])
@@ -377,7 +407,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
     return
   }
 
-  const queryResult = await generateResearchQuery(conversationMessages, question, geminiKeys, signal)
+  const queryResult = await generateResearchQuery(conversationMessages, question, geminiKeys, signal, model)
   for (const keyStatus of queryResult.keyStatuses) {
     yield { event: 'key_status', data: keyStatus }
   }
@@ -393,7 +423,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
   }
 
   if (!searchResult?.results) {
-    console.error('Tavily search failed:', searchResult?.error)
+    console.error('Tavily search failed')
     yield { event: 'error', data: { message: searchResult?.error?.message || 'Web aramasi yapilamadi.' } }
     return
   }
@@ -412,7 +442,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
         },
       ]
     : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }]
-  for await (const evt of streamChat(messages, {}, geminiKeys, signal)) {
+  for await (const evt of streamChat(messages, {}, geminiKeys, signal, model)) {
     yield evt
     if (evt.event === 'error') return
   }
@@ -429,26 +459,39 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
 }
 
 export async function testKey(provider, key) {
-  try {
-    if (provider === 'gemini') {
-      const genAI = new GoogleGenerativeAI(key.trim())
+  const normalizedKey = typeof key === 'string' ? key.trim() : ''
+  if (provider === 'gemini') {
+    try {
+      const genAI = new GoogleGenerativeAI(normalizedKey)
       const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL })
       await model.generateContent('test')
       return { success: true, provider }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return { success: false, provider, errorType: 'timeout' }
+      }
+      console.error('Gemini key test failed')
+      return { success: false, provider, errorType: testKeyErrorType('gemini', err) }
     }
+  }
 
-    if (provider === 'tavily') {
+  if (provider === 'tavily') {
+    try {
       const response = await fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: key.trim(), query: 'test', max_results: 1 }),
+        body: JSON.stringify({ api_key: normalizedKey, query: 'test', max_results: 1 }),
       })
-      return { success: response.ok, provider }
+      if (response.ok) return { success: true, provider }
+      return { success: false, provider, errorType: testKeyErrorType('tavily', { status: response.status }) }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return { success: false, provider, errorType: 'timeout' }
+      }
+      console.error('Tavily key test failed')
+      return { success: false, provider, errorType: 'network' }
     }
-
-    return { success: false, provider, errorType: 'invalid_provider' }
-  } catch (err) {
-    console.error('Key test failed:', err)
-    return { success: false, provider, errorType: 'request_failed' }
   }
+
+  return { success: false, provider, errorType: 'invalid' }
 }
