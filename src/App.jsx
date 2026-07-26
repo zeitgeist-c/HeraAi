@@ -78,25 +78,115 @@ function clampScrollTop(element, nextTop) {
   return Math.min(Math.max(0, nextTop), maxTop)
 }
 
-function waitForVisiblePaint() {
-  return new Promise(resolve => {
-    if (typeof window.requestAnimationFrame !== 'function') {
-      window.setTimeout(resolve, 0)
-      return
-    }
-
-    window.requestAnimationFrame(() => window.setTimeout(resolve, 0))
-  })
-}
-
-function getStreamDisplayStep(bufferLength) {
-  if (bufferLength > STREAM_LONG_BUFFER) return { characters: 12, delay: 16 }
-  if (bufferLength > STREAM_SHORT_BUFFER) return { characters: 6, delay: 20 }
-  return { characters: 3, delay: 24 }
+function getStreamDisplayCharacters(bufferLength) {
+  if (bufferLength > STREAM_LONG_BUFFER) return 12
+  if (bufferLength > STREAM_SHORT_BUFFER) return 6
+  return 3
 }
 
 function takeUnicodeCharacters(text, count) {
   return Array.from(text).slice(0, count).join('')
+}
+
+function createUniqueMessageId(counterRef) {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+
+  const fallbackCounter = counterRef.current++
+  return `msg-${Date.now()}-${fallbackCounter}`
+}
+
+function repairMessageIds(messages, counterRef) {
+  const seenIds = new Set()
+  let changed = false
+
+  const repairedMessages = (messages || []).map(message => {
+    if (!message) return message
+
+    const currentKey = message.id == null ? null : String(message.id)
+    if (currentKey != null && !seenIds.has(currentKey)) {
+      seenIds.add(currentKey)
+      return message
+    }
+
+    const nextId = createUniqueMessageId(counterRef)
+    seenIds.add(String(nextId))
+    changed = true
+    return { ...message, id: nextId }
+  })
+
+  return { messages: repairedMessages, changed }
+}
+
+function repairStoredSessions(sessions, counterRef) {
+  let changed = false
+  const repairedSessions = (sessions || []).map(session => {
+    const repaired = repairMessageIds(session?.messages, counterRef)
+    if (!repaired.changed) return session
+    changed = true
+    return { ...session, messages: repaired.messages }
+  })
+
+  return { sessions: repairedSessions, changed }
+}
+
+function waitForAnimationFrame(signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
+    let frameId = null
+    let timerId = null
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', handleAbort)
+    }
+    const finish = () => {
+      cleanup()
+      resolve()
+    }
+    const handleAbort = () => {
+      if (frameId != null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(frameId)
+      }
+      if (timerId != null) window.clearTimeout(timerId)
+      cleanup()
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+
+    signal?.addEventListener('abort', handleAbort, { once: true })
+    if (typeof window.requestAnimationFrame === 'function') {
+      frameId = window.requestAnimationFrame(finish)
+    } else {
+      timerId = window.setTimeout(finish, 16)
+    }
+  })
+}
+
+function requestDisplayFrame(callback) {
+  if (typeof window.requestAnimationFrame === 'function') {
+    return {
+      type: 'animation',
+      id: window.requestAnimationFrame(callback),
+    }
+  }
+
+  return {
+    type: 'timer',
+    id: window.setTimeout(() => callback(performance.now()), 16),
+  }
+}
+
+function cancelDisplayFrame(frame) {
+  if (!frame) return
+  if (frame.type === 'animation' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(frame.id)
+    return
+  }
+  window.clearTimeout(frame.id)
 }
 
 function createUserMessage({ id, content, attachments, mode }) {
@@ -159,10 +249,12 @@ function App() {
   const streamingControllerRef = useRef(null)
   const streamBufferRef = useRef('')
   const displayedAssistantContentRef = useRef('')
-  const streamFlushTimerRef = useRef(null)
+  const streamDisplayFrameRef = useRef(null)
   const streamDrainResolversRef = useRef([])
   const streamTargetMessageIdRef = useRef(null)
   const streamAbortReasonRef = useRef(null)
+  const panelVisibleRef = useRef(document.visibilityState !== 'hidden')
+  const panelVisibilityWaitersRef = useRef([])
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
   const autoScrollRef = useRef(true)
@@ -346,48 +438,172 @@ function App() {
   }, [])
 
   const stopAssistantDisplayQueue = useCallback((discardPending = true) => {
-    if (streamFlushTimerRef.current) {
-      window.clearTimeout(streamFlushTimerRef.current)
-      streamFlushTimerRef.current = null
+    if (streamDisplayFrameRef.current != null) {
+      cancelDisplayFrame(streamDisplayFrameRef.current)
+      streamDisplayFrameRef.current = null
     }
     if (discardPending) streamBufferRef.current = ''
     resolveStreamDrainWaiters()
   }, [resolveStreamDrainWaiters])
 
-  const queueAssistantText = useCallback((messageId, text) => {
-    if (!text || messageId == null) return
-
-    streamBufferRef.current += text
-    if (streamFlushTimerRef.current) return
+  const scheduleAssistantDisplayFrame = useCallback((messageId = streamTargetMessageIdRef.current) => {
+    if (
+      messageId == null ||
+      !panelVisibleRef.current ||
+      !streamBufferRef.current ||
+      streamDisplayFrameRef.current != null
+    ) {
+      return
+    }
 
     const pump = () => {
-      const { characters, delay } = getStreamDisplayStep(streamBufferRef.current.length)
-      const nextSlice = takeUnicodeCharacters(streamBufferRef.current, characters)
-      streamBufferRef.current = streamBufferRef.current.slice(nextSlice.length)
-      displayedAssistantContentRef.current += nextSlice
-      appendAssistantTextToMessage(messageId, nextSlice)
-
-      if (streamBufferRef.current) {
-        streamFlushTimerRef.current = window.setTimeout(pump, delay)
+      streamDisplayFrameRef.current = null
+      if (!panelVisibleRef.current) return
+      if (!streamBufferRef.current) {
+        resolveStreamDrainWaiters()
         return
       }
 
-      streamFlushTimerRef.current = null
+      const characters = getStreamDisplayCharacters(streamBufferRef.current.length)
+      const nextSlice = takeUnicodeCharacters(streamBufferRef.current, characters)
+      streamBufferRef.current = streamBufferRef.current.slice(nextSlice.length)
+      displayedAssistantContentRef.current += nextSlice
+
+      flushSync(() => {
+        appendAssistantTextToMessage(messageId, nextSlice)
+      })
+
+      if (streamBufferRef.current) {
+        streamDisplayFrameRef.current = requestDisplayFrame(pump)
+        return
+      }
+
       resolveStreamDrainWaiters()
     }
 
-    streamFlushTimerRef.current = window.setTimeout(pump, 0)
+    streamDisplayFrameRef.current = requestDisplayFrame(pump)
   }, [appendAssistantTextToMessage, resolveStreamDrainWaiters])
 
+  const queueAssistantText = useCallback((messageId, text) => {
+    if (!text || messageId == null) return
+    streamBufferRef.current += text
+
+    if (
+      panelVisibleRef.current &&
+      streamDisplayFrameRef.current == null &&
+      !displayedAssistantContentRef.current
+    ) {
+      const firstSlice = takeUnicodeCharacters(
+        streamBufferRef.current,
+        getStreamDisplayCharacters(streamBufferRef.current.length),
+      )
+      streamBufferRef.current = streamBufferRef.current.slice(firstSlice.length)
+      displayedAssistantContentRef.current += firstSlice
+      flushSync(() => {
+        appendAssistantTextToMessage(messageId, firstSlice)
+      })
+    }
+
+    scheduleAssistantDisplayFrame(messageId)
+  }, [appendAssistantTextToMessage, scheduleAssistantDisplayFrame])
+
   const drainAssistantBuffer = useCallback(() => {
-    if (!streamBufferRef.current && !streamFlushTimerRef.current) return Promise.resolve()
+    if (!streamBufferRef.current && streamDisplayFrameRef.current == null) return Promise.resolve()
     return new Promise(resolve => {
       streamDrainResolversRef.current.push(resolve)
     })
   }, [])
 
+  const resolvePanelVisibilityWaiters = useCallback(() => {
+    const waiters = panelVisibilityWaitersRef.current
+    panelVisibilityWaitersRef.current = []
+    waiters.forEach(waiter => {
+      waiter.signal?.removeEventListener('abort', waiter.handleAbort)
+      waiter.resolve()
+    })
+  }, [])
+
+  const waitForPanelVisible = useCallback((signal) => {
+    if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+    if (panelVisibleRef.current && document.visibilityState !== 'hidden') return Promise.resolve()
+
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject, signal, handleAbort: null }
+      waiter.handleAbort = () => {
+        panelVisibilityWaitersRef.current = panelVisibilityWaitersRef.current.filter(item => item !== waiter)
+        reject(new DOMException('Aborted', 'AbortError'))
+      }
+      signal?.addEventListener('abort', waiter.handleAbort, { once: true })
+      panelVisibilityWaitersRef.current.push(waiter)
+    })
+  }, [])
+
+  const waitForVisiblePaint = useCallback(async (signal) => {
+    while (true) {
+      await waitForPanelVisible(signal)
+      await waitForAnimationFrame(signal)
+      if (!panelVisibleRef.current || document.visibilityState === 'hidden') continue
+      await waitForAnimationFrame(signal)
+      if (panelVisibleRef.current && document.visibilityState !== 'hidden') return
+    }
+  }, [waitForPanelVisible])
+
+  useEffect(() => {
+    const markPanelHidden = () => {
+      panelVisibleRef.current = false
+      if (streamDisplayFrameRef.current != null) {
+        cancelDisplayFrame(streamDisplayFrameRef.current)
+        streamDisplayFrameRef.current = null
+      }
+    }
+
+    const markPanelVisible = () => {
+      if (document.visibilityState === 'hidden') return
+      panelVisibleRef.current = true
+      resolvePanelVisibilityWaiters()
+      scheduleAssistantDisplayFrame()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        markPanelHidden()
+      } else {
+        markPanelVisible()
+      }
+    }
+
+    panelVisibleRef.current = document.visibilityState !== 'hidden'
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    document.addEventListener('freeze', markPanelHidden)
+    document.addEventListener('resume', markPanelVisible)
+    window.addEventListener('pagehide', markPanelHidden)
+    window.addEventListener('pageshow', markPanelVisible)
+    window.addEventListener('focus', markPanelVisible)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      document.removeEventListener('freeze', markPanelHidden)
+      document.removeEventListener('resume', markPanelVisible)
+      window.removeEventListener('pagehide', markPanelHidden)
+      window.removeEventListener('pageshow', markPanelVisible)
+      window.removeEventListener('focus', markPanelVisible)
+
+      const waiters = panelVisibilityWaitersRef.current
+      panelVisibilityWaitersRef.current = []
+      waiters.forEach(waiter => {
+        waiter.signal?.removeEventListener('abort', waiter.handleAbort)
+        waiter.reject(new DOMException('Aborted', 'AbortError'))
+      })
+    }
+  }, [resolvePanelVisibilityWaiters, scheduleAssistantDisplayFrame])
+
   useEffect(() => () => {
     stopAssistantDisplayQueue(true)
+    if (streamingControllerRef.current) {
+      streamAbortReasonRef.current = 'unmount'
+      streamingControllerRef.current.abort()
+      streamingControllerRef.current = null
+    }
   }, [stopAssistantDisplayQueue])
 
   const captureScreenshot = useCallback(async (coords) => {
@@ -484,36 +700,50 @@ function App() {
           setSelectedModel(DEFAULT_MODEL)
         }
 
-        const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
+        const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
+        const storedSessionRepair = repairStoredSessions(result.sessions, msgIdCounter)
+        const storedSessions = storedSessionRepair.sessions
 
-        if (result.sessions && result.sessions.length > 0) {
-          setSessions(result.sessions)
+        if (storedSessionRepair.changed) {
+          chrome.storage.local.set({ sessions: storedSessions })
+        }
+
+        if (storedSessions.length > 0) {
+          setSessions(storedSessions)
 
           if (config.startupBehavior === 'resume') {
-            const currId = result.activeSessionId || result.sessions[0].id
+            const currId = result.activeSessionId || storedSessions[0].id
             setActiveSessionId(currId)
-            const currSession = result.sessions.find(s => s.id === currId) || result.sessions[0]
+            const currSession = storedSessions.find(s => s.id === currId) || storedSessions[0]
             setMessages(currSession.messages || welcomeMsg)
           } else {
             const id = Date.now().toString()
+            const newSession = { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
+            const nextSessions = [...storedSessions, newSession]
             setActiveSessionId(id)
-            setSessions(prev => [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
+            setSessions(nextSessions)
             setMessages(welcomeMsg)
+            chrome.storage.local.set({ sessions: nextSessions, activeSessionId: id })
           }
 
         } else if (result.chatHistory && result.chatHistory.length > 1) {
+          const repairedHistory = repairMessageIds(result.chatHistory, msgIdCounter).messages
           const id = Date.now().toString()
-          const newSession = { id, title: t('chat.history_title'), updatedAt: Date.now(), messages: result.chatHistory }
-          setSessions([newSession])
+          const newSession = { id, title: t('chat.history_title'), updatedAt: Date.now(), messages: repairedHistory }
 
           if (config.startupBehavior === 'resume') {
             setActiveSessionId(id)
-            setMessages(result.chatHistory)
+            setSessions([newSession])
+            setMessages(repairedHistory)
+            chrome.storage.local.set({ sessions: [newSession], activeSessionId: id })
           } else {
             const newId = Date.now().toString() + '1'
+            const welcomeSession = { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
+            const nextSessions = [newSession, welcomeSession]
             setActiveSessionId(newId)
-            setSessions(prev => [...prev, { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
+            setSessions(nextSessions)
             setMessages(welcomeMsg)
+            chrome.storage.local.set({ sessions: nextSessions, activeSessionId: newId })
           }
 
         } else {
@@ -545,7 +775,7 @@ function App() {
     } else {
       setIsLoading(false)
       const id = Date.now().toString()
-      const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
+      const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
       setActiveSessionId(id)
       setSessions([{ id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
       setMessages(welcomeMsg)
@@ -579,7 +809,7 @@ function App() {
     streamTargetMessageIdRef.current = null
 
     const id = Date.now().toString()
-    const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
+    const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
     setActiveSessionId(id)
     setSessions(prev => {
       const next = [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }]
@@ -594,6 +824,15 @@ function App() {
   }, [setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   const loadSession = useCallback((id) => {
+    if (streamingControllerRef.current) {
+      streamAbortReasonRef.current = 'session'
+      streamingControllerRef.current.abort()
+      streamingControllerRef.current = null
+    }
+    stopAssistantDisplayQueue(true)
+    setGenerating(false)
+    streamTargetMessageIdRef.current = null
+
     const session = sessions.find(s => s.id === id)
     if (session) {
       setActiveSessionId(id)
@@ -604,7 +843,7 @@ function App() {
       }
     }
     setShowHistory(false)
-  }, [sessions, stickToBottomOnNextRender])
+  }, [sessions, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue])
 
   const deleteSession = useCallback((id) => {
     const remainingSessions = sessions.filter(s => s.id !== id)
@@ -619,7 +858,7 @@ function App() {
         nextMessages = nextSession.messages || []
       } else {
         const newId = Date.now().toString()
-        const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
+        const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
         const newSession = { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
         nextSessions = [newSession]
         nextActiveSessionId = newId
@@ -697,8 +936,8 @@ function App() {
     }))
 
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')
-    const userMessageId = msgIdCounter.current++
-    const assistantMessageId = msgIdCounter.current++
+    const userMessageId = createUniqueMessageId(msgIdCounter)
+    const assistantMessageId = createUniqueMessageId(msgIdCounter)
     const requestId = `${Date.now()}-${assistantMessageId}`
     const startedAt = Date.now()
     const userMsg = createUserMessage({
@@ -735,6 +974,7 @@ function App() {
       setInput('')
       setAttachments([])
     })
+    persistCurrentSession([...baseMessages, userMsg])
 
     const controller = new AbortController()
     streamingControllerRef.current = controller
@@ -745,7 +985,7 @@ function App() {
     }, REQUEST_TIMEOUT_MS)
 
     try {
-      await waitForVisiblePaint()
+      await waitForVisiblePaint(controller.signal)
       if (controller.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError')
       }
@@ -878,7 +1118,7 @@ function App() {
           return assistantStatus === 'error'
             ? markAssistantError({ ...message, sources: assistantSources }, message.content || displayedAssistantContent)
             : finalizeAssistantMessage(message, {
-              content: message.content || displayedAssistantContent,
+              content: displayedAssistantContent,
               status: assistantStatus,
               sources: assistantSources
             })
@@ -906,7 +1146,7 @@ function App() {
       streamTargetMessageIdRef.current = null
       streamAbortReasonRef.current = null
     }
-  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, drainAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, drainAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t, waitForVisiblePaint])
 
 
   const handleKeyDown = useCallback((e) => {
