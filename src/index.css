@@ -3,76 +3,182 @@
 @tailwind utilities;
 
 @layer base {
-
-  /* ===== LIGHT THEME ===== */
   :root,
   .light {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
+    --background: 240 20% 98%;
+    --foreground: 240 18% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
+    --card-foreground: 240 18% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-
-    --radius: 0.6rem;
+    --popover-foreground: 240 18% 12%;
+    --primary: 255 85% 62%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 16% 95%;
+    --secondary-foreground: 240 16% 18%;
+    --muted: 240 15% 95%;
+    --muted-foreground: 240 8% 43%;
+    --accent: 252 65% 95%;
+    --accent-foreground: 255 68% 45%;
+    --destructive: 0 72% 54%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 13% 89%;
+    --input: 240 13% 87%;
+    --ring: 255 85% 62%;
+    --surface-raised: 0 0% 100%;
+    --surface-soft: 240 20% 97%;
+    --shadow-color: 240 30% 20%;
+    --radius: 0.875rem;
   }
 
-  /* ===== DARK THEME ===== */
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 240 15% 10%;
+    --foreground: 240 12% 94%;
+    --card: 240 14% 13%;
+    --card-foreground: 240 12% 94%;
+    --popover: 240 14% 15%;
+    --popover-foreground: 240 12% 94%;
+    --primary: 255 92% 70%;
+    --primary-foreground: 248 25% 10%;
+    --secondary: 240 12% 18%;
+    --secondary-foreground: 240 10% 91%;
+    --muted: 240 12% 17%;
+    --muted-foreground: 240 8% 65%;
+    --accent: 255 28% 22%;
+    --accent-foreground: 255 90% 80%;
+    --destructive: 0 68% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 10% 23%;
+    --input: 240 10% 26%;
+    --ring: 255 92% 70%;
+    --surface-raised: 240 14% 14%;
+    --surface-soft: 240 14% 12%;
+    --shadow-color: 240 50% 2%;
+  }
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+  * {
+    border-color: hsl(var(--border));
+  }
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+  html,
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-width: 0;
+    overflow: hidden;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    text-rendering: optimizeLegibility;
+  }
 
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  a:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+  ::selection {
+    background: hsl(var(--primary) / 0.24);
+  }
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.28);
+    border-radius: 999px;
   }
 }
 
-@layer base {
-  body {
-    @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+@layer components {
+  .hera-panel {
+    background:
+      radial-gradient(circle at 15% -10%, hsl(var(--primary) / 0.09), transparent 32%),
+      hsl(var(--background));
+  }
+
+  .hera-surface {
+    background: hsl(var(--surface-raised) / 0.92);
+    border: 1px solid hsl(var(--border) / 0.86);
+    box-shadow: 0 12px 34px hsl(var(--shadow-color) / 0.08);
+  }
+
+  .hera-icon-button {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors;
+  }
+
+  .hera-icon-button:hover {
+    @apply bg-secondary text-foreground;
+  }
+
+  .hera-action-button {
+    @apply inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors;
+  }
+
+  .hera-action-button:hover {
+    @apply bg-secondary text-foreground;
+  }
+
+  .hera-section-card {
+    @apply rounded-2xl border border-border/80 bg-card/85 shadow-sm;
+  }
+
+  .hera-panel-header {
+    @apply sticky top-0 z-20 flex min-h-14 items-center justify-between border-b border-border/70 bg-background/85 px-4 backdrop-blur-xl;
+  }
+
+  .hera-panel-title {
+    @apply text-base font-semibold tracking-tight;
+  }
+
+  .hera-menu {
+    animation: hera-menu-in 140ms ease-out;
+  }
+
+  .hera-fade-in {
+    animation: hera-fade-in 180ms ease-out;
+  }
+}
+
+@keyframes hera-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hera-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
