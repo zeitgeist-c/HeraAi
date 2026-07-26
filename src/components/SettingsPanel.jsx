@@ -45,7 +45,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
   const [activeTab, setActiveTab] = useState('api')
 
   const [theme, setTheme] = useState(currentConfig?.theme || 'system')
-  const [customPrimaryColor, setCustomPrimaryColor] = useState(currentConfig?.customPrimaryColor || '#0ea5e9')
+  const [customPrimaryColor, setCustomPrimaryColor] = useState(currentConfig?.customPrimaryColor || '#7c5cff')
 
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
   const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
@@ -203,11 +203,11 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
     const minutesAgo = key.lastErrorAt ? Math.max(0, Math.floor((Date.now() - key.lastErrorAt) / 60000)) : null
 
     return (
-      <div key={key.id} className="flex flex-col gap-2 p-2.5 rounded-lg border border-border bg-background/50">
-        <div className="flex items-center justify-between gap-2">
+      <div key={key.id} className="flex flex-col gap-2 rounded-xl border border-border/75 bg-background/50 p-2.5">
+        <div className="flex flex-col gap-2 min-[460px]:flex-row min-[460px]:items-center min-[460px]:justify-between">
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-mono text-foreground">{key.masked}</span>
+              <span className="max-w-full truncate font-mono text-xs text-foreground">{key.masked}</span>
               {key.isPrimary && (
                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-500 border border-green-500/20">
                   {t('setup.keys.primary_badge')}
@@ -229,7 +229,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
             <button
               onClick={() => handleTestKey(provider, key.id)}
               disabled={testing || testingAllProvider === provider}
@@ -321,46 +321,46 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
   }
 
   return (
-    <div className="flex flex-col bg-background text-foreground p-4 pt-6 items-center justify-start gap-4 overflow-y-auto w-full h-full">
-      <div className="w-full max-w-lg flex flex-col gap-4">
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="text-sm">{t('common.back')}</span>
-          </button>
-        )}
-
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/20 p-2 rounded-xl">
-            <Settings className="w-6 h-6 text-primary" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">{t('setup.title')}</h1>
+    <div className="hera-panel flex h-full min-h-screen w-full flex-col bg-background text-foreground">
+      <header className="hera-panel-header">
+        <div className="flex min-w-0 items-center gap-2.5">
+          {onClose ? (
+            <button type="button" onClick={onClose} className="hera-icon-button -ml-1" aria-label={t('common.back')}>
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+          ) : (
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Settings className="h-4 w-4" />
+            </span>
+          )}
+          <h1 className="hera-panel-title truncate">{t('setup.title')}</h1>
         </div>
+      </header>
 
-        <div className="flex rounded-lg bg-secondary/50 p-1">
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <div className="flex rounded-xl border border-border/60 bg-secondary/55 p-1">
           <button
+            type="button"
             onClick={() => setActiveTab('api')}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'api' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'api' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Key className="w-3.5 h-3.5" /> {t('setup.tabs.api')}
+            <Key className="h-3.5 w-3.5" /> {t('setup.tabs.api')}
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab('settings')}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'settings' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'settings' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Sparkles className="w-3.5 h-3.5" /> {t('setup.tabs.general')}
+            <Sparkles className="h-3.5 w-3.5" /> {t('setup.tabs.general')}
           </button>
         </div>
 
-        <div className="bg-card border rounded-xl p-4 shadow-sm min-h-[300px]">
+        <div className="hera-section-card min-h-[300px] p-3.5">
           {activeTab === 'api' && (
-            <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-300">
-                <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
-                <p className="text-xs leading-relaxed">{t('setup.keys.security_warning')}</p>
+            <div className="hera-fade-in flex flex-col gap-4">
+              <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-amber-700 dark:text-amber-300">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <p className="text-[11px] leading-relaxed">{t('setup.keys.security_warning')}</p>
               </div>
               <div className="flex flex-col gap-6">
                 {renderKeySection('gemini')}
@@ -370,9 +370,9 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
           )}
 
           {activeTab === 'settings' && (
-            <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="hera-fade-in flex flex-col gap-5">
               <div className="flex flex-col gap-3">
-                <label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   {t('setup.general.theme_title')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -383,23 +383,48 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
                   ].map(opt => (
                     <button
                       key={opt.id}
+                      type="button"
                       onClick={() => setTheme(opt.id)}
-                      className={`p-2 rounded-lg border text-xs font-medium transition-all ${theme === opt.id ? 'border-sky-500 bg-sky-500/10' : 'border-border hover:bg-secondary'}`}
+                      className={`min-h-9 rounded-lg border px-1.5 text-[11px] font-medium transition-all ${theme === opt.id ? 'border-primary/35 bg-primary/10 text-primary' : 'border-border/80 hover:bg-secondary'}`}
                     >
                       {opt.label}
                     </button>
                   ))}
                 </div>
+                <div className="flex items-center justify-between rounded-xl border border-border/70 bg-secondary/35 p-2.5">
+                  <span className="text-[11px] font-medium text-muted-foreground">{t('setup.general.accent_color')}</span>
+                  <div className="flex items-center gap-1.5">
+                    {['#7c5cff', '#2563eb', '#0f9f8f', '#e35d8f'].map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setCustomPrimaryColor(color)}
+                        aria-label={`${t('setup.general.accent_color')} ${color}`}
+                        className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-105 ${
+                          customPrimaryColor === color ? 'border-foreground' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={customPrimaryColor}
+                      onChange={(event) => setCustomPrimaryColor(event.target.value)}
+                      aria-label={t('setup.general.custom_accent_color')}
+                      className="h-6 w-6 cursor-pointer overflow-hidden rounded-full border-0 bg-transparent p-0"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   {t('setup.general.language_title')}
                 </label>
                 <select
                   value={selectedLanguage}
                   onChange={(e) => handleLanguageChange(e.target.value)}
-                  className="h-9 rounded-lg border border-input bg-background/50 px-3 text-sm"
+                  className="h-9 rounded-lg border border-input bg-background/60 px-3 text-xs"
                 >
                   {AVAILABLE_LANGUAGES.map(lang => (
                     <option key={lang.code} value={lang.code}>{lang.flag} {lang.name}</option>
@@ -408,14 +433,14 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   {t('setup.ai.system_prompt_title')}
                 </label>
                 <textarea
                   value={systemInstruction}
                   onChange={(e) => setSystemInstruction(e.target.value)}
                   placeholder={t('setup.ai.system_prompt_placeholder')}
-                  className="min-h-[80px] w-full resize-y rounded-lg border border-input bg-background/50 px-3 py-2 text-sm"
+                  className="min-h-[90px] w-full resize-y rounded-xl border border-input bg-background/60 px-3 py-2.5 text-xs leading-relaxed"
                 />
               </div>
             </div>
@@ -423,10 +448,11 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         </div>
 
         <button
+          type="button"
           onClick={handleSave}
-          className="inline-flex items-center justify-center rounded-lg text-sm font-bold transition-all bg-sky-500 text-white hover:bg-sky-600 h-10 px-4 gap-2 shadow-md"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
         >
-          <Save className="w-4 h-4" />
+          <Save className="h-4 w-4" />
           {t('setup.api.save_btn')}
         </button>
       </div>

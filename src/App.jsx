@@ -1,14 +1,18 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import { Settings, Send, Square, Paperclip, Trash2, Loader2, Sparkles, X, FileText, History, MessageSquarePlus, Languages, Lightbulb, Scissors, Globe, ScanText, Bot, Download, Upload, MessageSquare, Keyboard } from 'lucide-react'
+import { flushSync } from 'react-dom'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
 
 import SettingsPanel from './components/SettingsPanel'
+import AppHeader from './components/AppHeader'
 import ChatMessage from './components/ChatMessage'
 import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
 import ShortcutsPanel from './components/ShortcutsPanel'
+import WelcomeScreen from './components/WelcomeScreen'
+import ModelSelector from './components/ModelSelector'
 import { injectCropOverlay } from './lib/injectCropOverlay'
 import { streamChat, streamResearch, streamVision, MODELS, DEFAULT_MODEL } from './lib/api'
 import { fileToBase64 } from './lib/fileParsers'
@@ -26,7 +30,10 @@ function appendToInputValue(current, text) {
 }
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 96
+const SCROLL_RESUME_THRESHOLD_PX = 2
 const REQUEST_TIMEOUT_MS = 90_000
+const STREAM_SHORT_BUFFER = 160
+const STREAM_LONG_BUFFER = 600
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.5-flash': 'Gemini 3.5 Flash',
@@ -69,6 +76,27 @@ function isScrollNearBottom(element) {
 function clampScrollTop(element, nextTop) {
   const maxTop = Math.max(0, element.scrollHeight - element.clientHeight)
   return Math.min(Math.max(0, nextTop), maxTop)
+}
+
+function waitForVisiblePaint() {
+  return new Promise(resolve => {
+    if (typeof window.requestAnimationFrame !== 'function') {
+      window.setTimeout(resolve, 0)
+      return
+    }
+
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0))
+  })
+}
+
+function getStreamDisplayStep(bufferLength) {
+  if (bufferLength > STREAM_LONG_BUFFER) return { characters: 12, delay: 16 }
+  if (bufferLength > STREAM_SHORT_BUFFER) return { characters: 6, delay: 20 }
+  return { characters: 3, delay: 24 }
+}
+
+function takeUnicodeCharacters(text, count) {
+  return Array.from(text).slice(0, count).join('')
 }
 
 function createUserMessage({ id, content, attachments, mode }) {
@@ -130,12 +158,15 @@ function App() {
   const fileInputRef = useRef(null)
   const streamingControllerRef = useRef(null)
   const streamBufferRef = useRef('')
+  const displayedAssistantContentRef = useRef('')
   const streamFlushTimerRef = useRef(null)
+  const streamDrainResolversRef = useRef([])
   const streamTargetMessageIdRef = useRef(null)
   const streamAbortReasonRef = useRef(null)
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
   const autoScrollRef = useRef(true)
+  const userPausedAutoScrollRef = useRef(false)
   const forceScrollToBottomRef = useRef(false)
   const prevIsGeneratingRef = useRef(false)
   const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
@@ -158,6 +189,7 @@ function App() {
       if (!el) return
       el.scrollTop = el.scrollHeight
       autoScrollRef.current = true
+      userPausedAutoScrollRef.current = false
       forceScrollToBottomRef.current = false
       setShowScrollDownBtn(false)
     }
@@ -175,23 +207,51 @@ function App() {
 
   const stickToBottomOnNextRender = useCallback(() => {
     autoScrollRef.current = true
+    userPausedAutoScrollRef.current = false
     forceScrollToBottomRef.current = true
     setShowScrollDownBtn(false)
     scheduleScrollToBottom()
   }, [scheduleScrollToBottom])
 
-  const scrollChatBy = useCallback((deltaY) => {
-    const container = scrollRef.current
-    if (!container || !deltaY) return
-    container.scrollTop = clampScrollTop(container, container.scrollTop + deltaY)
-    const nearBottom = isScrollNearBottom(container)
-    if (!nearBottom && scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
+  const pauseAutoScroll = useCallback(() => {
+    if (scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
       window.cancelAnimationFrame(scheduledScrollFrameRef.current)
       scheduledScrollFrameRef.current = null
     }
-    autoScrollRef.current = nearBottom
-    setShowScrollDownBtn(prev => nearBottom ? false : (isGeneratingRef.current || prev))
+    userPausedAutoScrollRef.current = true
+    autoScrollRef.current = false
+    setShowScrollDownBtn(true)
   }, [])
+
+  const scrollChatBy = useCallback((deltaY) => {
+    const container = scrollRef.current
+    if (!container || !deltaY) return
+
+    if (deltaY < 0) {
+      pauseAutoScroll()
+    }
+
+    container.scrollTop = clampScrollTop(container, container.scrollTop + deltaY)
+    const distanceFromBottom = getScrollDistanceFromBottom(container)
+    const isAtBottom = distanceFromBottom <= SCROLL_RESUME_THRESHOLD_PX
+    const nearBottom = isScrollNearBottom(container)
+
+    if (isAtBottom && deltaY > 0) {
+      userPausedAutoScrollRef.current = false
+      autoScrollRef.current = true
+      setShowScrollDownBtn(false)
+      return
+    }
+
+    if (userPausedAutoScrollRef.current) {
+      autoScrollRef.current = false
+      setShowScrollDownBtn(true)
+      return
+    }
+
+    autoScrollRef.current = nearBottom
+    setShowScrollDownBtn(!nearBottom)
+  }, [pauseAutoScroll])
 
   const applyTheme = useCallback((themeValue, customPrimaryColor) => {
     const root = document.documentElement;
@@ -205,10 +265,10 @@ function App() {
     }
 
     if (customPrimaryColor) {
-      root.style.setProperty('--primary', customPrimaryColor);
       const hsl = hexToHSL(customPrimaryColor);
+      root.style.setProperty('--primary', `${hsl.h} ${hsl.s}% ${hsl.l}%`);
       root.style.setProperty('--primary-hsl', `${hsl.h}, ${hsl.s}%, ${hsl.l}%`);
-      root.style.setProperty('--primary-foreground', hsl.l > 60 ? '0 0 0' : '0 0 100');
+      root.style.setProperty('--primary-foreground', hsl.l > 62 ? '248 25% 10%' : '0 0% 100%');
     }
   }, [])
 
@@ -274,25 +334,25 @@ function App() {
 
     setMessages(prev => prev.map(message => (
       message.id === messageId && message.role === 'model'
-        ? { ...message, content: `${message.content || ''}${text}` }
+        ? { ...message, content: `${message.content || ''}${text}`, status: 'streaming' }
         : message
     )))
   }, [])
 
-  const flushAssistantBuffer = useCallback((messageId = streamTargetMessageIdRef.current, onFlushed) => {
+  const resolveStreamDrainWaiters = useCallback(() => {
+    const resolvers = streamDrainResolversRef.current
+    streamDrainResolversRef.current = []
+    resolvers.forEach(resolve => resolve())
+  }, [])
+
+  const stopAssistantDisplayQueue = useCallback((discardPending = true) => {
     if (streamFlushTimerRef.current) {
-      clearTimeout(streamFlushTimerRef.current)
+      window.clearTimeout(streamFlushTimerRef.current)
       streamFlushTimerRef.current = null
     }
-
-    const bufferedText = streamBufferRef.current
-    streamBufferRef.current = ''
-    if (onFlushed) {
-      onFlushed(bufferedText)
-      return
-    }
-    appendAssistantTextToMessage(messageId, bufferedText)
-  }, [appendAssistantTextToMessage])
+    if (discardPending) streamBufferRef.current = ''
+    resolveStreamDrainWaiters()
+  }, [resolveStreamDrainWaiters])
 
   const queueAssistantText = useCallback((messageId, text) => {
     if (!text || messageId == null) return
@@ -300,13 +360,35 @@ function App() {
     streamBufferRef.current += text
     if (streamFlushTimerRef.current) return
 
-    streamFlushTimerRef.current = setTimeout(() => {
+    const pump = () => {
+      const { characters, delay } = getStreamDisplayStep(streamBufferRef.current.length)
+      const nextSlice = takeUnicodeCharacters(streamBufferRef.current, characters)
+      streamBufferRef.current = streamBufferRef.current.slice(nextSlice.length)
+      displayedAssistantContentRef.current += nextSlice
+      appendAssistantTextToMessage(messageId, nextSlice)
+
+      if (streamBufferRef.current) {
+        streamFlushTimerRef.current = window.setTimeout(pump, delay)
+        return
+      }
+
       streamFlushTimerRef.current = null
-      const bufferedText = streamBufferRef.current
-      streamBufferRef.current = ''
-      appendAssistantTextToMessage(messageId, bufferedText)
-    }, 120)
-  }, [appendAssistantTextToMessage])
+      resolveStreamDrainWaiters()
+    }
+
+    streamFlushTimerRef.current = window.setTimeout(pump, 0)
+  }, [appendAssistantTextToMessage, resolveStreamDrainWaiters])
+
+  const drainAssistantBuffer = useCallback(() => {
+    if (!streamBufferRef.current && !streamFlushTimerRef.current) return Promise.resolve()
+    return new Promise(resolve => {
+      streamDrainResolversRef.current.push(resolve)
+    })
+  }, [])
+
+  useEffect(() => () => {
+    stopAssistantDisplayQueue(true)
+  }, [stopAssistantDisplayQueue])
 
   const captureScreenshot = useCallback(async (coords) => {
     if (!coords) return null;
@@ -385,7 +467,7 @@ function App() {
           theme: result.theme || 'system',
           startupBehavior: result.startupBehavior || 'resume',
           systemInstruction: result.systemInstruction || '',
-          customPrimaryColor: result.customPrimaryColor || '#0ea5e9',
+          customPrimaryColor: result.customPrimaryColor || '#7c5cff',
           language: result.language || 'tr',
         }
 
@@ -478,6 +560,7 @@ function App() {
       container.scrollTop = container.scrollHeight
       forceScrollToBottomRef.current = false
       autoScrollRef.current = true
+      userPausedAutoScrollRef.current = false
       setShowScrollDownBtn(false)
       return
     }
@@ -486,6 +569,15 @@ function App() {
   }, [messages])
 
   const startNewSession = useCallback(() => {
+    if (streamingControllerRef.current) {
+      streamAbortReasonRef.current = 'session'
+      streamingControllerRef.current.abort()
+      streamingControllerRef.current = null
+    }
+    stopAssistantDisplayQueue(true)
+    setGenerating(false)
+    streamTargetMessageIdRef.current = null
+
     const id = Date.now().toString()
     const welcomeMsg = [{ id: msgIdCounter.current++, role: 'model', content: t('chat.welcome') }]
     setActiveSessionId(id)
@@ -499,7 +591,7 @@ function App() {
     setMessages(welcomeMsg)
     setShowHistory(false)
     stickToBottomOnNextRender()
-  }, [stickToBottomOnNextRender, t])
+  }, [setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   const loadSession = useCallback((id) => {
     const session = sessions.find(s => s.id === id)
@@ -598,22 +690,6 @@ function App() {
       ? actionOptions.modeOverride
       : automaticMode
 
-    const geminiResolved = await resolveKeysForRequest('gemini')
-    if (geminiResolved.allInCooldown) {
-      const timeStr = new Date(geminiResolved.earliestCooldownEnd).toLocaleTimeString()
-      toast.error(t('chat.all_keys_cooldown', { time: timeStr }))
-      return
-    }
-    let tavilyResolved = null
-    if (mode === 'web') {
-      tavilyResolved = await resolveKeysForRequest('tavily')
-      if (tavilyResolved.allInCooldown) {
-        const timeStr = new Date(tavilyResolved.earliestCooldownEnd).toLocaleTimeString()
-        toast.error(t('chat.all_keys_cooldown', { time: timeStr }))
-        return
-      }
-    }
-
     const messageAttachments = attachments.map(att => ({
       data: att.data,
       mimeType: att.mimeType,
@@ -649,11 +725,16 @@ function App() {
     streamTargetMessageIdRef.current = assistantMessageId
     streamAbortReasonRef.current = null
     streamBufferRef.current = ''
-    setGenerating(true)
-    stickToBottomOnNextRender()
-    setMessages(prev => [...prev, userMsg, assistantMsg])
-    setInput('')
-    setAttachments([])
+    displayedAssistantContentRef.current = ''
+    streamDrainResolversRef.current = []
+
+    flushSync(() => {
+      setGenerating(true)
+      stickToBottomOnNextRender()
+      setMessages([...baseMessages, userMsg, assistantMsg])
+      setInput('')
+      setAttachments([])
+    })
 
     const controller = new AbortController()
     streamingControllerRef.current = controller
@@ -664,6 +745,30 @@ function App() {
     }, REQUEST_TIMEOUT_MS)
 
     try {
+      await waitForVisiblePaint()
+      if (controller.signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError')
+      }
+
+      const geminiResolved = await resolveKeysForRequest('gemini')
+      if (geminiResolved.allInCooldown) {
+        const timeStr = new Date(geminiResolved.earliestCooldownEnd).toLocaleTimeString()
+        const cooldownError = new Error(t('chat.all_keys_cooldown', { time: timeStr }))
+        cooldownError.name = 'KeyCooldownError'
+        throw cooldownError
+      }
+
+      let tavilyResolved = null
+      if (mode === 'web') {
+        tavilyResolved = await resolveKeysForRequest('tavily')
+        if (tavilyResolved.allInCooldown) {
+          const timeStr = new Date(tavilyResolved.earliestCooldownEnd).toLocaleTimeString()
+          const cooldownError = new Error(t('chat.all_keys_cooldown', { time: timeStr }))
+          cooldownError.name = 'KeyCooldownError'
+          throw cooldownError
+        }
+      }
+
       const requestOptions = {
         systemInstruction: appConfig?.systemInstruction || '',
         language: appConfig?.language || i18n.language || 'tr',
@@ -683,11 +788,6 @@ function App() {
           const chunkText = evt.data.text || ''
           assistantContent += chunkText
           assistantStatus = 'streaming'
-          setMessages(prev => prev.map(message => (
-            message.id === assistantMessageId && message.role === 'model'
-              ? { ...message, status: 'streaming' }
-              : message
-          )))
           queueAssistantText(assistantMessageId, chunkText)
         } else if (evt.event === 'sources') {
           assistantSources = evt.data.sources || []
@@ -737,22 +837,35 @@ function App() {
           assistantStatus = 'error'
           toast.error(t('chat.connection_error'))
         } else {
-          assistantStatus = assistantContent ? 'cancelled' : 'cancelled_empty'
-          shouldDropEmptyAssistant = !assistantContent
+          const displayedContent = displayedAssistantContentRef.current
+          assistantStatus = displayedContent ? 'cancelled' : 'cancelled_empty'
+          shouldDropEmptyAssistant = !displayedContent
         }
       } else {
         assistantStatus = 'error'
-        console.error("handleSend Error", err)
-        toast.error(t('chat.connection_error'))
+        if (err.name === 'KeyCooldownError') {
+          toast.error(err.message)
+        } else {
+          console.error("handleSend Error", err)
+          toast.error(t('chat.connection_error'))
+        }
       }
     } finally {
       window.clearTimeout(requestTimeoutId)
-      let bufferedText = ''
-      flushAssistantBuffer(assistantMessageId, (text) => {
-        bufferedText = text
-      })
-      if (bufferedText && !assistantContent.endsWith(bufferedText)) {
-        assistantContent += bufferedText
+      const wasCancelledBeforeDrain = streamAbortReasonRef.current === 'user' || streamAbortReasonRef.current === 'session'
+      if (wasCancelledBeforeDrain) {
+        stopAssistantDisplayQueue(true)
+      } else {
+        await drainAssistantBuffer()
+      }
+
+      const displayedAssistantContent = displayedAssistantContentRef.current
+      const wasUserCancelled = streamAbortReasonRef.current === 'user' || streamAbortReasonRef.current === 'session'
+
+      if (wasUserCancelled) {
+        stopAssistantDisplayQueue(true)
+        assistantStatus = displayedAssistantContent ? 'cancelled' : 'cancelled_empty'
+        shouldDropEmptyAssistant = !displayedAssistantContent
       }
 
       if (assistantStatus === 'streaming') {
@@ -763,9 +876,9 @@ function App() {
         let next = prev.map(message => {
           if (message.id !== assistantMessageId || message.role !== 'model') return message
           return assistantStatus === 'error'
-            ? markAssistantError({ ...message, sources: assistantSources }, assistantContent)
+            ? markAssistantError({ ...message, sources: assistantSources }, message.content || displayedAssistantContent)
             : finalizeAssistantMessage(message, {
-              content: assistantContent,
+              content: message.content || displayedAssistantContent,
               status: assistantStatus,
               sources: assistantSources
             })
@@ -780,9 +893,12 @@ function App() {
         return next
       })
 
-      const shouldPersistAssistant = assistantContent || (assistantStatus !== 'error' && assistantStatus !== 'cancelled_empty')
+      const persistedAssistantContent = assistantStatus === 'done'
+        ? assistantContent
+        : displayedAssistantContent
+      const shouldPersistAssistant = persistedAssistantContent || (assistantStatus !== 'error' && assistantStatus !== 'cancelled_empty')
       finalMessages = shouldPersistAssistant
-        ? [...baseMessages, userMsg, { ...assistantMsg, content: assistantContent, status: assistantStatus, sources: assistantSources }]
+        ? [...baseMessages, userMsg, { ...assistantMsg, content: persistedAssistantContent, status: assistantStatus, sources: assistantSources }]
         : [...baseMessages, userMsg]
       persistCurrentSession(finalMessages)
       setGenerating(false)
@@ -790,7 +906,7 @@ function App() {
       streamTargetMessageIdRef.current = null
       streamAbortReasonRef.current = null
     }
-  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, flushAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, t])
+  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, drainAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
 
   const handleKeyDown = useCallback((e) => {
@@ -861,7 +977,7 @@ function App() {
             confirm: t('chat.tooltips.crop_confirm'),
             cancel: t('chat.tooltips.crop_cancel')
           },
-          appConfig?.customPrimaryColor || '#0ea5e9'
+          appConfig?.customPrimaryColor || '#7c5cff'
         ]
       });
 
@@ -915,6 +1031,7 @@ function App() {
       streamAbortReasonRef.current = 'user'
       streamingControllerRef.current.abort()
       streamingControllerRef.current = null
+      stopAssistantDisplayQueue(true)
       setGenerating(false)
       if (targetId != null) {
         setMessages(prev => prev.map(message => (
@@ -925,13 +1042,14 @@ function App() {
       }
       toast.success(t('chat.cancelled'))
     }
-  }, [setGenerating, t])
+  }, [setGenerating, stopAssistantDisplayQueue, t])
 
   const scrollToBottom = useCallback((smooth = false) => {
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
     autoScrollRef.current = true
+    userPausedAutoScrollRef.current = false
     forceScrollToBottomRef.current = false
     setShowScrollDownBtn(false)
   }, [])
@@ -948,24 +1066,51 @@ function App() {
   }, [])
 
   const handleRetryMessage = useCallback((message) => {
-    if (!message?.content || isGeneratingRef.current) return
-    handleSend(message.content)
-  }, [handleSend])
+    if (!message || isGeneratingRef.current) return
+
+    if (message.role === 'user' && message.content) {
+      handleSend(message.content)
+      return
+    }
+
+    if (message.role === 'model') {
+      const messageIndex = messages.findIndex((item) => item.id === message.id)
+      const previousUserMessage = messageIndex > 0
+        ? [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user')
+        : null
+      if (previousUserMessage?.content) handleSend(previousUserMessage.content)
+    }
+  }, [handleSend, messages])
 
   const handleChatScroll = useCallback((event) => {
     const container = event.currentTarget
+    const distanceFromBottom = getScrollDistanceFromBottom(container)
+    const isAtBottom = distanceFromBottom <= SCROLL_RESUME_THRESHOLD_PX
     const nearBottom = isScrollNearBottom(container)
-    if (!nearBottom && scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(scheduledScrollFrameRef.current)
-      scheduledScrollFrameRef.current = null
-    }
-    autoScrollRef.current = nearBottom
-    if (nearBottom) {
+
+    if (isAtBottom) {
+      userPausedAutoScrollRef.current = false
+      autoScrollRef.current = true
       setShowScrollDownBtn(false)
-    } else {
-      setShowScrollDownBtn(prev => isGeneratingRef.current || prev ? true : false)
+      return
     }
+
+    if (userPausedAutoScrollRef.current) {
+      autoScrollRef.current = false
+      setShowScrollDownBtn(true)
+      return
+    }
+
+    autoScrollRef.current = nearBottom
+    setShowScrollDownBtn(!nearBottom)
   }, [])
+
+  const handleChatWheel = useCallback((event) => {
+    const container = scrollRef.current
+    if (!container || event.deltaY >= 0) return
+    if (container.scrollHeight <= container.clientHeight) return
+    pauseAutoScroll()
+  }, [pauseAutoScroll])
 
   const handleComposerWheel = useCallback((event) => {
     const container = scrollRef.current
@@ -1023,102 +1168,41 @@ function App() {
     return <ShortcutsPanel onClose={() => setShowShortcuts(false)} />
   }
 
+  const isWelcomeOnly = (
+    messages.length === 1 &&
+    messages[0]?.role === 'model' &&
+    !messages[0]?.status &&
+    !messages[0]?.attachments?.length
+  )
+
+  const getQuickActionClass = (isActive = false) => (
+    `hera-icon-button h-8 w-8 border border-transparent active:scale-95 disabled:pointer-events-none disabled:opacity-35 ${
+      isActive
+        ? 'border-primary/25 bg-primary/[0.12] text-primary'
+        : 'hover:border-border/70 hover:bg-secondary'
+    }`
+  )
+
+  const handleModelChange = (nextModel) => {
+    setSelectedModel(nextModel)
+    if (chrome && chrome.storage) chrome.storage.local.set({ selectedModel: nextModel })
+  }
+
   return (
-    <div className="flex flex-col h-screen min-h-0 bg-background text-foreground overflow-hidden">
-      <header className="flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b bg-background/95 backdrop-blur z-10 shrink-0 shadow-sm">
-        <div className="flex items-center gap-2 min-w-0">
-          <Sparkles className="w-5 h-5 text-primary shrink-0" />
-          <h1 className="font-semibold text-base tracking-tight shrink-0">HeraAi</h1>
-          <select
-            data-testid="model-selector"
-            aria-label={t('chat.tooltips.model_selector')}
-            title={t('chat.tooltips.model_selector')}
-            value={selectedModel}
-            onChange={(e) => {
-              const next = e.target.value
-              setSelectedModel(next)
-              if (chrome && chrome.storage) {
-                chrome.storage.local.set({ selectedModel: next })
-              }
-            }}
-            className="h-7 max-w-[110px] text-[11px] rounded-md border border-input bg-background/50 px-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary shrink-0"
-          >
-            {MODELS.map((modelId) => (
-              <option key={modelId} value={modelId}>{MODEL_LABELS[modelId] || modelId}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            title={t('chat.tooltips.new_chat')}
-            onClick={startNewSession}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <MessageSquarePlus className="w-4 h-4" />
-          </button>
-          <button
-            title={t('chat.tooltips.history')}
-            onClick={() => setShowHistory(true)}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <History className="w-4 h-4" />
-          </button>
-          <button
-            title={t('chat.tooltips.clear_chat')}
-            onClick={clearHistory}
-            className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          <button
-            title={t('chat.tooltips.export')}
-            onClick={handleExport}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-          <label className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors cursor-pointer">
-            <Upload className="w-4 h-4" />
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleImport}
-              className="hidden"
-            />
-          </label>
-          <button
-            title={t('chat.tooltips.settings')}
-            onClick={() => setShowSettings(true)}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-          <button
-            title={t('chat.tooltips.statistics')}
-            onClick={() => setShowStats(true)}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-          <button
-            title={t('chat.tooltips.shortcuts')}
-            onClick={() => setShowShortcuts(true)}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
-            <Keyboard className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
+    <div className="hera-panel flex h-screen min-h-0 min-w-0 flex-col overflow-hidden text-foreground">
+      <AppHeader
+        onNewChat={startNewSession}
+        onHistory={() => setShowHistory(true)}
+        onClear={clearHistory}
+        onExport={handleExport}
+        onImport={handleImport}
+        onSettings={() => setShowSettings(true)}
+        onStats={() => setShowStats(true)}
+        onShortcuts={() => setShowShortcuts(true)}
+      />
 
       {showSettings && (
-        <div className="absolute inset-0 z-50 bg-background overflow-y-auto">
-          <button
-            onClick={() => setShowSettings(false)}
-            className="absolute top-4 right-4 p-2 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground z-50 transition-colors"
-            title={t('chat.tooltips.close')}
-          >
-            <X className="w-5 h-5" />
-          </button>
+        <div className="absolute inset-0 z-50 overflow-y-auto bg-background">
           <SettingsPanel
             currentConfig={appConfig}
             onClose={() => setShowSettings(false)}
@@ -1131,188 +1215,91 @@ function App() {
         </div>
       )}
 
-      <main className="flex-1 min-h-0 overflow-y-auto relative" ref={scrollRef} onScroll={handleChatScroll}>
+      <main
+        className="relative min-h-0 flex-1 overscroll-contain overflow-x-hidden overflow-y-auto"
+        ref={scrollRef}
+        onScroll={handleChatScroll}
+        onWheelCapture={handleChatWheel}
+      >
         {showScrollDownBtn && (
-          <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
+          <div className="pointer-events-none sticky bottom-3 z-10 flex justify-center">
             <button
+              type="button"
               onClick={() => scrollToBottom()}
-              className="pointer-events-auto flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:bg-primary/90"
+              className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-primary/20 bg-popover px-3 py-1.5 text-[11px] font-medium text-foreground shadow-lg hover:bg-secondary"
             >
               ↓ {t('chat.new_messages')}
             </button>
           </div>
         )}
-        <div className="p-4 pb-8 space-y-4">
-          {messages.map((msg, idx) => {
-            const isLastAssistant = idx === messages.length - 1 && msg.role === 'model'
-            return (
-              <ChatMessage
-                key={msg.id ?? idx}
-                message={msg}
-                isPending={isLastAssistant && isGenerating}
-                onEdit={handleEditMessage}
-                onRetry={handleRetryMessage}
-              />
-            )
-          })}
-        </div>
-      </main>
 
-      <div className="p-4 bg-background border-t shadow-sm shrink-0" onWheel={handleComposerWheel}>
-        {attachments.length > 0 && (
-          <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
-            {attachments.map((att, idx) => (
-              <div key={idx} className="relative group bg-secondary border border-border rounded-lg p-1.5 flex items-center gap-2 pr-6 max-w-[150px] shrink-0">
-                {att.mimeType.startsWith('image/') ? (
-                  <img src={`data:${att.mimeType};base64,${att.data}`} alt="preview" className="w-6 h-6 object-cover rounded" />
-                ) : (
-                  <FileText className="w-5 h-5 text-muted-foreground" />
-                )}
-                <span className="text-xs truncate">{att.name}</span>
-                <button
-                  onClick={() => removeAttachment(idx)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-background/80 hover:bg-destructive hover:text-destructive-foreground opacity-0 group-hover:opacity-100"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
+        {isWelcomeOnly ? (
+          <WelcomeScreen
+            onCrop={handleScreenshot}
+            onResearch={() => {
+              setEnableResearch(true)
+              setActiveMode('web')
+              document.querySelector('textarea')?.focus()
+            }}
+            onAttach={() => fileInputRef.current?.click()}
+          />
+        ) : (
+          <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-5 pb-8">
+            {messages.map((msg, idx) => {
+              const isLastAssistant = idx === messages.length - 1 && msg.role === 'model'
+              return (
+                <ChatMessage
+                  key={msg.id ?? idx}
+                  message={msg}
+                  isPending={isLastAssistant && isGenerating}
+                  onEdit={handleEditMessage}
+                  onRetry={handleRetryMessage}
+                />
+              )
+            })}
           </div>
         )}
+      </main>
 
-        <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1 scrollbar-hide">
-          <button
-            type="button"
-            title={t('chat.quick_actions.crop_tooltip')}
-            aria-label={t('chat.quick_actions.crop_tooltip')}
-            aria-pressed={activeMode === 'crop'}
-            onClick={handleScreenshot}
-            disabled={isGenerating}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              activeMode === 'crop'
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <Scissors className="w-4 h-4" />
-          </button>
+      <div className="p-4 bg-background shrink-0 border-t border-border/60" onWheel={handleComposerWheel}>
+        <div className="hera-surface mx-auto w-full max-w-3xl overflow-hidden rounded-2xl transition-shadow focus-within:border-primary/35 focus-within:shadow-lg focus-within:shadow-primary/5">
+          {attachments.length > 0 && (
+            <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
+              {attachments.map((att, idx) => (
+                <div key={`${att.name}-${idx}`} className="group relative flex max-w-[170px] shrink-0 items-center gap-2 rounded-lg border border-border/70 bg-secondary/65 py-1 pl-1 pr-7">
+                  {att.mimeType.startsWith('image/') ? (
+                    <img src={`data:${att.mimeType};base64,${att.data}`} alt="" className="h-7 w-7 rounded-md object-cover" />
+                  ) : (
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-background/70">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    </span>
+                  )}
+                  <span className="truncate text-[11px]">{att.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(idx)}
+                    aria-label={t('chat.tooltips.remove_attachment')}
+                    className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
-          <button
-            type="button"
-            title={t('chat.quick_actions.web_tooltip')}
-            aria-label={t('chat.quick_actions.web_tooltip')}
-            aria-pressed={enableResearch}
-            onClick={() => {
-              const next = !enableResearch;
-              setEnableResearch(next);
-              setActiveMode(next ? 'web' : null);
-            }}
-            disabled={isGenerating}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              enableResearch
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <Globe className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            title={t('chat.quick_actions.ocr_tooltip')}
-            aria-label={t('chat.quick_actions.ocr_tooltip')}
-            aria-pressed={activeMode === 'ocr'}
-            onClick={() => {
-              setActiveMode('ocr');
-              setInput('');
-              handleSend(t('chat.prompts.ocr'), { modeOverride: 'vision' });
-            }}
-            disabled={isGenerating || !hasImageAttachment}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              activeMode === 'ocr'
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <ScanText className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            title={t('chat.quick_actions.translate_tooltip')}
-            aria-label={t('chat.quick_actions.translate_tooltip')}
-            aria-pressed={activeMode === 'translate'}
-            onClick={() => {
-              setActiveMode('translate');
-              const p = t('chat.prompts.translate') + ':\n' + input;
-              setInput('');
-              handleSend(p);
-            }}
-            disabled={isGenerating}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              activeMode === 'translate'
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <Languages className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            title={t('chat.quick_actions.summarize_tooltip')}
-            aria-label={t('chat.quick_actions.summarize_tooltip')}
-            aria-pressed={activeMode === 'summarize'}
-            onClick={() => {
-              setActiveMode('summarize');
-              const p = t('chat.prompts.summarize') + ':\n' + input;
-              setInput('');
-              handleSend(p);
-            }}
-            disabled={isGenerating}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              activeMode === 'summarize'
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            title={t('chat.quick_actions.explain_tooltip')}
-            aria-label={t('chat.quick_actions.explain_tooltip')}
-            aria-pressed={activeMode === 'explain'}
-            onClick={() => {
-              setActiveMode('explain');
-              const p = t('chat.prompts.explain') + ':\n' + input;
-              setInput('');
-              handleSend(p);
-            }}
-            disabled={isGenerating}
-            className={`flex items-center justify-center h-9 w-9 backdrop-blur-sm rounded-xl transition-all border shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              activeMode === 'explain'
-                ? 'bg-primary/20 border-primary text-primary shadow-primary/20'
-                : 'bg-secondary/80 hover:bg-primary/20 hover:text-primary border-border/50 text-muted-foreground'
-            }`}
-          >
-            <Lightbulb className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="relative flex flex-col bg-background/50 backdrop-blur-sm border rounded-xl shadow-md focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary">
           <textarea
             value={typeof input === 'string' ? input : ''}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={t('chat.placeholder')}
-            className="min-h-[52px] max-h-48 w-full resize-none bg-transparent px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground scrollbar-thin overflow-y-auto"
+            className="min-h-[66px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-2 pt-3 text-[14px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
             rows="2"
           />
-          <div className="flex items-center justify-between px-2 pb-2">
-            <div className="flex items-center gap-1">
+
+          <div className="flex min-w-0 items-center justify-between gap-2 px-2 pb-2">
+            <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -1322,30 +1309,132 @@ function App() {
                 multiple
               />
               <button
+                type="button"
                 title={t('chat.tooltips.attach_file')}
+                aria-label={t('chat.tooltips.attach_file')}
                 onClick={() => fileInputRef.current?.click()}
-                className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
+                className={getQuickActionClass()}
                 disabled={isGenerating}
               >
-                <Paperclip className="w-4 h-4" />
+                <Paperclip className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.crop_tooltip')}
+                aria-label={t('chat.quick_actions.crop_tooltip')}
+                aria-pressed={activeMode === 'crop'}
+                onClick={handleScreenshot}
+                disabled={isGenerating}
+                className={getQuickActionClass(activeMode === 'crop')}
+              >
+                <Scissors className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.web_tooltip')}
+                aria-label={t('chat.quick_actions.web_tooltip')}
+                aria-pressed={enableResearch}
+                onClick={() => {
+                  const next = !enableResearch
+                  setEnableResearch(next)
+                  setActiveMode(next ? 'web' : null)
+                }}
+                disabled={isGenerating}
+                className={getQuickActionClass(enableResearch)}
+              >
+                <Globe className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.ocr_tooltip')}
+                aria-label={t('chat.quick_actions.ocr_tooltip')}
+                aria-pressed={activeMode === 'ocr'}
+                onClick={() => {
+                  setActiveMode('ocr')
+                  setInput('')
+                  handleSend(t('chat.prompts.ocr'), { modeOverride: 'vision' })
+                }}
+                disabled={isGenerating || !hasImageAttachment}
+                className={getQuickActionClass(activeMode === 'ocr')}
+              >
+                <ScanText className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.translate_tooltip')}
+                aria-label={t('chat.quick_actions.translate_tooltip')}
+                aria-pressed={activeMode === 'translate'}
+                onClick={() => {
+                  setActiveMode('translate')
+                  const prompt = `${t('chat.prompts.translate')}:\n${input}`
+                  setInput('')
+                  handleSend(prompt)
+                }}
+                disabled={isGenerating}
+                className={getQuickActionClass(activeMode === 'translate')}
+              >
+                <Languages className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.summarize_tooltip')}
+                aria-label={t('chat.quick_actions.summarize_tooltip')}
+                aria-pressed={activeMode === 'summarize'}
+                onClick={() => {
+                  setActiveMode('summarize')
+                  const prompt = `${t('chat.prompts.summarize')}:\n${input}`
+                  setInput('')
+                  handleSend(prompt)
+                }}
+                disabled={isGenerating}
+                className={getQuickActionClass(activeMode === 'summarize')}
+              >
+                <FileText className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.quick_actions.explain_tooltip')}
+                aria-label={t('chat.quick_actions.explain_tooltip')}
+                aria-pressed={activeMode === 'explain'}
+                onClick={() => {
+                  setActiveMode('explain')
+                  const prompt = `${t('chat.prompts.explain')}:\n${input}`
+                  setInput('')
+                  handleSend(prompt)
+                }}
+                disabled={isGenerating}
+                className={getQuickActionClass(activeMode === 'explain')}
+              >
+                <Lightbulb className="h-4 w-4" />
               </button>
             </div>
+
             <button
+              type="button"
               onClick={() => isGenerating ? cancelStream() : handleSend()}
               disabled={!isGenerating && (!input.trim() && attachments.length === 0)}
-              title={isGenerating ? t('chat.tooltips.stop') : ''}
-            className={`flex items-center justify-center p-2 rounded-lg shadow-sm ${
-              isGenerating
+              title={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
+              aria-label={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-35 ${
+                isGenerating
                   ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
-              } disabled:opacity-50 disabled:pointer-events-none`}
+                  : 'bg-primary text-primary-foreground hover:brightness-105'
+              }`}
             >
-              {isGenerating ? <Square className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+              {isGenerating ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
             </button>
           </div>
         </div>
-        <div className="text-center mt-2">
-          <span className="text-[10px] text-muted-foreground/60">{t('chat.powered_by')}</span>
+        <div data-testid="composer-meta" className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
+          <ModelSelector
+            selectedModel={selectedModel}
+            models={MODELS}
+            modelLabels={MODEL_LABELS}
+            onModelChange={handleModelChange}
+          />
+          <p className="min-w-0 flex-1 truncate text-right text-[11px] leading-none text-muted-foreground/55" title={t('chat.powered_by')}>
+            {t('chat.powered_by')}
+          </p>
         </div>
       </div>
     </div>
