@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { MessageSquare, Clock, Mic, Scissors, Globe, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Activity, Clock, Globe, MessageSquare, Mic, Scissors, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { getStats } from '../lib/stats'
 
 function StatsPanel({ onClose }) {
@@ -26,85 +27,73 @@ function StatsPanel({ onClose }) {
     for (let i = 6; i >= 0; i--) {
       const date = new Date()
       date.setDate(date.getDate() - i)
-      const dateStr = date.toDateString()
-      last7Days.push(stats.messagesByDate[dateStr] || 0)
+      last7Days.push(stats.messagesByDate[date.toDateString()] || 0)
     }
-    return last7Days.reduce((a, b) => a + b, 0)
+    return last7Days.reduce((sum, count) => sum + count, 0)
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+      <div className="hera-panel flex h-screen items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     )
   }
 
+  const primaryStats = [
+    { label: t('stats.total_messages'), value: stats?.totalMessages || 0, icon: MessageSquare },
+    { label: t('stats.total_sessions'), value: stats?.totalSessions || 0, icon: Clock },
+    { label: t('stats.last_7_days'), value: getLast7DaysMessages(), icon: Activity },
+  ]
+  const activityStats = [
+    { label: t('stats.voice_inputs'), value: stats?.voiceInputs || 0, icon: Mic },
+    { label: t('stats.screenshots'), value: stats?.screenshots || 0, icon: Scissors },
+    { label: t('stats.searches'), value: stats?.searches || 0, icon: Globe },
+  ]
+
   return (
-    <div className="flex flex-col h-full bg-background text-foreground p-6 pt-12">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold">{t('stats.title')}</h2>
+    <div className="hera-panel flex h-screen flex-col bg-background text-foreground">
+      <header className="hera-panel-header">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Activity className="h-4 w-4" />
+          </span>
+          <h2 className="hera-panel-title truncate">{t('stats.title')}</h2>
         </div>
-        <button onClick={onClose} className="p-2 hover:bg-secondary rounded-full">
-          <X className="w-5 h-5" />
+        <button type="button" onClick={onClose} className="hera-icon-button" aria-label={t('chat.tooltips.close')}>
+          <X className="h-4 w-4" />
         </button>
-      </div>
+      </header>
 
-      <div className="flex-1 overflow-y-auto space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-card border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <MessageSquare className="w-4 h-4 text-primary" />
-              <span className="text-sm text-muted-foreground">{t('stats.total_messages')}</span>
+      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+        <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-3">
+          {primaryStats.map(({ label, value, icon: Icon }) => (
+            <div key={label} className="hera-section-card min-w-0 p-3">
+              <div className="mb-3 flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+              <span className="block text-xl font-semibold tracking-tight">{value}</span>
+              <span className="mt-1 block truncate text-[11px] text-muted-foreground">{label}</span>
             </div>
-            <span className="text-2xl font-bold">{stats?.totalMessages || 0}</span>
-          </div>
-
-          <div className="bg-card border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 text-primary" />
-              <span className="text-sm text-muted-foreground">{t('stats.total_sessions')}</span>
-            </div>
-            <span className="text-2xl font-bold">{stats?.totalSessions || 0}</span>
-          </div>
+          ))}
         </div>
 
-        <div className="bg-card border rounded-xl p-4">
-          <span className="text-sm text-muted-foreground block mb-2">{t('stats.last_7_days')}</span>
-          <span className="text-2xl font-bold">{getLast7DaysMessages()}</span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-card border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Mic className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">{t('stats.voice_inputs')}</span>
-            </div>
-            <span className="text-lg font-bold">{stats?.voiceInputs || 0}</span>
+        <section className="hera-section-card p-3">
+          <h3 className="mb-3 text-xs font-semibold">{t('stats.activity_title')}</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {activityStats.map(({ label, value, icon: Icon }) => (
+              <div key={label} className="min-w-0 rounded-xl bg-secondary/55 p-2.5">
+                <Icon className="mb-2 h-3.5 w-3.5 text-muted-foreground" />
+                <span className="block text-base font-semibold">{value}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{label}</span>
+              </div>
+            ))}
           </div>
+        </section>
 
-          <div className="bg-card border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Scissors className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">{t('stats.screenshots')}</span>
-            </div>
-            <span className="text-lg font-bold">{stats?.screenshots || 0}</span>
-          </div>
-
-          <div className="bg-card border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Globe className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">{t('stats.searches')}</span>
-            </div>
-            <span className="text-lg font-bold">{stats?.searches || 0}</span>
-          </div>
-        </div>
-
-        <div className="bg-card border rounded-xl p-4">
-          <span className="text-sm text-muted-foreground block mb-1">{t('stats.last_active')}</span>
-          <span className="text-sm font-medium">{formatDate(stats?.lastActive)}</span>
+        <div className="hera-section-card flex items-center justify-between gap-4 p-3">
+          <span className="text-xs text-muted-foreground">{t('stats.last_active')}</span>
+          <span className="truncate text-right text-xs font-medium">{formatDate(stats?.lastActive)}</span>
         </div>
       </div>
     </div>
