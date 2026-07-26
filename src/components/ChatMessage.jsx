@@ -147,7 +147,7 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
       ) : (
         <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
           {isPending ? (
-            <div className="whitespace-pre-wrap leading-[1.65]">{message.content}</div>
+            message.content
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
