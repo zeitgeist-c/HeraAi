@@ -105,6 +105,14 @@ function setScrollMetrics(element, { scrollHeight, clientHeight, scrollTop }) {
   });
 }
 
+function openSettingsPanel() {
+  const menuButton = document.querySelector('button[aria-haspopup="menu"]');
+  fireEvent.click(menuButton);
+  const settingsButton = Array.from(document.querySelectorAll('[role="menuitem"]'))
+    .find(button => button.querySelector('svg.lucide-settings'));
+  fireEvent.click(settingsButton);
+}
+
 describe('HeraAi App', () => {
   let currentStorage = {};
   let storageListeners = [];
@@ -190,6 +198,77 @@ describe('HeraAi App', () => {
     expect(api.streamChat.mock.calls[0][0].at(-1).content).toBe('Button click question');
   });
 
+  it('shows the user message and thinking state before API key resolution finishes', async () => {
+    let releaseKeyLookup;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'geminiApiKeys') {
+        releaseKeyLookup = () => callback({ geminiApiKeys: [] });
+        return Promise.resolve();
+      }
+      if (typeof callback === 'function') callback(currentStorage);
+      return Promise.resolve(currentStorage);
+    });
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Resolved answer' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Show this immediately' } });
+    fireEvent.click(getSendButton());
+
+    expect(screen.getByText('Show this immediately')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
+    expect(api.streamChat).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(releaseKeyLookup).toBeTypeOf('function'));
+    await act(async () => releaseKeyLookup());
+    expect(await screen.findByText('Resolved answer')).toBeInTheDocument();
+  });
+
+  it('paints the user message and thinking state before an immediately available response starts', async () => {
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Immediate provider answer' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Paint me first' } });
+    fireEvent.click(getSendButton());
+
+    expect(screen.getByText('Paint me first')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(api.streamChat).not.toHaveBeenCalled();
+
+    expect(await screen.findByText('Immediate provider answer')).toBeInTheDocument();
+  });
+
+  it('reveals a large provider chunk progressively instead of displaying it all at once', async () => {
+    const streamedAnswer = 'Bu cevap sağlayıcıdan büyük bir parça olarak gelse bile kullanıcıya kademeli biçimde görünmelidir. '.repeat(4).trim();
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: streamedAnswer } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Progressive response test' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => {
+      const visibleText = screen.getByTestId('assistant-content').textContent;
+      expect(visibleText.length).toBeGreaterThan(0);
+      expect(visibleText.length).toBeLessThan(streamedAnswer.length);
+    });
+
+    expect(await screen.findByText(streamedAnswer, {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
   it('should not allow empty message to be sent', async () => {
     render(<App />);
 
@@ -270,7 +349,7 @@ describe('HeraAi App', () => {
 
     expect(await screen.findByText('Separate response')).toBeInTheDocument();
 
-    const messageCards = Array.from(document.querySelectorAll('.group.flex'));
+    const messageCards = Array.from(document.querySelectorAll('article'));
     expect(messageCards.some(card => card.textContent.includes('Merhaba') && card.textContent.includes('Separate response'))).toBe(false);
     expect(messageCards.some(card => card.textContent.includes('Separate response'))).toBe(true);
   });
@@ -466,6 +545,40 @@ describe('HeraAi App', () => {
     expect(scrollContainer.scrollTop).toBe(360);
   });
 
+  it('should stop auto-following as soon as the wheel moves upward near the bottom', async () => {
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const scrollContainer = document.querySelector('main');
+    setScrollMetrics(scrollContainer, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 });
+
+    const input = document.querySelector('textarea') || screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'pause near bottom' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+
+    fireEvent.wheel(scrollContainer, { deltaY: -32 });
+    scrollContainer.scrollTop = 568;
+    fireEvent.scroll(scrollContainer);
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'Do not pull me down' } });
+    });
+
+    expect(await screen.findByText('Do not pull me down')).toBeInTheDocument();
+    expect(scrollContainer.scrollTop).toBe(568);
+    expect(screen.getByText(/Yeni mesajlar|New messages/i)).toBeInTheDocument();
+
+    await act(async () => {
+      controlled.finish();
+    });
+  });
+
   it('should render the user message before the first assistant chunk arrives', async () => {
     const controlled = createControlledStream();
     api.streamChat.mockImplementationOnce(() => controlled.stream);
@@ -520,6 +633,32 @@ describe('HeraAi App', () => {
 
     expect(await screen.findByText(/Cancelled|ptal/)).toBeInTheDocument();
     expect(screen.getByText('Partial answer')).toBeInTheDocument();
+  });
+
+  it('should discard queued but not yet displayed text when stopped', async () => {
+    const longAnswer = 'Visible response content should continue for long enough to stop the display queue before every received character is shown. '.repeat(12).trim();
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: longAnswer } },
+    ]));
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Stop the queued response' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => {
+      const visibleText = screen.getByTestId('assistant-content').textContent;
+      expect(visibleText.length).toBeGreaterThan(0);
+      expect(visibleText.length).toBeLessThan(longAnswer.length);
+    });
+
+    fireEvent.click(getStopButton());
+
+    expect(await screen.findByText(/Cancelled|ptal/)).toBeInTheDocument();
+    expect(screen.queryByText(longAnswer)).not.toBeInTheDocument();
   });
 
   it('should preserve the reader position when assistant content streams while the user is above the bottom', async () => {
@@ -700,8 +839,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBeGreaterThan(0);
@@ -827,8 +965,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
@@ -842,8 +979,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
@@ -864,8 +1000,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     expect(await screen.findByText(/API keys are stored in this browser|API anahtarları yalnızca bu cihazdaki/i)).toBeInTheDocument();
   });
@@ -876,8 +1011,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
@@ -910,7 +1044,7 @@ describe('HeraAi App', () => {
     });
   });
 
-  it('blocks the request with a cooldown signal when every Gemini key is in cooldown', async () => {
+  it('keeps the optimistic user message visible while blocking a cooldown request', async () => {
     currentStorage.geminiApiKeys = [{
       id: 'k1',
       key: 'AIza-cooldown-aaaaaaaaaaaa',
@@ -933,12 +1067,9 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'please answer while all keys are rate-limited' } });
     fireEvent.click(getSendButton());
 
-    await waitFor(() => {
-      expect(api.streamChat).not.toHaveBeenCalled();
-    });
-
-    const main = document.querySelector('main');
-    expect(main?.textContent || '').not.toContain('please answer while all keys are rate-limited');
+    expect(await screen.findByText('please answer while all keys are rate-limited')).toBeInTheDocument();
+    expect(await screen.findByText(/Response failed|Yanıt alınamadı/i)).toBeInTheDocument();
+    expect(api.streamChat).not.toHaveBeenCalled();
   });
 
   it('calls testKey once per saved Gemini key when clicking Test All', async () => {
@@ -953,8 +1084,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
@@ -978,14 +1108,13 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
     });
 
-    const keyRows = () => Array.from(document.querySelectorAll('span.text-sm.font-mono'));
+    const keyRows = () => Array.from(document.querySelectorAll('span.font-mono'));
 
     await waitFor(() => {
       expect(keyRows()).toHaveLength(2);
@@ -1006,8 +1135,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const settingsBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-settings'));
-    fireEvent.click(settingsBtn);
+    openSettingsPanel();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
@@ -1022,13 +1150,14 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders a model selector in the header with the 4 supported model ids', async () => {
+  it('renders the model selector below the composer with the 4 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const modelSelect = document.querySelector('select[data-testid="model-selector"]');
     expect(modelSelect).toBeInTheDocument();
+    expect(modelSelect.closest('[data-testid="composer-meta"]')).toBeInTheDocument();
 
     const optionValues = Array.from(modelSelect.options).map(opt => opt.value);
     expect(optionValues).toEqual([
