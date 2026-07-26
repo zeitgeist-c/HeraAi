@@ -116,6 +116,7 @@ function openSettingsPanel() {
 describe('HeraAi App', () => {
   let currentStorage = {};
   let storageListeners = [];
+  let documentVisibility = 'visible';
 
   const triggerStorageChange = (changes) => {
     act(() => {
@@ -126,6 +127,11 @@ describe('HeraAi App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storageListeners = [];
+    documentVisibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => documentVisibility,
+    });
     currentStorage = {
       theme: 'light',
     };
@@ -247,6 +253,193 @@ describe('HeraAi App', () => {
     expect(await screen.findByText('Immediate provider answer')).toBeInTheDocument();
   });
 
+  it('keeps new message ids distinct after reopening a persisted session', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'persisted-session',
+      sessions: [{
+        id: 'persisted-session',
+        title: 'Persisted chat',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 0, role: 'user', content: 'Persisted question' },
+          { id: 1, role: 'model', content: 'Persisted answer', status: 'done', sources: [] },
+        ],
+      }],
+    };
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Persisted answer')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Question after reopening' } });
+    fireEvent.click(getSendButton());
+
+    expect(screen.getByText('Question after reopening')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText('Persisted answer')).toBeInTheDocument();
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'Fresh answer' } });
+    });
+
+    expect(await screen.findByText('Fresh answer')).toBeInTheDocument();
+    expect(screen.getByText('Persisted answer')).toBeInTheDocument();
+
+    await act(async () => {
+      controlled.finish();
+    });
+  });
+
+  it('repairs duplicate legacy message ids when reopening stored sessions', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'legacy-session',
+      sessions: [{
+        id: 'legacy-session',
+        title: 'Legacy chat',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 0, role: 'user', content: 'Legacy question one' },
+          { id: 1, role: 'model', content: 'Legacy answer one' },
+          { id: 0, role: 'user', content: 'Legacy question two' },
+          { id: 1, role: 'model', content: 'Legacy answer two' },
+        ],
+      }],
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText('Legacy answer two')).toBeInTheDocument();
+    await waitFor(() => {
+      const ids = currentStorage.sessions[0].messages.map(message => String(message.id));
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+    expect(currentStorage.sessions[0].messages.map(message => message.content)).toEqual([
+      'Legacy question one',
+      'Legacy answer one',
+      'Legacy question two',
+      'Legacy answer two',
+    ]);
+  });
+
+  it('keeps optimistic rendering after the panel is hidden, resumed, and switched to a new chat', async () => {
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Answer after panel resume' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    act(() => {
+      documentVisibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('freeze'));
+    });
+    act(() => {
+      documentVisibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('resume'));
+      window.dispatchEvent(new Event('pageshow'));
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Question after panel resume' } });
+    fireEvent.click(getSendButton());
+
+    expect(screen.getByText('Question after panel resume')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(api.streamChat).not.toHaveBeenCalled();
+
+    expect(await screen.findByText('Answer after panel resume')).toBeInTheDocument();
+  });
+
+  it('pauses a received response while hidden and reveals it progressively after resume', async () => {
+    const longAnswer = 'Hidden panel response must be revealed across visible animation frames instead of appearing in one batch. '.repeat(6).trim();
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Hide before response' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+
+    act(() => {
+      documentVisibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('freeze'));
+    });
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: longAnswer } });
+      controlled.finish();
+    });
+
+    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.queryByText(longAnswer)).not.toBeInTheDocument();
+
+    act(() => {
+      documentVisibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('resume'));
+      window.dispatchEvent(new Event('pageshow'));
+    });
+
+    await waitFor(() => {
+      const visibleText = screen.getByTestId('assistant-content').textContent;
+      expect(visibleText.length).toBeGreaterThan(0);
+      expect(visibleText.length).toBeLessThan(longAnswer.length);
+    });
+    expect(await screen.findByText(longAnswer, {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
+  it('preserves the same optimistic sequence after a full unmount and storage-backed remount', async () => {
+    api.streamChat
+      .mockImplementationOnce(() => mockStream([
+        { event: 'chunk', data: { text: 'Answer before restart' } },
+      ]))
+      .mockImplementationOnce(() => mockStream([
+        { event: 'chunk', data: { text: 'Answer after restart' } },
+      ]));
+
+    const firstMount = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    let input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Question before restart' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Answer before restart')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(currentStorage.sessions.some(session => (
+        session.messages?.some(message => message.content === 'Answer before restart')
+      ))).toBe(true);
+    });
+
+    firstMount.unmount();
+    render(<App />);
+    expect(await screen.findByText('Question before restart')).toBeInTheDocument();
+
+    input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Question after restart' } });
+    fireEvent.click(getSendButton());
+
+    expect(screen.getByText('Question after restart')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(1);
+
+    expect(await screen.findByText('Answer after restart')).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(2);
+  });
+
   it('reveals a large provider chunk progressively instead of displaying it all at once', async () => {
     const streamedAnswer = 'Bu cevap sağlayıcıdan büyük bir parça olarak gelse bile kullanıcıya kademeli biçimde görünmelidir. '.repeat(4).trim();
     api.streamChat.mockImplementationOnce(() => mockStream([
@@ -305,7 +498,7 @@ describe('HeraAi App', () => {
     expect(api.streamChat.mock.calls[0][2]).toEqual([]);
   });
 
-  it('should combine multiple chunks into one assistant message and save the session once after streaming', async () => {
+  it('should combine multiple chunks and persist the user turn before the completed response', async () => {
     api.streamChat.mockImplementationOnce(() => {
       return delayedMockStream([
         { event: 'chunk', data: { text: 'Hello' } },
@@ -329,7 +522,14 @@ describe('HeraAi App', () => {
     expect(screen.getAllByText('Hello from AI')).toHaveLength(1);
 
     const sessionWrites = global.chrome.storage.local.set.mock.calls.filter(([data]) => data?.sessions);
-    expect(sessionWrites).toHaveLength(1);
+    expect(sessionWrites).toHaveLength(2);
+    expect(sessionWrites[0][0].sessions[0].messages.map(message => message.content)).toEqual([
+      'stream test',
+    ]);
+    expect(sessionWrites[1][0].sessions[0].messages.map(message => message.content)).toEqual([
+      'stream test',
+      'Hello from AI',
+    ]);
   });
 
   it('should keep a new assistant response separate from the welcome card', async () => {
