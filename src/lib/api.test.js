@@ -2,30 +2,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   generateContentMock: vi.fn(),
-  sendMessageStreamMock: vi.fn(),
-  getGenerativeModelMock: vi.fn(),
+  generateContentStreamMock: vi.fn(),
+  clientOptionsMock: vi.fn(),
 }))
 
-vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: vi.fn().mockImplementation(function GoogleGenerativeAI() {
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: vi.fn().mockImplementation(function GoogleGenAI(options) {
+    mocks.clientOptionsMock(options)
     return {
-      getGenerativeModel: mocks.getGenerativeModelMock,
+      models: {
+        generateContent: mocks.generateContentMock,
+        generateContentStream: mocks.generateContentStreamMock,
+      },
     }
   }),
 }))
-
-mocks.getGenerativeModelMock.mockReturnValue({
-  generateContent: mocks.generateContentMock,
-  startChat: vi.fn().mockReturnValue({
-    sendMessageStream: mocks.sendMessageStreamMock,
-  }),
-})
 
 const { streamResearch, streamVision, streamChat, testKey, MODELS, DEFAULT_MODEL } = await import('./api')
 
 function geminiStream(text) {
   return (async function* stream() {
-    yield { text: () => text }
+    yield { text }
   })()
 }
 
@@ -54,11 +51,9 @@ describe('streamResearch', () => {
       }),
     })
     mocks.generateContentMock.mockResolvedValue({
-      response: {
-        text: () => 'Dunya su an Gunes yorungesinde hangi tarihte ve konumda',
-      },
+      text: 'Dunya su an Gunes yorungesinde hangi tarihte ve konumda',
     })
-    mocks.sendMessageStreamMock.mockResolvedValue({ stream: geminiStream('Baglamli cevap') })
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Baglamli cevap'))
   })
 
   it('expands a short follow-up question before sending it to Tavily', async () => {
@@ -80,7 +75,7 @@ describe('streamResearch', () => {
       { role: 'user', content: 'hangi tarihten bahsediyorsun' },
     ], [{ id: 'g1', key: 'gemini-key' }], [{ id: 't1', key: 'tavily-key' }]))
 
-    const finalPrompt = mocks.sendMessageStreamMock.mock.calls[0][0]
+    const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
     expect(finalPrompt).toContain('Orijinal kullanici sorusu: hangi tarihten bahsediyorsun')
     expect(finalPrompt).toContain('Web arama sorgusu: Dunya su an Gunes yorungesinde hangi tarihte ve konumda')
     expect(finalPrompt).toContain('Kullanici: dunya suan gunesin neresinde')
@@ -97,19 +92,68 @@ describe('streamResearch', () => {
       { role: 'user', content: 'devami ne' },
     ], [{ id: 'g1', key: 'gemini-key' }], [{ id: 't1', key: 'tavily-key' }]))
 
-    const finalPrompt = mocks.sendMessageStreamMock.mock.calls[0][0]
+    const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
     expect(finalPrompt).toContain('Kullanici: ilk soru')
     expect(finalPrompt).toContain('HeraAi: ilk cevap')
     expect(finalPrompt).not.toContain('Merhaba')
     expect(finalPrompt).not.toContain('thinking')
     expect(finalPrompt).not.toContain('Response failed')
   })
+
+  it('does not mark a Gemini key rate-limited when query expansion returns empty text', async () => {
+    mocks.generateContentMock.mockResolvedValueOnce({ text: '' })
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'follow-up question' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [{ id: 't1', key: 'tavily-key' }],
+    ))
+
+    expect(events
+      .filter(event => event.event === 'key_status' && event.data.provider === 'gemini')
+      .map(event => event.data)).toEqual([
+      { provider: 'gemini', keyId: 'g1', status: 'success' },
+    ])
+  })
+
+  it('returns tavily_key_missing when research has no Tavily key', async () => {
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugunun haberlerini ara' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [],
+    ))
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        event: 'error',
+        data: expect.objectContaining({ code: 'tavily_key_missing' }),
+      }),
+    ])
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('returns research_failed when Tavily search fails', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugunun haberlerini ara' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [{ id: 't1', key: 'tavily-key' }],
+    ))
+
+    expect(events.find(event => event.event === 'error')).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ code: 'research_failed' }),
+      }),
+    )
+    expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('streamVision', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.sendMessageStreamMock.mockResolvedValue({ stream: geminiStream('Vision answer') })
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Vision answer'))
   })
 
   it('sends every image attachment to Gemini in attachment order', async () => {
@@ -125,7 +169,7 @@ describe('streamVision', () => {
       },
     ], null, {}, [{ id: 'g1', key: 'gemini-key' }]))
 
-    const parts = mocks.sendMessageStreamMock.mock.calls[0][0]
+    const parts = mocks.generateContentStreamMock.mock.calls[0][0].contents[0].parts
     expect(parts).toEqual([
       { text: 'Cevir' },
       { inlineData: { data: 'first-image', mimeType: 'image/png' } },
@@ -142,7 +186,7 @@ describe('streamVision', () => {
       },
     ], 'fallback-image', {}, [{ id: 'g1', key: 'gemini-key' }]))
 
-    const parts = mocks.sendMessageStreamMock.mock.calls[0][0]
+    const parts = mocks.generateContentStreamMock.mock.calls[0][0].contents[0].parts
     expect(parts).toEqual([
       { text: 'Cevir' },
       { inlineData: { data: 'fallback-image', mimeType: 'image/png' } },
@@ -211,6 +255,48 @@ describe('testKey (Gemini)', () => {
     expect(result.success).toBe(false)
     expect(result.errorType).toBe('network')
   })
+
+  it('tests the selected Gemini model instead of silently testing the default model', async () => {
+    mocks.generateContentMock.mockResolvedValue({})
+
+    await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+
+    expect(mocks.generateContentMock.mock.calls[0][0].model).toBe('gemini-3.5-flash')
+  })
+
+  it('reports selected-model access failures without calling the key invalid', async () => {
+    mocks.generateContentMock.mockRejectedValue(
+      Object.assign(new Error('models/gemini-3.5-flash is not found for API version v1'), { status: 404 })
+    )
+
+    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+
+    expect(result).toEqual({
+      success: false,
+      provider: 'gemini',
+      errorType: 'model_unavailable',
+    })
+  })
+
+  it('keeps permission errors distinct from an invalid API key', async () => {
+    mocks.generateContentMock.mockRejectedValue(
+      Object.assign(new Error('PERMISSION_DENIED for selected model'), { status: 403 })
+    )
+
+    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+
+    expect(result.errorType).toBe('permission_denied')
+  })
+
+  it('classifies a billing precondition before the generic 403 permission case', async () => {
+    mocks.generateContentMock.mockRejectedValue(
+      Object.assign(new Error('FAILED_PRECONDITION: billing must be enabled'), { status: 403 })
+    )
+
+    const result = await testKey('gemini', 'AIza-billing-key', 'gemini-3.5-flash')
+
+    expect(result.errorType).toBe('billing_required')
+  })
 })
 
 describe('testKey (Tavily)', () => {
@@ -274,9 +360,9 @@ describe('streamChat fallback', () => {
   })
 
   it('falls back to the next key when the primary rate-limits during stream creation', async () => {
-    mocks.sendMessageStreamMock
+    mocks.generateContentStreamMock
       .mockRejectedValueOnce(Object.assign(new Error('429 RATE_LIMIT'), { status: 429 }))
-      .mockResolvedValueOnce({ stream: geminiStream('chunk from g2') })
+      .mockResolvedValueOnce(geminiStream('chunk from g2'))
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'question' }],
@@ -296,8 +382,27 @@ describe('streamChat fallback', () => {
     expect(events.some(e => e.event === 'error')).toBe(false)
   })
 
+  it('falls back to non-streaming generation on a streaming transport failure', async () => {
+    mocks.generateContentStreamMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    mocks.generateContentMock.mockResolvedValueOnce({ text: 'fallback response' })
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-working-key-aaaaaaaa' }],
+    ))
+
+    expect(events).toContainEqual({
+      event: 'key_status',
+      data: { provider: 'gemini', keyId: 'g1', status: 'success' },
+    })
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'fallback response' } })
+    expect(events.some(event => event.event === 'error')).toBe(false)
+    expect(mocks.generateContentMock).toHaveBeenCalledTimes(1)
+  })
+
   it('does not fall back when a single key returns an invalid 400 error', async () => {
-    mocks.sendMessageStreamMock.mockRejectedValueOnce(
+    mocks.generateContentStreamMock.mockRejectedValueOnce(
       Object.assign(new Error('API_KEY_INVALID'), { status: 400 })
     )
 
@@ -312,11 +417,13 @@ describe('streamChat fallback', () => {
       { provider: 'gemini', keyId: 'g1', status: 'error' },
     ])
     expect(events.some(e => e.event === 'error')).toBe(true)
-    expect(mocks.sendMessageStreamMock).toHaveBeenCalledTimes(1)
+    expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not fall back when a single key refuses content for SAFETY reasons', async () => {
-    mocks.sendMessageStreamMock.mockRejectedValueOnce(new Error('blocked content SAFETY'))
+    mocks.generateContentStreamMock.mockRejectedValueOnce(
+      Object.assign(new Error('blocked content SAFETY'), { status: 400 })
+    )
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'question' }],
@@ -325,18 +432,144 @@ describe('streamChat fallback', () => {
     ))
 
     const keyStatuses = events.filter(e => e.event === 'key_status').map(e => e.data)
-    expect(keyStatuses).toEqual([
-      { provider: 'gemini', keyId: 'g1', status: 'error' },
-    ])
+    expect(keyStatuses).toEqual([])
     expect(events.some(e => e.event === 'error')).toBe(true)
-    expect(mocks.sendMessageStreamMock).toHaveBeenCalledTimes(1)
+    expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mark the key invalid for a model-scoped 403 permission error', async () => {
+    mocks.generateContentStreamMock.mockRejectedValueOnce(
+      Object.assign(new Error('PERMISSION_DENIED for gemini-3.5-flash'), { status: 403 })
+    )
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-permission-key' }],
+      undefined,
+      'gemini-3.5-flash',
+    ))
+
+    expect(events.some(event => event.event === 'key_status')).toBe(false)
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'permission_denied' }),
+    }))
+  })
+
+  it('reports a 404 as model_unavailable and does not retry it as a network failure', async () => {
+    mocks.generateContentStreamMock.mockRejectedValueOnce(
+      Object.assign(new Error('NOT_FOUND: models/gemini-3.5-flash is not found'), { status: 404 })
+    )
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-model-key-aaaaaaaa' }],
+      undefined,
+      'gemini-3.5-flash',
+    ))
+
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'model_unavailable' }),
+    }))
+    expect(events.some(event => event.event === 'key_status')).toBe(false)
+    expect(mocks.generateContentMock).not.toHaveBeenCalled()
+  })
+
+  it('reports a 503 as service_unavailable and does not call the non-stream fallback', async () => {
+    mocks.generateContentStreamMock.mockRejectedValueOnce(
+      Object.assign(new Error('UNAVAILABLE: The model is overloaded'), { status: 503 })
+    )
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-service-key-aaaaaa' }],
+      undefined,
+      'gemini-3.5-flash',
+    ))
+
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'service_unavailable' }),
+    }))
+    expect(mocks.generateContentMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the 3.5 Flash 120-second startup deadline as timeout without a second request', async () => {
+    vi.useFakeTimers()
+    try {
+      let requestSignal
+      mocks.generateContentStreamMock.mockImplementationOnce(parameters => {
+        requestSignal = parameters.config.abortSignal
+        return new Promise(() => {})
+      })
+
+      const eventsPromise = collectEvents(streamChat(
+        [{ role: 'user', content: 'question' }],
+        {},
+        [{ id: 'g1', key: 'AIza-slow-key-aaaaaaaaa' }],
+        undefined,
+        'gemini-3.5-flash',
+      ))
+
+      await vi.advanceTimersByTimeAsync(120000)
+      const events = await eventsPromise
+
+      expect(events).toContainEqual(expect.objectContaining({
+        event: 'error',
+        data: expect.objectContaining({ code: 'timeout' }),
+      }))
+      expect(requestSignal.aborted).toBe(true)
+      expect(mocks.generateContentMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('treats an SDK-internal abort as a timeout when the caller did not cancel', async () => {
+    const sdkTimeout = new DOMException('The operation was aborted', 'AbortError')
+    mocks.generateContentStreamMock.mockRejectedValueOnce(sdkTimeout)
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-sdk-timeout-key' }],
+      undefined,
+      'gemini-3.5-flash',
+    ))
+
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'timeout' }),
+    }))
+    expect(mocks.generateContentMock).not.toHaveBeenCalled()
+  })
+
+  it('returns an error instead of completing successfully when the model stream is empty', async () => {
+    mocks.generateContentStreamMock.mockResolvedValueOnce(geminiStream(''))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
+    ))
+
+    expect(events.some(event => event.event === 'chunk')).toBe(false)
+    expect(events).toContainEqual(expect.objectContaining({ event: 'error' }))
+    expect(events).not.toContainEqual(expect.objectContaining({
+      event: 'key_status',
+      data: expect.objectContaining({ status: 'success' }),
+    }))
   })
 })
 
 describe('model selection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.sendMessageStreamMock.mockResolvedValue({ stream: geminiStream('ok') })
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
   it('exports the 4 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
@@ -349,7 +582,7 @@ describe('model selection', () => {
     ])
   })
 
-  it('passes the selected model into getGenerativeModel for streamChat', async () => {
+  it('passes the selected model into generateContentStream for streamChat', async () => {
     await collectEvents(streamChat(
       [{ role: 'user', content: 'question' }],
       {},
@@ -358,11 +591,16 @@ describe('model selection', () => {
       'gemini-3.5-flash',
     ))
 
-    const modelArg = mocks.getGenerativeModelMock.mock.calls[0][0]
-    expect(modelArg.model).toBe('gemini-3.5-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.5-flash')
+    expect(mocks.clientOptionsMock).toHaveBeenCalledWith({
+      apiKey: 'AIza-key-aaaaaaaaaaaa',
+      httpOptions: {
+        apiVersion: 'v1',
+      },
+    })
   })
 
-  it('passes the selected model into getGenerativeModel for streamVision', async () => {
+  it('passes the selected model into generateContentStream for streamVision', async () => {
     await collectEvents(streamVision(
       [{ role: 'user', content: 'describe', attachments: [] }],
       'fallback-image',
@@ -372,8 +610,7 @@ describe('model selection', () => {
       'gemini-3.6-flash',
     ))
 
-    const modelArg = mocks.getGenerativeModelMock.mock.calls[0][0]
-    expect(modelArg.model).toBe('gemini-3.6-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
   })
 
   it('falls back to DEFAULT_MODEL when no model argument is supplied for streamChat', async () => {
@@ -384,17 +621,16 @@ describe('model selection', () => {
       undefined,
     ))
 
-    const modelArg = mocks.getGenerativeModelMock.mock.calls[0][0]
-    expect(modelArg.model).toBe(DEFAULT_MODEL)
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
   })
 
-  it('testKey still uses DEFAULT_MODEL regardless of selected model arg', async () => {
+  it('testKey uses DEFAULT_MODEL by default and honors an explicitly selected model', async () => {
     mocks.generateContentMock.mockResolvedValue({})
 
     await testKey('gemini', 'AIza-valid-key-12345abcde')
     await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.5-flash')
 
-    expect(mocks.getGenerativeModelMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
-    expect(mocks.getGenerativeModelMock.mock.calls[1][0].model).toBe(DEFAULT_MODEL)
+    expect(mocks.generateContentMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
+    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.5-flash')
   })
 })

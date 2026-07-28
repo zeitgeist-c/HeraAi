@@ -16,6 +16,9 @@ function computeStatus(key) {
   if (key.lastErrorType === 'rate_limited' && key.cooldownUntil && key.cooldownUntil > now) return 'rate_limited'
   if (key.lastErrorType === 'quota_exceeded') return 'quota_exceeded'
   if (key.lastErrorType === 'invalid') return 'invalid'
+  if (['network', 'timeout', 'model_unavailable', 'service_unavailable', 'billing_required', 'permission_denied'].includes(key.lastErrorType)) {
+    return key.lastSuccessAt ? 'success' : 'pending'
+  }
   if (key.lastErrorAt && (!key.lastSuccessAt || key.lastErrorAt > key.lastSuccessAt)) return 'invalid'
   if (key.lastSuccessAt) return 'success'
   return 'pending'
@@ -36,11 +39,15 @@ function friendlyTestMessage(t, errorType) {
     case 'rate_limit': return t('setup.keys.test_rate_limit')
     case 'network': return t('setup.keys.test_network')
     case 'timeout': return t('setup.keys.test_timeout')
+    case 'model_unavailable': return t('setup.keys.test_model_unavailable')
+    case 'service_unavailable': return t('setup.keys.test_service_unavailable')
+    case 'billing_required': return t('setup.keys.test_billing_required')
+    case 'permission_denied': return t('setup.keys.test_permission_denied')
     default: return t('setup.keys.test_unknown')
   }
 }
 
-function SettingsPanel({ onSave, currentConfig, onClose }) {
+function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState('api')
 
@@ -123,7 +130,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         ? 'rate_limited'
         : result.errorType === 'quota'
           ? 'quota_exceeded'
-          : 'invalid'
+          : result.errorType || 'invalid'
       const updates = {
         lastErrorAt: Date.now(),
         lastErrorType: mappedType,
@@ -145,7 +152,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         toast.error(t('setup.keys.test_failed'))
         return
       }
-      const result = await testKey(provider, rawKey)
+      const result = await testKey(provider, rawKey, currentModel)
       await applyTestResult(provider, id, result)
       await refreshKeys(provider)
       if (result.success) {
@@ -169,7 +176,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         const rawKey = await getRawKey(provider, key.id)
         if (!rawKey) continue
         try {
-          const result = await testKey(provider, rawKey)
+          const result = await testKey(provider, rawKey, currentModel)
           await applyTestResult(provider, key.id, result)
           await refreshKeys(provider)
         } catch {

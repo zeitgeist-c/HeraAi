@@ -1,8 +1,8 @@
 import js from '@eslint/js'
 import globals from 'globals'
+import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
-import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default [
   { ignores: ['dist'] },
@@ -10,9 +10,11 @@ export default [
   reactHooks.configs?.flat?.recommended || { plugins: { 'react-hooks': reactHooks }, rules: reactHooks.configs.recommended.rules },
   {
     plugins: {
+      react,
       'react-refresh': reactRefresh
     },
     rules: {
+      'react/jsx-uses-vars': 'error',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     }
   },
@@ -33,8 +35,11 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': 'off',
-      'no-constant-binary-expression': 'off',
+      'no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_|^[A-Z][A-Z0-9_]*$',
+      }],
     },
   },
 ]

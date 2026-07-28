@@ -16,12 +16,7 @@
             "saved_success": "Ayarlar kaydedildi!",
             "provider": "AI Sağlayıcı",
             "provider_info": "Google Gemini (gemini-3.1-flash-lite) dogrudan eklenti icinde calisir",
-            "test_connection": "Bağlantıyı Test Et",
-            "connected": "Bağlı",
-            "no_connection": "Bağlantı Yok",
-            "security_note": "API anahtarlari tarayicinizda saklanir ve dogrudan secili servise gonderilir.",
-            "connection_success": "API baglantisi basarili!",
-            "connection_failed": "API baglantisi basarisiz."
+            "security_note": "API anahtarlari tarayicinizda saklanir ve dogrudan secili servise gonderilir."
         },
         "keys": {
             "title": "API Anahtarları",
@@ -60,6 +55,10 @@
             "test_rate_limit": "Rate limit",
             "test_network": "Bağlantı hatası",
             "test_timeout": "Timeout",
+            "test_model_unavailable": "Seçili model bu API anahtarı veya proje için kullanılamıyor.",
+            "test_service_unavailable": "Gemini servisi geçici olarak kullanılamıyor. Biraz sonra yeniden deneyin.",
+            "test_billing_required": "Bu model için faturalandırma veya proje erişimi gerekiyor.",
+            "test_permission_denied": "Bu API anahtarının seçili modeli kullanma izni yok.",
             "test_unknown": "Test başarısız",
             "test_all_progress": "Test ediliyor {{done}}/{{total}}"
         },
@@ -168,7 +167,29 @@
         "status": {
             "thinking": "Düşünüyor...",
             "cancelled": "İptal edildi",
-            "error": "Yanıt alınamadı"
+            "error": "Yanıt alınamadı",
+            "interrupted": "Tarayıcı yanıt tamamlanmadan kapandı. Güvenle yeniden deneyebilirsiniz."
+        },
+        "generation_errors": {
+            "api_key_missing": "Devam etmek için Ayarlar'dan bir Gemini API anahtarı ekleyin.",
+            "tavily_key_missing": "Web araştırması için Ayarlar'dan bir Tavily API anahtarı ekleyin.",
+            "all_keys_cooldown": "Tüm API anahtarları geçici olarak hız sınırında. Kısa süre sonra yeniden deneyin.",
+            "quota_exceeded": "API kotası doldu. Sağlayıcı kotanızı kontrol edip yeniden deneyin.",
+            "rate_limited": "Sağlayıcı istekleri geçici olarak sınırlıyor. Kısa süre sonra yeniden deneyin.",
+            "timeout": "İstek zaman aşımına uğradı. Bağlantınızı kontrol edip yeniden deneyin.",
+            "network_error": "Gemini ile bağlantı kurulamadı. Bağlantınızı kontrol edip yeniden deneyin.",
+            "model_unavailable": "Seçili Gemini modeli bu API anahtarı veya proje için kullanılamıyor. Google AI Studio'da model erişimini kontrol edin.",
+            "service_unavailable": "Gemini servisi şu anda yoğun veya geçici olarak kullanılamıyor. Biraz sonra yeniden deneyin.",
+            "api_key_invalid": "Gemini API anahtarı geçersiz. Ayarlar'daki anahtarı kontrol edin.",
+            "permission_denied": "Bu API anahtarının seçili modeli kullanma izni yok.",
+            "billing_required": "Seçili model için faturalandırma veya proje erişimi gerekiyor.",
+            "empty_response": "Seçili model boş bir yanıt döndürdü. Yeniden deneyin veya başka bir model seçin.",
+            "research_failed": "Web araştırması tamamlanamadı.",
+            "already_running": "Başka bir yanıt hâlâ çalışıyor. Yeni bir yanıt başlatmadan önce onu durdurun.",
+            "invalid_request": "Yanıt isteği eksik kaldı. Lütfen yeniden deneyin.",
+            "generation_start_failed": "Arka plandaki yanıt işlemi başlatılamadı.",
+            "generation_failed": "AI yanıtı oluşturulamadı.",
+            "storage_failed": "Mesaj yerel olarak kaydedilemedi. Uzantı depolamasında yer açıp yeniden deneyin."
         },
         "connection_error": "AI istegi basarisiz oldu. API anahtarinizi ve baglantinizi kontrol edin.",
         "cancelled": "İstek iptal edildi",

@@ -41,7 +41,10 @@ export async function getKeys(provider) {
   const storageKey = getStorageKey(provider);
   const entries = await readStorage(storageKey);
   return entries
-    .map(({ key, ...rest }) => rest)
+    .map((entry) => {
+      const { key: _, ...rest } = entry;
+      return rest;
+    })
     .sort((a, b) => {
       if (a.isPrimary && !b.isPrimary) return -1;
       if (!a.isPrimary && b.isPrimary) return 1;

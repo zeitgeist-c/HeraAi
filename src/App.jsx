@@ -14,12 +14,11 @@ import ShortcutsPanel from './components/ShortcutsPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
 import { injectCropOverlay } from './lib/injectCropOverlay'
-import { streamChat, streamResearch, streamVision, MODELS, DEFAULT_MODEL } from './lib/api'
+import { MODELS, DEFAULT_MODEL } from './lib/api'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
-import { resolveKeysForRequest, updateKeyMetadata } from './lib/keyManager'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -31,9 +30,15 @@ function appendToInputValue(current, text) {
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 96
 const SCROLL_RESUME_THRESHOLD_PX = 2
-const REQUEST_TIMEOUT_MS = 90_000
-const STREAM_SHORT_BUFFER = 160
-const STREAM_LONG_BUFFER = 600
+const STREAM_SHORT_BUFFER = 240
+const STREAM_LONG_BUFFER = 900
+const MIN_THINKING_VISIBLE_MS = 500
+const PARTIAL_PERSIST_INTERVAL_MS = 150
+const BOOTSTRAP_STATE_TIMEOUT_MS = 5_000
+const BOOTSTRAP_STATE_RETRY_DELAYS_MS = [250, 750, 1500]
+const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
+const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
+const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.5-flash': 'Gemini 3.5 Flash',
@@ -78,14 +83,24 @@ function clampScrollTop(element, nextTop) {
   return Math.min(Math.max(0, nextTop), maxTop)
 }
 
-function getStreamDisplayCharacters(bufferLength) {
-  if (bufferLength > STREAM_LONG_BUFFER) return 12
-  if (bufferLength > STREAM_SHORT_BUFFER) return 6
-  return 3
+function getStreamDisplayStep(bufferLength) {
+  if (bufferLength > STREAM_LONG_BUFFER) return { characters: 36, delay: 60 }
+  if (bufferLength > STREAM_SHORT_BUFFER) return { characters: 24, delay: 60 }
+  return { characters: 2, delay: 30 }
 }
 
-function takeUnicodeCharacters(text, count) {
-  return Array.from(text).slice(0, count).join('')
+function takeDisplayChunk(text, targetCount) {
+  const characters = Array.from(text)
+  if (characters.length <= targetCount) return text
+
+  const maximumCount = Math.min(characters.length, Math.ceil(targetCount * 1.5))
+  for (let index = targetCount; index < maximumCount; index += 1) {
+    if (/\s/.test(characters[index])) {
+      return characters.slice(0, index + 1).join('')
+    }
+  }
+
+  return characters.slice(0, targetCount).join('')
 }
 
 function createUniqueMessageId(counterRef) {
@@ -119,51 +134,41 @@ function repairMessageIds(messages, counterRef) {
   return { messages: repairedMessages, changed }
 }
 
-function repairStoredSessions(sessions, counterRef) {
+function repairStoredSessions(sessions, counterRef, activeGeneration = null) {
   let changed = false
   const repairedSessions = (sessions || []).map(session => {
     const repaired = repairMessageIds(session?.messages, counterRef)
-    if (!repaired.changed) return session
+    const messages = repaired.messages.flatMap(message => {
+      if (!message || message.role !== 'model') return message ? [message] : []
+      const content = typeof message.content === 'string' ? message.content : ''
+      const belongsToActiveGeneration = (
+        activeGeneration
+        && session?.id === activeGeneration.sessionId
+        && message.id === activeGeneration.assistantMessageId
+        && (
+          ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)
+          || TERMINAL_GENERATION_STATUSES.has(activeGeneration.status)
+        )
+      )
+      if (belongsToActiveGeneration) return [message]
+      if (['thinking', 'streaming', 'cancelled_empty'].includes(message.status) && !content) {
+        changed = true
+        return []
+      }
+      if (['thinking', 'streaming'].includes(message.status) && content) {
+        changed = true
+        return [{ ...message, status: 'interrupted' }]
+      }
+      return [message]
+    })
+    if (!repaired.changed && messages.length === repaired.messages.length && messages.every((message, index) => message === repaired.messages[index])) {
+      return session
+    }
     changed = true
-    return { ...session, messages: repaired.messages }
+    return { ...session, messages }
   })
 
   return { sessions: repairedSessions, changed }
-}
-
-function waitForAnimationFrame(signal) {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'))
-      return
-    }
-
-    let frameId = null
-    let timerId = null
-
-    const cleanup = () => {
-      signal?.removeEventListener('abort', handleAbort)
-    }
-    const finish = () => {
-      cleanup()
-      resolve()
-    }
-    const handleAbort = () => {
-      if (frameId != null && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(frameId)
-      }
-      if (timerId != null) window.clearTimeout(timerId)
-      cleanup()
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-
-    signal?.addEventListener('abort', handleAbort, { once: true })
-    if (typeof window.requestAnimationFrame === 'function') {
-      frameId = window.requestAnimationFrame(finish)
-    } else {
-      timerId = window.setTimeout(finish, 16)
-    }
-  })
 }
 
 function requestDisplayFrame(callback) {
@@ -189,6 +194,51 @@ function cancelDisplayFrame(frame) {
   window.clearTimeout(frame.id)
 }
 
+function getGenerationContent(generation) {
+  if (!generation) return ''
+  if (typeof generation.content === 'string') return generation.content
+  return typeof generation.receivedContent === 'string' ? generation.receivedContent : ''
+}
+
+function sendRuntimeMessage(message) {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+    return Promise.reject(new Error('Chrome runtime messaging is unavailable'))
+  }
+
+  try {
+    return Promise.resolve(chrome.runtime.sendMessage(message))
+  } catch (error) {
+    return Promise.reject(error)
+  }
+}
+
+function sendRuntimeMessageWithTimeout(message, timeoutMs) {
+  let timeoutId
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(`Chrome runtime message timed out: ${message?.type || 'unknown'}`)
+      error.name = 'RuntimeMessageTimeoutError'
+      reject(error)
+    }, timeoutMs)
+  })
+
+  return Promise.race([
+    sendRuntimeMessage(message),
+    timeout,
+  ]).finally(() => {
+    if (timeoutId != null) window.clearTimeout(timeoutId)
+  })
+}
+
+function setChromeStorage(values) {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local?.set) return Promise.resolve()
+  try {
+    return Promise.resolve(chrome.storage.local.set(values))
+  } catch (error) {
+    return Promise.reject(error)
+  }
+}
+
 function createUserMessage({ id, content, attachments, mode }) {
   return {
     id,
@@ -212,23 +262,6 @@ function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
   }
 }
 
-function finalizeAssistantMessage(message, { content, status, sources }) {
-  return {
-    ...message,
-    content,
-    status,
-    sources
-  }
-}
-
-function markAssistantError(message, content = '') {
-  return finalizeAssistantMessage(message, {
-    content,
-    status: 'error',
-    sources: Array.isArray(message.sources) ? message.sources : []
-  })
-}
-
 function App() {
   const { t } = useTranslation()
   const [appConfig, setAppConfig] = useState(null)
@@ -246,15 +279,33 @@ function App() {
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
-  const streamingControllerRef = useRef(null)
   const streamBufferRef = useRef('')
   const displayedAssistantContentRef = useRef('')
   const streamDisplayFrameRef = useRef(null)
+  const streamLastDisplayAtRef = useRef(0)
+  const streamRevealNotBeforeRef = useRef(0)
   const streamDrainResolversRef = useRef([])
   const streamTargetMessageIdRef = useRef(null)
-  const streamAbortReasonRef = useRef(null)
+  const activeSessionIdRef = useRef(null)
+  const sessionsRef = useRef([])
+  const messagesRef = useRef([])
+  const activeGenerationRef = useRef(null)
+  const lastGenerationRevisionRef = useRef(0)
+  const finalizingGenerationRef = useRef(null)
+  const finalizationPromiseRef = useRef(null)
+  const finalizationRetryRef = useRef({ jobId: null, attempts: 0, timerId: null })
+  const finalizeGenerationHandlerRef = useRef(() => Promise.resolve())
+  const generationStateHandlerRef = useRef(() => undefined)
+  const cancellationPromiseRef = useRef(null)
+  const cancelRequestedJobIdsRef = useRef(new Set())
+  const presentationCancellationRef = useRef(null)
+  const storageWriteQueueRef = useRef(Promise.resolve())
+  const storageWriteEpochRef = useRef(0)
+  const partialPersistTimerRef = useRef(null)
+  const lastPartialPersistAtRef = useRef(0)
+  const flushVisibleSessionRef = useRef(() => Promise.resolve())
+  const mountedRef = useRef(false)
   const panelVisibleRef = useRef(document.visibilityState !== 'hidden')
-  const panelVisibilityWaitersRef = useRef([])
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
   const autoScrollRef = useRef(true)
@@ -272,6 +323,16 @@ function App() {
   const setGenerating = useCallback((val) => {
     setIsGeneratingState(val)
     isGeneratingRef.current = val
+  }, [])
+
+  useEffect(() => { activeSessionIdRef.current = activeSessionId }, [activeSessionId])
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
+  useEffect(() => { messagesRef.current = messages }, [messages])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
 
   const scheduleScrollToBottom = useCallback(() => {
@@ -312,6 +373,7 @@ function App() {
     }
     userPausedAutoScrollRef.current = true
     autoScrollRef.current = false
+    forceScrollToBottomRef.current = false
     setShowScrollDownBtn(true)
   }, [])
 
@@ -395,40 +457,169 @@ function App() {
     return t('chat.new_chat')
   }, [t])
 
-  const persistCurrentSession = useCallback((nextMessages) => {
-    if (!activeSessionId || !nextMessages?.length) return
+  const enqueueStorageWrite = useCallback((values) => {
+    const writeEpoch = storageWriteEpochRef.current
+    const write = () => (
+      writeEpoch === storageWriteEpochRef.current
+        ? setChromeStorage(values)
+        : Promise.resolve()
+    )
+    const queuedWrite = storageWriteQueueRef.current
+      .catch(() => undefined)
+      .then(write)
+    storageWriteQueueRef.current = queuedWrite.catch(error => {
+      console.error('Chrome storage write failed', error)
+    })
+    return queuedWrite
+  }, [])
 
-    setSessions(prev => {
-      const existing = prev.find(s => s.id === activeSessionId)
+  const mergeSessionMessages = useCallback((sessionId, nextMessages) => {
+    if (!sessionId || !nextMessages?.length) return null
+    const previous = sessionsRef.current
+    const existing = previous.find(session => session.id === sessionId)
+    if (nextMessages.length === 1 && nextMessages[0].role === 'model' && !existing) return null
 
-      if (nextMessages.length === 1 && nextMessages[0].role === 'model' && !existing) {
-        return prev
-      }
-
-      const others = prev.filter(s => s.id !== activeSessionId)
-      const newArr = [...others, {
-        id: activeSessionId,
+    const nextSessions = [
+      ...previous.filter(session => session.id !== sessionId),
+      {
+        id: sessionId,
         title: generateTitle(nextMessages),
         updatedAt: Date.now(),
-        messages: nextMessages
-      }]
+        messages: nextMessages,
+      },
+    ]
+    sessionsRef.current = nextSessions
+    if (mountedRef.current) setSessions(nextSessions)
+    return nextSessions
+  }, [generateTitle])
 
-      if (chrome && chrome.storage) {
-        chrome.storage.local.set({ sessions: newArr, activeSessionId })
-      }
-
-      return newArr
+  const persistSessionMessages = useCallback((sessionId, nextMessages, extraStorage = {}) => {
+    const nextSessions = mergeSessionMessages(sessionId, nextMessages)
+    if (!nextSessions) return Promise.resolve()
+    return enqueueStorageWrite({
+      sessions: nextSessions,
+      activeSessionId: activeSessionIdRef.current || sessionId,
+      ...extraStorage,
     })
-  }, [activeSessionId, generateTitle])
+  }, [enqueueStorageWrite, mergeSessionMessages])
+
+  const persistSessionMessagesFromLatestStorage = useCallback((sessionId, nextMessages) => {
+    if (!sessionId || !nextMessages?.length) return Promise.resolve()
+    const writeEpoch = storageWriteEpochRef.current
+    const write = async () => {
+      if (writeEpoch !== storageWriteEpochRef.current) return
+      if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return
+
+      const stored = await chrome.storage.local.get(['sessions'])
+      if (writeEpoch !== storageWriteEpochRef.current) return
+      const localSession = sessionsRef.current.find(session => session.id === sessionId)
+      if (!localSession) return
+
+      const storedSessions = Array.isArray(stored?.sessions) ? stored.sessions : []
+      const storedSession = storedSessions.find(session => session?.id === sessionId)
+      const nextSessions = [
+        ...storedSessions.filter(session => session?.id !== sessionId),
+        {
+          ...(storedSession || localSession),
+          id: sessionId,
+          title: generateTitle(nextMessages),
+          updatedAt: Date.now(),
+          messages: nextMessages,
+        },
+      ]
+      await setChromeStorage({ sessions: nextSessions })
+    }
+    const queuedWrite = storageWriteQueueRef.current
+      .catch(() => undefined)
+      .then(write)
+    storageWriteQueueRef.current = queuedWrite.catch(error => {
+      console.error('Chrome storage merged session write failed', error)
+    })
+    return queuedWrite
+  }, [generateTitle])
+
+  const persistAuthoritativeSessionRepair = useCallback((authoritativeGeneration) => {
+    const repaired = repairStoredSessions(
+      sessionsRef.current,
+      msgIdCounter,
+      authoritativeGeneration,
+    )
+    if (!repaired.changed) return Promise.resolve(false)
+
+    sessionsRef.current = repaired.sessions
+    if (mountedRef.current) setSessions(repaired.sessions)
+
+    const activeSession = repaired.sessions.find(session => (
+      session.id === activeSessionIdRef.current
+    ))
+    if (activeSession) {
+      messagesRef.current = activeSession.messages || []
+      if (mountedRef.current) setMessages(messagesRef.current)
+    }
+
+    return enqueueStorageWrite({
+      sessions: repaired.sessions,
+      activeSessionId: activeSessionIdRef.current,
+    }).then(() => true)
+  }, [enqueueStorageWrite])
+
+  const flushVisibleSession = useCallback((immediate = false) => {
+    const sessionId = activeSessionIdRef.current
+    const visibleMessages = messagesRef.current
+    if (!sessionId || !visibleMessages?.length) return Promise.resolve()
+    if (partialPersistTimerRef.current != null) {
+      window.clearTimeout(partialPersistTimerRef.current)
+      partialPersistTimerRef.current = null
+    }
+    lastPartialPersistAtRef.current = Date.now()
+    if (immediate) {
+      const nextSessions = mergeSessionMessages(sessionId, visibleMessages)
+      if (!nextSessions) return Promise.resolve()
+      storageWriteEpochRef.current += 1
+      const precedingWrites = storageWriteQueueRef.current.catch(() => undefined)
+      const immediateWrite = setChromeStorage({
+        sessions: nextSessions,
+        activeSessionId: activeSessionIdRef.current || sessionId,
+      }).catch(error => {
+        console.error('Immediate Chrome storage flush failed', error)
+      })
+      storageWriteQueueRef.current = Promise.all([precedingWrites, immediateWrite]).then(() => undefined)
+      return immediateWrite
+    }
+    return persistSessionMessages(sessionId, visibleMessages)
+  }, [mergeSessionMessages, persistSessionMessages])
+
+  useEffect(() => {
+    flushVisibleSessionRef.current = flushVisibleSession
+  }, [flushVisibleSession])
+
+  useEffect(() => {
+    if (!isGenerating || !activeSessionId || !messages.some(message => message.status === 'streaming')) {
+      return undefined
+    }
+    if (partialPersistTimerRef.current != null) return undefined
+    const elapsed = Date.now() - lastPartialPersistAtRef.current
+    const delay = Math.max(0, PARTIAL_PERSIST_INTERVAL_MS - elapsed)
+    partialPersistTimerRef.current = window.setTimeout(() => {
+      partialPersistTimerRef.current = null
+      lastPartialPersistAtRef.current = Date.now()
+      void persistSessionMessages(activeSessionIdRef.current, messagesRef.current)
+    }, delay)
+    return undefined
+  }, [activeSessionId, isGenerating, messages, persistSessionMessages])
 
   const appendAssistantTextToMessage = useCallback((messageId, text) => {
     if (!text || messageId == null) return
 
-    setMessages(prev => prev.map(message => (
-      message.id === messageId && message.role === 'model'
-        ? { ...message, content: `${message.content || ''}${text}`, status: 'streaming' }
-        : message
-    )))
+    setMessages(prev => {
+      const next = prev.map(message => (
+        message.id === messageId && message.role === 'model'
+          ? { ...message, content: `${message.content || ''}${text}`, status: 'streaming' }
+          : message
+      ))
+      messagesRef.current = next
+      return next
+    })
   }, [])
 
   const resolveStreamDrainWaiters = useCallback(() => {
@@ -443,6 +634,8 @@ function App() {
       streamDisplayFrameRef.current = null
     }
     if (discardPending) streamBufferRef.current = ''
+    streamLastDisplayAtRef.current = 0
+    streamRevealNotBeforeRef.current = 0
     resolveStreamDrainWaiters()
   }, [resolveStreamDrainWaiters])
 
@@ -464,14 +657,23 @@ function App() {
         return
       }
 
-      const characters = getStreamDisplayCharacters(streamBufferRef.current.length)
-      const nextSlice = takeUnicodeCharacters(streamBufferRef.current, characters)
+      const now = Date.now()
+      const { characters, delay } = getStreamDisplayStep(streamBufferRef.current.length)
+      const nextDisplayAt = Math.max(
+        streamRevealNotBeforeRef.current,
+        streamLastDisplayAtRef.current + delay,
+      )
+      if (now < nextDisplayAt) {
+        streamDisplayFrameRef.current = requestDisplayFrame(pump)
+        return
+      }
+
+      const nextSlice = takeDisplayChunk(streamBufferRef.current, characters)
       streamBufferRef.current = streamBufferRef.current.slice(nextSlice.length)
       displayedAssistantContentRef.current += nextSlice
+      streamLastDisplayAtRef.current = now
 
-      flushSync(() => {
-        appendAssistantTextToMessage(messageId, nextSlice)
-      })
+      appendAssistantTextToMessage(messageId, nextSlice)
 
       if (streamBufferRef.current) {
         streamDisplayFrameRef.current = requestDisplayFrame(pump)
@@ -484,29 +686,6 @@ function App() {
     streamDisplayFrameRef.current = requestDisplayFrame(pump)
   }, [appendAssistantTextToMessage, resolveStreamDrainWaiters])
 
-  const queueAssistantText = useCallback((messageId, text) => {
-    if (!text || messageId == null) return
-    streamBufferRef.current += text
-
-    if (
-      panelVisibleRef.current &&
-      streamDisplayFrameRef.current == null &&
-      !displayedAssistantContentRef.current
-    ) {
-      const firstSlice = takeUnicodeCharacters(
-        streamBufferRef.current,
-        getStreamDisplayCharacters(streamBufferRef.current.length),
-      )
-      streamBufferRef.current = streamBufferRef.current.slice(firstSlice.length)
-      displayedAssistantContentRef.current += firstSlice
-      flushSync(() => {
-        appendAssistantTextToMessage(messageId, firstSlice)
-      })
-    }
-
-    scheduleAssistantDisplayFrame(messageId)
-  }, [appendAssistantTextToMessage, scheduleAssistantDisplayFrame])
-
   const drainAssistantBuffer = useCallback(() => {
     if (!streamBufferRef.current && streamDisplayFrameRef.current == null) return Promise.resolve()
     return new Promise(resolve => {
@@ -514,43 +693,416 @@ function App() {
     })
   }, [])
 
-  const resolvePanelVisibilityWaiters = useCallback(() => {
-    const waiters = panelVisibilityWaitersRef.current
-    panelVisibilityWaitersRef.current = []
-    waiters.forEach(waiter => {
-      waiter.signal?.removeEventListener('abort', waiter.handleAbort)
-      waiter.resolve()
+  const updateVisibleGenerationMessage = useCallback((generation, updater) => {
+    if (!generation || generation.sessionId !== activeSessionIdRef.current) return null
+    const assistantMessageId = generation.assistantMessageId
+    let found = false
+    const currentMessages = messagesRef.current
+    const nextMessages = currentMessages.map(message => {
+      if (message.id !== assistantMessageId || message.role !== 'model') return message
+      found = true
+      return updater(message)
     })
-  }, [])
 
-  const waitForPanelVisible = useCallback((signal) => {
-    if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
-    if (panelVisibleRef.current && document.visibilityState !== 'hidden') return Promise.resolve()
-
-    return new Promise((resolve, reject) => {
-      const waiter = { resolve, reject, signal, handleAbort: null }
-      waiter.handleAbort = () => {
-        panelVisibilityWaitersRef.current = panelVisibilityWaitersRef.current.filter(item => item !== waiter)
-        reject(new DOMException('Aborted', 'AbortError'))
-      }
-      signal?.addEventListener('abort', waiter.handleAbort, { once: true })
-      panelVisibilityWaitersRef.current.push(waiter)
-    })
-  }, [])
-
-  const waitForVisiblePaint = useCallback(async (signal) => {
-    while (true) {
-      await waitForPanelVisible(signal)
-      await waitForAnimationFrame(signal)
-      if (!panelVisibleRef.current || document.visibilityState === 'hidden') continue
-      await waitForAnimationFrame(signal)
-      if (panelVisibleRef.current && document.visibilityState !== 'hidden') return
+    if (!found) {
+      const created = createAssistantMessage({
+        id: assistantMessageId,
+        requestId: generation.requestId || generation.jobId,
+        userMessageId: generation.userMessageId,
+        startedAt: generation.startedAt || Date.now(),
+      })
+      nextMessages.push(updater(created))
     }
-  }, [waitForPanelVisible])
+
+    messagesRef.current = nextMessages
+    if (mountedRef.current) setMessages(nextMessages)
+    return nextMessages
+  }, [])
+
+  const prepareGenerationPresentation = useCallback((generation) => {
+    if (!generation || generation.sessionId !== activeSessionIdRef.current) return false
+    const assistantMessageId = generation.assistantMessageId
+    const existingMessage = messagesRef.current.find(message => (
+      message.id === assistantMessageId && message.role === 'model'
+    ))
+    const fullContent = getGenerationContent(generation)
+    const storedContent = typeof existingMessage?.content === 'string' ? existingMessage.content : ''
+    const visibleContent = fullContent.startsWith(storedContent) ? storedContent : ''
+
+    stopAssistantDisplayQueue(true)
+    streamTargetMessageIdRef.current = assistantMessageId
+    displayedAssistantContentRef.current = visibleContent
+    streamLastDisplayAtRef.current = 0
+    streamRevealNotBeforeRef.current = visibleContent ? 0 : Date.now() + MIN_THINKING_VISIBLE_MS
+
+    updateVisibleGenerationMessage(generation, message => ({
+      ...message,
+      content: visibleContent,
+      status: visibleContent ? 'streaming' : 'thinking',
+      sources: Array.isArray(generation.sources) ? generation.sources : (message.sources || []),
+      errorCode: null,
+    }))
+    return true
+  }, [stopAssistantDisplayQueue, updateVisibleGenerationMessage])
+
+  const queueGenerationContent = useCallback((generation) => {
+    if (!generation || generation.sessionId !== activeSessionIdRef.current) return
+    const fullContent = getGenerationContent(generation)
+    const displayedContent = displayedAssistantContentRef.current
+    const knownContent = `${displayedContent}${streamBufferRef.current}`
+
+    if (fullContent.startsWith(knownContent)) {
+      const suffix = fullContent.slice(knownContent.length)
+      if (suffix) streamBufferRef.current += suffix
+    } else if (fullContent.startsWith(displayedContent)) {
+      streamBufferRef.current = fullContent.slice(displayedContent.length)
+    } else {
+      displayedAssistantContentRef.current = ''
+      streamBufferRef.current = fullContent
+      streamRevealNotBeforeRef.current = Date.now() + MIN_THINKING_VISIBLE_MS
+      updateVisibleGenerationMessage(generation, message => ({
+        ...message,
+        content: '',
+        status: 'thinking',
+      }))
+    }
+
+    if (Array.isArray(generation.sources)) {
+      updateVisibleGenerationMessage(generation, message => ({
+        ...message,
+        sources: generation.sources,
+      }))
+    }
+    scheduleAssistantDisplayFrame(generation.assistantMessageId)
+  }, [scheduleAssistantDisplayFrame, updateVisibleGenerationMessage])
+
+  const finalizeGeneration = useCallback((generation) => {
+    if (!generation?.jobId) return Promise.resolve()
+    if (finalizationPromiseRef.current?.jobId === generation.jobId) {
+      return finalizationPromiseRef.current.promise
+    }
+    finalizingGenerationRef.current = generation.jobId
+
+    const finalizationPromise = (async () => {
+      try {
+        const startedVisible = generation.sessionId === activeSessionIdRef.current
+        const presentationWasCancelled = presentationCancellationRef.current?.jobId === generation.jobId
+
+        if (generation.status === 'cancelled' || presentationWasCancelled) {
+          stopAssistantDisplayQueue(true)
+        } else if (generation.status === 'interrupted') {
+          stopAssistantDisplayQueue(true)
+          if (startedVisible) displayedAssistantContentRef.current = getGenerationContent(generation)
+        } else if (startedVisible) {
+          queueGenerationContent(generation)
+          await drainAssistantBuffer()
+        }
+
+        const presentationCancellation = presentationCancellationRef.current?.jobId === generation.jobId
+          ? presentationCancellationRef.current
+          : null
+        if (
+          startedVisible
+          && !presentationCancellation
+          && generation.status === 'error'
+          && !displayedAssistantContentRef.current
+        ) {
+          const remainingThinkingTime = streamRevealNotBeforeRef.current - Date.now()
+          if (remainingThinkingTime > 0) {
+            await new Promise(resolve => window.setTimeout(resolve, remainingThinkingTime))
+          }
+        }
+
+        if (!mountedRef.current) return
+
+        // Resolve the target session after every presentation await. The active
+        // session may have changed while the typing queue was draining.
+        const storedSession = sessionsRef.current.find(session => session.id === generation.sessionId)
+        const effectiveGenerationStatus = presentationCancellation ? 'cancelled' : generation.status
+        const terminalStatus = effectiveGenerationStatus === 'completed'
+          ? 'done'
+          : effectiveGenerationStatus
+        const fullContent = getGenerationContent(generation)
+        const storedAssistant = storedSession?.messages?.find(message => (
+          message.id === generation.assistantMessageId && message.role === 'model'
+        ))
+        const finalContent = effectiveGenerationStatus === 'cancelled'
+          ? (
+              presentationCancellation?.content
+              ?? generation.cancelledVisibleContent
+              ?? storedAssistant?.content
+              ?? ''
+            )
+          : fullContent
+
+        if (storedSession) {
+          let found = false
+          let nextMessages = (storedSession.messages || []).map(message => {
+            if (message.id !== generation.assistantMessageId || message.role !== 'model') return message
+            found = true
+            return {
+              ...message,
+              content: finalContent,
+              status: terminalStatus,
+              sources: Array.isArray(generation.sources) ? generation.sources : (message.sources || []),
+              errorCode: generation.errorCode || null,
+            }
+          })
+
+          if (
+            !found
+            && (
+              finalContent
+              || effectiveGenerationStatus === 'error'
+              || effectiveGenerationStatus === 'interrupted'
+            )
+          ) {
+            nextMessages = [
+              ...nextMessages,
+              {
+                ...createAssistantMessage({
+                  id: generation.assistantMessageId,
+                  requestId: generation.requestId || generation.jobId,
+                  userMessageId: generation.userMessageId,
+                  startedAt: generation.startedAt || Date.now(),
+                }),
+                content: finalContent,
+                status: terminalStatus,
+                sources: Array.isArray(generation.sources) ? generation.sources : [],
+                errorCode: generation.errorCode || null,
+              },
+            ]
+          }
+
+          if (effectiveGenerationStatus === 'cancelled' && !finalContent) {
+            nextMessages = nextMessages.filter(message => message.id !== generation.assistantMessageId)
+          }
+
+          if (partialPersistTimerRef.current != null) {
+            window.clearTimeout(partialPersistTimerRef.current)
+            partialPersistTimerRef.current = null
+          }
+          if (generation.sessionId === activeSessionIdRef.current) {
+            messagesRef.current = nextMessages
+            setMessages(nextMessages)
+          }
+          await persistSessionMessages(generation.sessionId, nextMessages)
+        }
+
+        const acknowledgement = await sendRuntimeMessage({
+          type: 'DONE_ACK',
+          jobId: generation.jobId,
+          finalRevision: generation.revision || 0,
+        })
+        if (acknowledgement?.ok !== true) {
+          const error = new Error(acknowledgement.errorCode || 'generation_ack_failed')
+          error.name = 'GenerationAcknowledgementError'
+          throw error
+        }
+
+        let acknowledgementReplacement = null
+        if (acknowledgement.removed === false) {
+          const state = await sendRuntimeMessage({ type: 'GET_STATE' })
+          if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+            throw new Error('Generation state response was invalid after acknowledgement')
+          }
+          const authoritativeGeneration = state.activeGeneration
+          if (
+            authoritativeGeneration?.jobId === generation.jobId
+            && TERMINAL_GENERATION_STATUSES.has(authoritativeGeneration.status)
+          ) {
+            const error = new Error('generation_ack_not_removed')
+            error.name = 'GenerationAcknowledgementError'
+            throw error
+          }
+          acknowledgementReplacement = authoritativeGeneration || null
+        }
+
+        const isVisibleAtCommit = generation.sessionId === activeSessionIdRef.current
+        if (effectiveGenerationStatus === 'error' && isVisibleAtCommit) {
+          toast.error(t(`chat.generation_errors.${generation.errorCode || 'generation_failed'}`, {
+            defaultValue: t('chat.connection_error'),
+          }))
+        } else if (effectiveGenerationStatus === 'interrupted' && isVisibleAtCommit) {
+          toast.error(t('chat.status.interrupted'))
+        }
+
+        if (finalizationRetryRef.current.jobId === generation.jobId) {
+          if (finalizationRetryRef.current.timerId != null) {
+            window.clearTimeout(finalizationRetryRef.current.timerId)
+          }
+          finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+        }
+
+        const wasTrackingAcknowledgedGeneration = activeGenerationRef.current?.jobId === generation.jobId
+        if (wasTrackingAcknowledgedGeneration) {
+          activeGenerationRef.current = null
+          lastGenerationRevisionRef.current = 0
+          streamTargetMessageIdRef.current = null
+          stopAssistantDisplayQueue(true)
+        }
+        cancelRequestedJobIdsRef.current.delete(generation.jobId)
+        if (presentationCancellationRef.current?.jobId === generation.jobId) {
+          presentationCancellationRef.current = null
+        }
+        if (acknowledgementReplacement?.jobId) {
+          generationStateHandlerRef.current(acknowledgementReplacement)
+        } else if (wasTrackingAcknowledgedGeneration) {
+          setGenerating(false)
+        }
+      } catch (error) {
+        console.error('Generation finalization failed', error)
+        if (!mountedRef.current || activeGenerationRef.current?.jobId !== generation.jobId) return
+
+        const previousRetry = finalizationRetryRef.current
+        const attempts = previousRetry.jobId === generation.jobId
+          ? previousRetry.attempts + 1
+          : 1
+        const retryDelay = FINALIZATION_RETRY_DELAYS_MS[attempts - 1]
+
+        if (retryDelay == null) {
+          finalizationRetryRef.current = {
+            jobId: generation.jobId,
+            attempts,
+            timerId: null,
+          }
+          setGenerating(false)
+          toast.error(t('chat.connection_error'))
+          return
+        }
+
+        setGenerating(true)
+        const timerId = window.setTimeout(async () => {
+          if (finalizationRetryRef.current.jobId !== generation.jobId) return
+          finalizationRetryRef.current = {
+            ...finalizationRetryRef.current,
+            timerId: null,
+          }
+          if (!mountedRef.current || activeGenerationRef.current?.jobId !== generation.jobId) return
+
+          let retryGeneration = activeGenerationRef.current
+          try {
+            const state = await sendRuntimeMessage({ type: 'GET_STATE' })
+            if (state && Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+              const authoritativeGeneration = state.activeGeneration
+              if (!authoritativeGeneration) {
+                finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+                activeGenerationRef.current = null
+                lastGenerationRevisionRef.current = 0
+                streamTargetMessageIdRef.current = null
+                presentationCancellationRef.current = null
+                cancelRequestedJobIdsRef.current.delete(generation.jobId)
+                stopAssistantDisplayQueue(true)
+                setGenerating(false)
+                return
+              }
+
+              if (authoritativeGeneration.jobId !== generation.jobId) {
+                finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+                activeGenerationRef.current = null
+                lastGenerationRevisionRef.current = 0
+                streamTargetMessageIdRef.current = null
+                presentationCancellationRef.current = null
+                cancelRequestedJobIdsRef.current.delete(generation.jobId)
+                stopAssistantDisplayQueue(true)
+                generationStateHandlerRef.current(authoritativeGeneration)
+                return
+              }
+
+              retryGeneration = {
+                ...retryGeneration,
+                ...authoritativeGeneration,
+              }
+              activeGenerationRef.current = retryGeneration
+              lastGenerationRevisionRef.current = Math.max(
+                lastGenerationRevisionRef.current,
+                Number(authoritativeGeneration.revision || 0),
+              )
+            }
+          } catch (reconciliationError) {
+            console.error('Generation finalization reconciliation failed', reconciliationError)
+          }
+
+          if (activeGenerationRef.current?.jobId === generation.jobId) {
+            void finalizeGenerationHandlerRef.current(retryGeneration)
+          }
+        }, retryDelay)
+        finalizationRetryRef.current = {
+          jobId: generation.jobId,
+          attempts,
+          timerId,
+        }
+      } finally {
+        if (finalizingGenerationRef.current === generation.jobId) {
+          finalizingGenerationRef.current = null
+        }
+        if (finalizationPromiseRef.current?.jobId === generation.jobId) {
+          finalizationPromiseRef.current = null
+        }
+      }
+    })()
+
+    finalizationPromiseRef.current = {
+      jobId: generation.jobId,
+      promise: finalizationPromise,
+    }
+    return finalizationPromise
+  }, [drainAssistantBuffer, persistSessionMessages, queueGenerationContent, setGenerating, stopAssistantDisplayQueue, t])
+
+  finalizeGenerationHandlerRef.current = finalizeGeneration
+
+  const handleGenerationState = useCallback((incomingGeneration) => {
+    if (!incomingGeneration?.jobId) return
+    const currentGeneration = activeGenerationRef.current
+    if (currentGeneration?.jobId && currentGeneration.jobId !== incomingGeneration.jobId) return
+
+    const incomingRevision = Number(incomingGeneration.revision || 0)
+    const isTerminal = TERMINAL_GENERATION_STATUSES.has(incomingGeneration.status)
+    const isTerminalTransition = isTerminal && !TERMINAL_GENERATION_STATUSES.has(currentGeneration?.status)
+    const isForwardStatusTransition = (
+      currentGeneration?.status === 'queued'
+      && incomingGeneration.status === 'running'
+    )
+    if (
+      currentGeneration
+      && (
+        incomingRevision < lastGenerationRevisionRef.current
+        || (
+          incomingRevision === lastGenerationRevisionRef.current
+          && !isTerminalTransition
+          && !isForwardStatusTransition
+        )
+      )
+    ) {
+      return
+    }
+
+    const generation = { ...currentGeneration, ...incomingGeneration }
+    activeGenerationRef.current = generation
+    lastGenerationRevisionRef.current = Math.max(lastGenerationRevisionRef.current, incomingRevision)
+    setGenerating(true)
+
+    if (
+      generation.sessionId === activeSessionIdRef.current
+      && streamTargetMessageIdRef.current !== generation.assistantMessageId
+    ) {
+      prepareGenerationPresentation(generation)
+    }
+
+    if (generation.sessionId === activeSessionIdRef.current) {
+      queueGenerationContent(generation)
+    }
+
+    if (isTerminal) finalizeGeneration(generation)
+  }, [finalizeGeneration, prepareGenerationPresentation, queueGenerationContent, setGenerating])
+
+  generationStateHandlerRef.current = handleGenerationState
 
   useEffect(() => {
     const markPanelHidden = () => {
       panelVisibleRef.current = false
+      streamLastDisplayAtRef.current = 0
+      void flushVisibleSessionRef.current(true)
       if (streamDisplayFrameRef.current != null) {
         cancelDisplayFrame(streamDisplayFrameRef.current)
         streamDisplayFrameRef.current = null
@@ -559,8 +1111,15 @@ function App() {
 
     const markPanelVisible = () => {
       if (document.visibilityState === 'hidden') return
+      const wasVisible = panelVisibleRef.current
       panelVisibleRef.current = true
-      resolvePanelVisibilityWaiters()
+      if (!wasVisible) {
+        const now = Date.now()
+        streamLastDisplayAtRef.current = now
+        if (streamTargetMessageIdRef.current != null && !displayedAssistantContentRef.current) {
+          streamRevealNotBeforeRef.current = now + MIN_THINKING_VISIBLE_MS
+        }
+      }
       scheduleAssistantDisplayFrame()
     }
 
@@ -587,24 +1146,40 @@ function App() {
       window.removeEventListener('pagehide', markPanelHidden)
       window.removeEventListener('pageshow', markPanelVisible)
       window.removeEventListener('focus', markPanelVisible)
-
-      const waiters = panelVisibilityWaitersRef.current
-      panelVisibilityWaitersRef.current = []
-      waiters.forEach(waiter => {
-        waiter.signal?.removeEventListener('abort', waiter.handleAbort)
-        waiter.reject(new DOMException('Aborted', 'AbortError'))
-      })
     }
-  }, [resolvePanelVisibilityWaiters, scheduleAssistantDisplayFrame])
+  }, [scheduleAssistantDisplayFrame])
 
   useEffect(() => () => {
-    stopAssistantDisplayQueue(true)
-    if (streamingControllerRef.current) {
-      streamAbortReasonRef.current = 'unmount'
-      streamingControllerRef.current.abort()
-      streamingControllerRef.current = null
+    mountedRef.current = false
+    void flushVisibleSessionRef.current(true)
+    if (partialPersistTimerRef.current != null) {
+      window.clearTimeout(partialPersistTimerRef.current)
+      partialPersistTimerRef.current = null
     }
+    if (finalizationRetryRef.current.timerId != null) {
+      window.clearTimeout(finalizationRetryRef.current.timerId)
+      finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+    }
+    stopAssistantDisplayQueue(true)
   }, [stopAssistantDisplayQueue])
+
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return undefined
+    const listener = (message) => {
+      if (message?.type === 'ACTIVE_GEN_CHANGED') {
+        handleGenerationState(message.snapshot || message.activeGeneration)
+      } else if (message?.type === 'DONE' || message?.type === 'CANCEL_DONE') {
+        handleGenerationState(message.activeGeneration || message.generation || message)
+      } else if (message?.type === 'START_REJECTED') {
+        toast.error(t(`chat.generation_errors.${message.errorCode || 'already_running'}`, {
+          defaultValue: t('chat.connection_error'),
+        }))
+      }
+      return false
+    }
+    chrome.runtime.onMessage.addListener(listener)
+    return () => chrome.runtime.onMessage.removeListener(listener)
+  }, [handleGenerationState, t])
 
   const captureScreenshot = useCallback(async (coords) => {
     if (!coords) return null;
@@ -641,23 +1216,26 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const listener = async (msg) => {
+    const listener = (msg) => {
       if (msg.type === 'HERAAI_CROP_DONE' && !cropProcessingRef.current) {
         cropProcessingRef.current = true;
-        try {
-          setGenerating(true);
-          const attachment = await captureScreenshot(msg.coords);
-          if (attachment) {
-            setAttachments(prev => [...prev, attachment]);
+        void (async () => {
+          try {
+            setGenerating(true);
+            const attachment = await captureScreenshot(msg.coords);
+            if (attachment) {
+              setAttachments(prev => [...prev, attachment]);
+            }
+          } catch (err) {
+            console.error("Screenshot error", err);
+            toast.error(t('chat.file_error'))
+          } finally {
+            setGenerating(Boolean(activeGenerationRef.current?.jobId));
+            cropProcessingRef.current = false;
           }
-        } catch (err) {
-          console.error("Screenshot error", err);
-          toast.error(t('chat.file_error'))
-        } finally {
-          setGenerating(false);
-          cropProcessingRef.current = false;
-        }
+        })()
       }
+      return false
     };
     if (chrome && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener(listener);
@@ -677,181 +1255,629 @@ function App() {
   }, [isGenerating, activeMode])
 
   useEffect(() => {
-    if (chrome && chrome.storage) {
-      chrome.storage.local.get(['theme', 'startupBehavior', 'systemInstruction', 'chatHistory', 'sessions', 'activeSessionId', 'customPrimaryColor', 'language', 'selectedText', 'selectedModel'], (result) => {
-        const config = {
-          theme: result.theme || 'system',
-          startupBehavior: result.startupBehavior || 'resume',
-          systemInstruction: result.systemInstruction || '',
-          customPrimaryColor: result.customPrimaryColor || '#7c5cff',
-          language: result.language || 'tr',
-        }
-
-        setAppConfig(config)
-        applyTheme(config.theme, config.customPrimaryColor)
-
-        if (result.language) {
-          i18n.changeLanguage(result.language)
-        }
-
-        if (result.selectedModel && MODELS.includes(result.selectedModel)) {
-          setSelectedModel(result.selectedModel)
-        } else {
-          setSelectedModel(DEFAULT_MODEL)
-        }
-
-        const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
-        const storedSessionRepair = repairStoredSessions(result.sessions, msgIdCounter)
-        const storedSessions = storedSessionRepair.sessions
-
-        if (storedSessionRepair.changed) {
-          chrome.storage.local.set({ sessions: storedSessions })
-        }
-
-        if (storedSessions.length > 0) {
-          setSessions(storedSessions)
-
-          if (config.startupBehavior === 'resume') {
-            const currId = result.activeSessionId || storedSessions[0].id
-            setActiveSessionId(currId)
-            const currSession = storedSessions.find(s => s.id === currId) || storedSessions[0]
-            setMessages(currSession.messages || welcomeMsg)
-          } else {
-            const id = Date.now().toString()
-            const newSession = { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
-            const nextSessions = [...storedSessions, newSession]
-            setActiveSessionId(id)
-            setSessions(nextSessions)
-            setMessages(welcomeMsg)
-            chrome.storage.local.set({ sessions: nextSessions, activeSessionId: id })
-          }
-
-        } else if (result.chatHistory && result.chatHistory.length > 1) {
-          const repairedHistory = repairMessageIds(result.chatHistory, msgIdCounter).messages
-          const id = Date.now().toString()
-          const newSession = { id, title: t('chat.history_title'), updatedAt: Date.now(), messages: repairedHistory }
-
-          if (config.startupBehavior === 'resume') {
-            setActiveSessionId(id)
-            setSessions([newSession])
-            setMessages(repairedHistory)
-            chrome.storage.local.set({ sessions: [newSession], activeSessionId: id })
-          } else {
-            const newId = Date.now().toString() + '1'
-            const welcomeSession = { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
-            const nextSessions = [newSession, welcomeSession]
-            setActiveSessionId(newId)
-            setSessions(nextSessions)
-            setMessages(welcomeMsg)
-            chrome.storage.local.set({ sessions: nextSessions, activeSessionId: newId })
-          }
-
-        } else {
-          const id = Date.now().toString()
-          setActiveSessionId(id)
-          setSessions([{ id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
-          setMessages(welcomeMsg)
-        }
-        setIsLoading(false)
-
-        if (result.selectedText) {
-          setInput(prev => appendToInputValue(prev, result.selectedText))
-          chrome.storage.local.remove(['selectedText'])
-        }
-      })
-
-      const storageListener = (changes, namespace) => {
-        if (namespace === 'local' && changes.selectedText && changes.selectedText.newValue) {
-          setInput(prev => appendToInputValue(prev, changes.selectedText.newValue));
-          chrome.storage.local.remove(['selectedText']);
-        }
-      };
-
-      chrome.storage.onChanged.addListener(storageListener)
-
-      return () => {
-        chrome.storage.onChanged.removeListener(storageListener)
-      }
-    } else {
-      setIsLoading(false)
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) {
+      const translate = i18n.getFixedT(i18n.resolvedLanguage || i18n.language || 'tr')
       const id = Date.now().toString()
-      const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
+      const welcomeMessages = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: translate('chat.welcome') }]
+      activeSessionIdRef.current = id
+      sessionsRef.current = [{ id, title: translate('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMessages }]
+      messagesRef.current = welcomeMessages
       setActiveSessionId(id)
-      setSessions([{ id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }])
-      setMessages(welcomeMsg)
+      setSessions(sessionsRef.current)
+      setMessages(welcomeMessages)
+      setIsLoading(false)
+      return undefined
     }
-  }, [t, applyTheme])
+
+    let disposed = false
+    let initializationComplete = false
+    let pendingGenerationChange
+    let hasPendingGenerationChange = false
+    let pendingSessionsChange
+    let hasPendingSessionsChange = false
+    let pendingActiveSessionIdChange
+    let hasPendingActiveSessionIdChange = false
+    let bootstrapStateRetryTimerId = null
+
+    const clearBootstrapGeneration = (expectedJobId) => {
+      if (activeGenerationRef.current?.jobId !== expectedJobId) return
+      activeGenerationRef.current = null
+      lastGenerationRevisionRef.current = 0
+      streamTargetMessageIdRef.current = null
+      presentationCancellationRef.current = null
+      cancelRequestedJobIdsRef.current.delete(expectedJobId)
+      stopAssistantDisplayQueue(true)
+      setGenerating(false)
+    }
+
+    const applyBootstrapStateReconciliation = async (expectedJobId, authoritativeGeneration) => {
+      if (disposed) return
+      const trackedGeneration = activeGenerationRef.current
+      if (trackedGeneration?.jobId && trackedGeneration.jobId !== expectedJobId) return
+
+      if (!authoritativeGeneration) {
+        clearBootstrapGeneration(expectedJobId)
+        await persistAuthoritativeSessionRepair(null)
+        return
+      }
+
+      if (authoritativeGeneration.jobId !== expectedJobId) {
+        clearBootstrapGeneration(expectedJobId)
+        await persistAuthoritativeSessionRepair(authoritativeGeneration)
+        if (disposed) return
+      }
+
+      generationStateHandlerRef.current(authoritativeGeneration)
+    }
+
+    const scheduleBootstrapStateReconciliation = (expectedJobId, attempt = 0) => {
+      const retryDelay = BOOTSTRAP_STATE_RETRY_DELAYS_MS[attempt]
+      if (disposed || retryDelay == null) return
+
+      bootstrapStateRetryTimerId = window.setTimeout(async () => {
+        bootstrapStateRetryTimerId = null
+        if (disposed || activeGenerationRef.current?.jobId !== expectedJobId) return
+
+        try {
+          const state = await sendRuntimeMessageWithTimeout(
+            { type: 'GET_STATE' },
+            BOOTSTRAP_STATE_TIMEOUT_MS,
+          )
+          if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+            throw new Error('Generation state response was invalid during bootstrap retry')
+          }
+          await applyBootstrapStateReconciliation(expectedJobId, state.activeGeneration)
+        } catch (error) {
+          console.error('Generation state retry failed', error)
+          scheduleBootstrapStateReconciliation(expectedJobId, attempt + 1)
+        }
+      }, retryDelay)
+    }
+
+    const initialize = async () => {
+      let result = {}
+      try {
+        result = await chrome.storage.local.get([
+          'theme',
+          'startupBehavior',
+          'systemInstruction',
+          'chatHistory',
+          'sessions',
+          'activeSessionId',
+          'activeGeneration',
+          'customPrimaryColor',
+          'language',
+          'selectedText',
+          'selectedModel',
+        ])
+      } catch (error) {
+        console.error('Chrome storage initialization failed', error)
+      }
+      if (disposed) return
+
+      const config = {
+        theme: result.theme || 'system',
+        startupBehavior: result.startupBehavior || 'resume',
+        systemInstruction: result.systemInstruction || '',
+        customPrimaryColor: result.customPrimaryColor || '#7c5cff',
+        language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
+      }
+      const currentLanguage = i18n.resolvedLanguage || i18n.language
+      if (currentLanguage !== config.language) {
+        try {
+          await i18n.changeLanguage(config.language)
+        } catch (error) {
+          console.error('Language initialization failed', error)
+        }
+        if (disposed) return
+      }
+      const translate = i18n.getFixedT(config.language)
+      setAppConfig(config)
+      applyTheme(config.theme, config.customPrimaryColor)
+      setSelectedModel(
+        result.selectedModel && MODELS.includes(result.selectedModel)
+          ? result.selectedModel
+          : DEFAULT_MODEL
+      )
+
+      const welcomeMessages = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: translate('chat.welcome') }]
+      // Do not repair transient assistant states until GET_STATE has supplied the
+      // authoritative generation. A stale storage snapshot can otherwise preserve
+      // an orphaned "thinking" message, or remove the placeholder for a newer job.
+      let nextSessions = Array.isArray(result.sessions) ? result.sessions : []
+      let nextActiveSessionId = null
+      let nextMessages = welcomeMessages
+      let shouldPersistSessions = false
+
+      if (nextSessions.length > 0) {
+        if (config.startupBehavior === 'resume') {
+          const requestedId = result.activeSessionId || nextSessions[0].id
+          const currentSession = nextSessions.find(session => session.id === requestedId) || nextSessions[0]
+          nextActiveSessionId = currentSession.id
+          nextMessages = currentSession.messages || welcomeMessages
+        } else {
+          nextActiveSessionId = Date.now().toString()
+          const newSession = {
+            id: nextActiveSessionId,
+            title: translate('chat.new_chat'),
+            updatedAt: Date.now(),
+            messages: welcomeMessages,
+          }
+          nextSessions = [...nextSessions, newSession]
+          shouldPersistSessions = true
+        }
+      } else if (Array.isArray(result.chatHistory) && result.chatHistory.length > 1) {
+        const repairedHistory = repairMessageIds(result.chatHistory, msgIdCounter).messages
+        const historyId = Date.now().toString()
+        const historySession = {
+          id: historyId,
+          title: translate('chat.history_title'),
+          updatedAt: Date.now(),
+          messages: repairedHistory,
+        }
+        if (config.startupBehavior === 'resume') {
+          nextActiveSessionId = historyId
+          nextSessions = [historySession]
+          nextMessages = repairedHistory
+        } else {
+          nextActiveSessionId = `${Date.now()}1`
+          const welcomeSession = {
+            id: nextActiveSessionId,
+            title: translate('chat.new_chat'),
+            updatedAt: Date.now(),
+            messages: welcomeMessages,
+          }
+          nextSessions = [historySession, welcomeSession]
+        }
+        shouldPersistSessions = true
+      } else {
+        nextActiveSessionId = Date.now().toString()
+        nextSessions = [{
+          id: nextActiveSessionId,
+          title: translate('chat.new_chat'),
+          updatedAt: Date.now(),
+          messages: welcomeMessages,
+        }]
+        shouldPersistSessions = true
+      }
+
+      if (result.selectedText) {
+        setInput(previous => appendToInputValue(previous, result.selectedText))
+        void chrome.storage.local.remove(['selectedText'])
+      }
+
+      let generation = result.activeGeneration || null
+      let generationStateReconciliationFailed = false
+      try {
+        const state = await sendRuntimeMessageWithTimeout(
+          { type: 'GET_STATE' },
+          BOOTSTRAP_STATE_TIMEOUT_MS,
+        )
+        if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+          throw new Error('Generation state response was invalid during bootstrap')
+        }
+        generation = state.activeGeneration
+      } catch (error) {
+        console.error('Generation state reconciliation failed', error)
+        generationStateReconciliationFailed = true
+      }
+      if (disposed) return
+
+      if (hasPendingGenerationChange) {
+        if (!pendingGenerationChange) {
+          generation = null
+        } else if (
+          !generation
+          || pendingGenerationChange.jobId !== generation.jobId
+          || Number(pendingGenerationChange.revision || 0) >= Number(generation.revision || 0)
+        ) {
+          generation = pendingGenerationChange
+        }
+      }
+
+      // A START claim writes sessions, activeSessionId, and activeGeneration in
+      // one storage transaction. If that transaction lands while the initial
+      // read is pending, adopt all three fields together so finalization can
+      // always resolve the generation's session.
+      if (hasPendingSessionsChange) {
+        nextSessions = Array.isArray(pendingSessionsChange) ? pendingSessionsChange : []
+      }
+      if (hasPendingActiveSessionIdChange) {
+        nextActiveSessionId = pendingActiveSessionIdChange || null
+      }
+
+      const authoritativeSessionRepair = repairStoredSessions(
+        nextSessions,
+        msgIdCounter,
+        generation,
+      )
+      nextSessions = authoritativeSessionRepair.sessions
+      shouldPersistSessions = shouldPersistSessions || authoritativeSessionRepair.changed
+
+      const repairedActiveSession = (
+        nextSessions.find(session => session.id === nextActiveSessionId)
+        || nextSessions[0]
+      )
+      if (repairedActiveSession) {
+        nextActiveSessionId = repairedActiveSession.id
+        nextMessages = repairedActiveSession.messages || welcomeMessages
+      }
+
+      activeSessionIdRef.current = nextActiveSessionId
+      sessionsRef.current = nextSessions
+      messagesRef.current = nextMessages
+      setActiveSessionId(nextActiveSessionId)
+      setSessions(nextSessions)
+      setMessages(nextMessages)
+
+      if (shouldPersistSessions) {
+        void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
+      }
+
+      activeGenerationRef.current = null
+      lastGenerationRevisionRef.current = 0
+      initializationComplete = true
+      if (generation?.jobId) {
+        generationStateHandlerRef.current(generation)
+      } else {
+        setGenerating(false)
+      }
+      setIsLoading(false)
+      if (
+        generationStateReconciliationFailed
+        && generation?.jobId
+        && ACTIVE_GENERATION_STATUSES.has(generation.status)
+      ) {
+        scheduleBootstrapStateReconciliation(generation.jobId)
+      }
+    }
+
+    const storageListener = (changes, namespace) => {
+      if (namespace !== 'local') return
+      if (changes.selectedText?.newValue) {
+        setInput(previous => appendToInputValue(previous, changes.selectedText.newValue))
+        void chrome.storage.local.remove(['selectedText'])
+      }
+      if (!initializationComplete) {
+        if (changes.sessions) {
+          pendingSessionsChange = changes.sessions.newValue
+          hasPendingSessionsChange = true
+        }
+        if (changes.activeSessionId) {
+          pendingActiveSessionIdChange = changes.activeSessionId.newValue
+          hasPendingActiveSessionIdChange = true
+        }
+        if (changes.activeGeneration) {
+          pendingGenerationChange = changes.activeGeneration.newValue || null
+          hasPendingGenerationChange = true
+        }
+        return
+      }
+      if (changes.activeGeneration) {
+        const nextGeneration = changes.activeGeneration.newValue || null
+        if (nextGeneration) {
+          const generationSessionMissing = !sessionsRef.current.some(session => (
+            session.id === nextGeneration.sessionId
+          ))
+          const changedSessions = changes.sessions?.newValue
+          const changedGenerationSession = generationSessionMissing && Array.isArray(changedSessions)
+            ? changedSessions.find(session => session?.id === nextGeneration.sessionId)
+            : null
+          if (changedGenerationSession) {
+            const nextSessions = [
+              ...sessionsRef.current.filter(session => session.id !== nextGeneration.sessionId),
+              changedGenerationSession,
+            ]
+            sessionsRef.current = nextSessions
+            setSessions(nextSessions)
+
+            if (changes.activeSessionId?.newValue === nextGeneration.sessionId) {
+              activeSessionIdRef.current = nextGeneration.sessionId
+              messagesRef.current = changedGenerationSession.messages || []
+              setActiveSessionId(nextGeneration.sessionId)
+              setMessages(messagesRef.current)
+            }
+          }
+          generationStateHandlerRef.current(nextGeneration)
+          return
+        }
+
+        const trackedGeneration = activeGenerationRef.current
+        if (trackedGeneration && finalizingGenerationRef.current !== trackedGeneration.jobId) {
+          if (finalizationRetryRef.current.timerId != null) {
+            window.clearTimeout(finalizationRetryRef.current.timerId)
+          }
+          finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+          activeGenerationRef.current = null
+          lastGenerationRevisionRef.current = 0
+          streamTargetMessageIdRef.current = null
+          presentationCancellationRef.current = null
+          cancelRequestedJobIdsRef.current.delete(trackedGeneration.jobId)
+          stopAssistantDisplayQueue(true)
+          setGenerating(false)
+          void persistAuthoritativeSessionRepair(null)
+        }
+      }
+    }
+    chrome.storage.onChanged.addListener(storageListener)
+    void initialize()
+
+    return () => {
+      disposed = true
+      if (bootstrapStateRetryTimerId != null) {
+        window.clearTimeout(bootstrapStateRetryTimerId)
+      }
+      chrome.storage.onChanged.removeListener(storageListener)
+    }
+  }, [applyTheme, enqueueStorageWrite, persistAuthoritativeSessionRepair, setGenerating, stopAssistantDisplayQueue])
 
   useLayoutEffect(() => {
     const container = scrollRef.current
     if (!container) return
 
     if (forceScrollToBottomRef.current || autoScrollRef.current) {
-      container.scrollTop = container.scrollHeight
-      forceScrollToBottomRef.current = false
-      autoScrollRef.current = true
-      userPausedAutoScrollRef.current = false
-      setShowScrollDownBtn(false)
+      scheduleScrollToBottom()
       return
     }
 
     setShowScrollDownBtn(true)
-  }, [messages])
+  }, [messages, scheduleScrollToBottom])
 
-  const startNewSession = useCallback(() => {
-    if (streamingControllerRef.current) {
-      streamAbortReasonRef.current = 'session'
-      streamingControllerRef.current.abort()
-      streamingControllerRef.current = null
+  const cancelActiveGeneration = useCallback((reason = 'user') => {
+    const generation = activeGenerationRef.current
+    if (!generation?.jobId) {
+      return Promise.resolve()
+    }
+
+    if (
+      TERMINAL_GENERATION_STATUSES.has(generation.status)
+      && finalizationRetryRef.current.jobId === generation.jobId
+      && finalizationRetryRef.current.timerId != null
+    ) {
+      setGenerating(true)
+      return Promise.resolve()
+    }
+
+    if (
+      TERMINAL_GENERATION_STATUSES.has(generation.status)
+      && finalizationPromiseRef.current?.jobId !== generation.jobId
+      && finalizationRetryRef.current.jobId === generation.jobId
+      && finalizationRetryRef.current.attempts > FINALIZATION_RETRY_DELAYS_MS.length
+    ) {
+      finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+    }
+
+    if (
+      generation.status === 'completed'
+      && (
+        finalizingGenerationRef.current === generation.jobId
+        || finalizationPromiseRef.current?.jobId === generation.jobId
+      )
+    ) {
+      if (presentationCancellationRef.current?.jobId !== generation.jobId) {
+        const visibleContent = generation.sessionId === activeSessionIdRef.current
+          ? displayedAssistantContentRef.current
+          : getGenerationContent(generation)
+        presentationCancellationRef.current = {
+          jobId: generation.jobId,
+          content: visibleContent,
+        }
+        stopAssistantDisplayQueue(true)
+        if (generation.sessionId === activeSessionIdRef.current) {
+          const nextMessages = updateVisibleGenerationMessage(generation, message => ({
+            ...message,
+            content: visibleContent,
+            status: visibleContent ? 'cancelled' : 'cancelled_empty',
+          }))
+          if (nextMessages?.length) void persistSessionMessages(generation.sessionId, nextMessages)
+        }
+      }
+      setGenerating(true)
+      return finalizationPromiseRef.current?.jobId === generation.jobId
+        ? finalizationPromiseRef.current.promise
+        : finalizeGeneration(generation)
+    }
+
+    if (TERMINAL_GENERATION_STATUSES.has(generation.status)) {
+      setGenerating(true)
+      return finalizationPromiseRef.current?.jobId === generation.jobId
+        ? finalizationPromiseRef.current.promise
+        : finalizeGeneration(generation)
+    }
+
+    if (!ACTIVE_GENERATION_STATUSES.has(generation.status)) return Promise.resolve()
+    if (cancellationPromiseRef.current?.jobId === generation.jobId) {
+      return cancellationPromiseRef.current.promise
+    }
+    cancelRequestedJobIdsRef.current.add(generation.jobId)
+
+    const visibleContent = generation.sessionId === activeSessionIdRef.current
+      ? displayedAssistantContentRef.current
+      : getGenerationContent(generation)
+    activeGenerationRef.current = {
+      ...generation,
+      cancelledVisibleContent: visibleContent,
     }
     stopAssistantDisplayQueue(true)
-    setGenerating(false)
+
+    if (generation.sessionId === activeSessionIdRef.current) {
+      const nextMessages = updateVisibleGenerationMessage(generation, message => ({
+        ...message,
+        content: visibleContent,
+        status: visibleContent ? 'cancelled' : 'cancelled_empty',
+      }))
+      if (nextMessages?.length) void persistSessionMessages(generation.sessionId, nextMessages)
+    }
+    setGenerating(true)
+
+    const clearTrackedGeneration = () => {
+      if (activeGenerationRef.current?.jobId !== generation.jobId) return
+      activeGenerationRef.current = null
+      lastGenerationRevisionRef.current = 0
+      streamTargetMessageIdRef.current = null
+      presentationCancellationRef.current = null
+      cancelRequestedJobIdsRef.current.delete(generation.jobId)
+      stopAssistantDisplayQueue(true)
+      setGenerating(false)
+    }
+
+    const applyAuthoritativeSnapshot = (snapshot) => {
+      if (!snapshot) {
+        clearTrackedGeneration()
+        return 'cleared'
+      }
+
+      if (snapshot.jobId !== generation.jobId) {
+        clearTrackedGeneration()
+        handleGenerationState(snapshot)
+        return TERMINAL_GENERATION_STATUSES.has(snapshot.status) ? 'terminal' : 'active'
+      }
+
+      if (TERMINAL_GENERATION_STATUSES.has(snapshot.status)) {
+        handleGenerationState(snapshot)
+        return 'terminal'
+      }
+
+      const reconciledGeneration = {
+        ...activeGenerationRef.current,
+        ...snapshot,
+      }
+      cancelRequestedJobIdsRef.current.delete(generation.jobId)
+      activeGenerationRef.current = reconciledGeneration
+      lastGenerationRevisionRef.current = Math.max(
+        lastGenerationRevisionRef.current,
+        Number(snapshot.revision || 0),
+      )
+      setGenerating(true)
+      if (reconciledGeneration.sessionId === activeSessionIdRef.current) {
+        prepareGenerationPresentation(reconciledGeneration)
+        queueGenerationContent(reconciledGeneration)
+      }
+      return 'active'
+    }
+
+    const reconcileWithWorker = async () => {
+      const state = await sendRuntimeMessage({ type: 'GET_STATE' })
+      if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+        throw new Error('Generation state response was invalid')
+      }
+      return applyAuthoritativeSnapshot(state.activeGeneration)
+    }
+
+    const cancellationPromise = (async () => {
+      try {
+        const response = await sendRuntimeMessage({
+          type: 'CANCEL',
+          jobId: generation.jobId,
+          reason,
+        })
+        const responseGeneration = response?.activeGeneration
+        let result
+        if (
+          responseGeneration?.jobId === generation.jobId
+          && TERMINAL_GENERATION_STATUSES.has(responseGeneration.status)
+        ) {
+          result = applyAuthoritativeSnapshot(responseGeneration)
+        } else {
+          result = await reconcileWithWorker()
+        }
+
+        if (result === 'terminal' && finalizationPromiseRef.current?.jobId === generation.jobId) {
+          await finalizationPromiseRef.current.promise
+        }
+      } catch (error) {
+        console.error('Generation cancellation failed', error)
+        try {
+          const result = await reconcileWithWorker()
+          if (result === 'terminal' && finalizationPromiseRef.current?.jobId === generation.jobId) {
+            await finalizationPromiseRef.current.promise
+          }
+        } catch (reconciliationError) {
+          console.error('Generation cancellation reconciliation failed', reconciliationError)
+          if (mountedRef.current && activeGenerationRef.current?.jobId === generation.jobId) {
+            setGenerating(true)
+            toast.error(t('chat.connection_error'))
+          }
+        }
+      } finally {
+        if (cancellationPromiseRef.current?.jobId === generation.jobId) {
+          cancellationPromiseRef.current = null
+        }
+      }
+    })()
+
+    cancellationPromiseRef.current = {
+      jobId: generation.jobId,
+      promise: cancellationPromise,
+    }
+    return cancellationPromise
+  }, [finalizeGeneration, handleGenerationState, persistSessionMessages, prepareGenerationPresentation, queueGenerationContent, setGenerating, stopAssistantDisplayQueue, t, updateVisibleGenerationMessage])
+
+  const startNewSession = useCallback(() => {
+    void cancelActiveGeneration('new_chat')
+    stopAssistantDisplayQueue(true)
+    setGenerating(Boolean(activeGenerationRef.current?.jobId))
     streamTargetMessageIdRef.current = null
 
     const id = Date.now().toString()
     const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
+    const nextSessions = [
+      ...sessionsRef.current,
+      { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg },
+    ]
+    activeSessionIdRef.current = id
+    sessionsRef.current = nextSessions
+    messagesRef.current = welcomeMsg
     setActiveSessionId(id)
-    setSessions(prev => {
-      const next = [...prev, { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }]
-      if (chrome && chrome.storage) {
-        chrome.storage.local.set({ sessions: next, activeSessionId: id })
-      }
-      return next
-    })
+    setSessions(nextSessions)
     setMessages(welcomeMsg)
+    void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: id })
     setShowHistory(false)
     stickToBottomOnNextRender()
-  }, [setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+  }, [cancelActiveGeneration, enqueueStorageWrite, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   const loadSession = useCallback((id) => {
-    if (streamingControllerRef.current) {
-      streamAbortReasonRef.current = 'session'
-      streamingControllerRef.current.abort()
-      streamingControllerRef.current = null
+    const generation = activeGenerationRef.current
+    const isSwitchingSession = activeSessionIdRef.current !== id
+    if (generation && generation.sessionId !== id) {
+      void cancelActiveGeneration('session_switch')
     }
-    stopAssistantDisplayQueue(true)
-    setGenerating(false)
-    streamTargetMessageIdRef.current = null
+    if (isSwitchingSession) stopAssistantDisplayQueue(true)
+    setGenerating(Boolean(activeGenerationRef.current?.jobId))
+    if (isSwitchingSession) streamTargetMessageIdRef.current = null
 
-    const session = sessions.find(s => s.id === id)
+    const session = sessionsRef.current.find(item => item.id === id)
     if (session) {
+      activeSessionIdRef.current = id
+      messagesRef.current = session.messages || []
       setActiveSessionId(id)
-      setMessages(session.messages)
+      setMessages(messagesRef.current)
       stickToBottomOnNextRender()
-      if (chrome && chrome.storage) {
-        chrome.storage.local.set({ activeSessionId: id })
+      void enqueueStorageWrite({ activeSessionId: id })
+      if (
+        isSwitchingSession
+        && generation?.sessionId === id
+        && ACTIVE_GENERATION_STATUSES.has(generation.status)
+      ) {
+        setGenerating(true)
+        prepareGenerationPresentation(generation)
+        queueGenerationContent(generation)
       }
     }
     setShowHistory(false)
-  }, [sessions, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue])
+  }, [cancelActiveGeneration, enqueueStorageWrite, prepareGenerationPresentation, queueGenerationContent, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue])
 
   const deleteSession = useCallback((id) => {
-    const remainingSessions = sessions.filter(s => s.id !== id)
+    if (activeGenerationRef.current?.sessionId === id) {
+      void cancelActiveGeneration('session_deleted')
+    }
+    const remainingSessions = sessionsRef.current.filter(session => session.id !== id)
+    const wasActiveSession = activeSessionIdRef.current === id
     let nextSessions = remainingSessions
-    let nextActiveSessionId = activeSessionId
-    let nextMessages = messages
+    let nextActiveSessionId = activeSessionIdRef.current
+    let nextMessages = messagesRef.current
 
-    if (activeSessionId === id) {
+    if (wasActiveSession) {
       if (remainingSessions.length > 0) {
         const nextSession = remainingSessions[0]
         nextActiveSessionId = nextSession.id
@@ -866,25 +1892,28 @@ function App() {
       }
     }
 
+    sessionsRef.current = nextSessions
+    activeSessionIdRef.current = nextActiveSessionId
     setSessions(nextSessions)
     setActiveSessionId(nextActiveSessionId)
-    if (activeSessionId === id) {
+    if (wasActiveSession) {
+      messagesRef.current = nextMessages
       setMessages(nextMessages)
       stickToBottomOnNextRender()
     }
-    if (chrome && chrome.storage) {
-      chrome.storage.local.set({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
-    }
-  }, [activeSessionId, messages, sessions, stickToBottomOnNextRender, t])
+    void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
+  }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
 
   const clearHistory = useCallback(() => {
+    void cancelActiveGeneration('clear_history')
+    sessionsRef.current = []
     setSessions([])
-    if (chrome && chrome.storage) {
-      chrome.storage.local.remove(['sessions', 'activeSessionId', 'chatHistory'])
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      void chrome.storage.local.remove(['chatHistory'])
     }
     startNewSession()
     toast.success(t('chat.history_cleared'))
-  }, [t, startNewSession])
+  }, [cancelActiveGeneration, startNewSession, t])
 
   const handleExport = useCallback(() => {
     if (sessions.length === 0) {
@@ -900,28 +1929,42 @@ function App() {
     if (!file) return
 
     try {
+      await cancelActiveGeneration('import')
+      if (activeGenerationRef.current?.jobId) {
+        toast.error(t('chat.connection_error'))
+        e.target.value = ''
+        return
+      }
       const importedSessions = await importSessions(file)
+      sessionsRef.current = importedSessions
       setSessions(importedSessions)
       if (importedSessions.length > 0) {
+        activeSessionIdRef.current = importedSessions[0].id
+        messagesRef.current = importedSessions[0].messages || []
         setActiveSessionId(importedSessions[0].id)
-        setMessages(importedSessions[0].messages || [])
+        setMessages(messagesRef.current)
         stickToBottomOnNextRender()
-        if (chrome && chrome.storage) {
-          chrome.storage.local.set({ sessions: importedSessions, activeSessionId: importedSessions[0].id })
-        }
+        void enqueueStorageWrite({ sessions: importedSessions, activeSessionId: importedSessions[0].id })
       }
       toast.success(t('chat.imported'))
     } catch (err) {
       toast.error(err.message || t('chat.import_error'))
     }
     e.target.value = ''
-  }, [stickToBottomOnNextRender, t])
+  }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
 
   const handleSend = useCallback(async (directActionText = null, actionOptions = {}) => {
-    const actualText = typeof directActionText === 'string' ? directActionText : null;
-    const safeInput = typeof input === 'string' ? input : '';
-    const userText = actualText || safeInput.trim();
-    if ((!userText && attachments.length === 0) || isGeneratingRef.current) return
+    const actualText = typeof directActionText === 'string' ? directActionText : null
+    const safeInput = typeof input === 'string' ? input : ''
+    const userText = actualText || safeInput.trim()
+    if (!userText && attachments.length === 0) return
+    if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
+      toast.error(t('chat.generation_errors.already_running', {
+        defaultValue: t('chat.connection_error'),
+      }))
+      return
+    }
+    if (isGeneratingRef.current) return
 
     const automaticMode = enableResearch ? 'web' : (attachments.length > 0 ? 'vision' : 'chat')
     const supportedModes = new Set(['chat', 'vision', 'web'])
@@ -929,224 +1972,228 @@ function App() {
       ? actionOptions.modeOverride
       : automaticMode
 
-    const messageAttachments = attachments.map(att => ({
+    const retryUserMessage = actionOptions?.retryUserMessage
+    const sourceAttachments = retryUserMessage?.attachments || attachments
+    const messageAttachments = sourceAttachments.map(att => ({
       data: att.data,
       mimeType: att.mimeType,
       name: att.name
     }))
 
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')
-    const userMessageId = createUniqueMessageId(msgIdCounter)
+    const userMessageId = retryUserMessage?.id || createUniqueMessageId(msgIdCounter)
     const assistantMessageId = createUniqueMessageId(msgIdCounter)
     const requestId = `${Date.now()}-${assistantMessageId}`
+    const jobId = requestId
     const startedAt = Date.now()
-    const userMsg = createUserMessage({
-      id: userMessageId,
-      content: userText,
-      attachments: messageAttachments,
-      mode
-    })
+    const userMsg = retryUserMessage
+      ? { ...retryUserMessage, content: userText, attachments: messageAttachments, mode: retryUserMessage.mode || mode }
+      : createUserMessage({
+          id: userMessageId,
+          content: userText,
+          attachments: messageAttachments,
+          mode,
+        })
     const assistantMsg = createAssistantMessage({
       id: assistantMessageId,
       requestId,
       userMessageId,
       startedAt
     })
-    const baseMessages = normalizeConversationMessages(messages)
+    const retryUserIndex = retryUserMessage
+      ? messagesRef.current.findIndex(message => message.id === retryUserMessage.id)
+      : -1
+    const baseMessages = normalizeConversationMessages(
+      retryUserIndex >= 0
+        ? messagesRef.current.slice(0, retryUserIndex)
+        : messagesRef.current
+    )
     const requestMessages = [...baseMessages, userMsg]
-    let shouldDropEmptyAssistant = false
-    let finalMessages = null
-    let assistantContent = ''
-    let assistantSources = []
-    let assistantStatus = 'done'
-    let requestTimedOut = false
+    const requestSessionId = activeSessionIdRef.current
+    const optimisticMessages = [...baseMessages, userMsg, assistantMsg]
+    const sessionTitle = generateTitle(optimisticMessages)
+    const generation = {
+      jobId,
+      requestId,
+      sessionId: requestSessionId,
+      userMessageId,
+      assistantMessageId,
+      startedAt,
+      completedAt: null,
+      mode,
+      model: selectedModel,
+      language: appConfig?.language || i18n.language || 'tr',
+      status: 'queued',
+      revision: 0,
+      content: '',
+      sources: [],
+      errorCode: null,
+      cancelReason: null,
+      updatedAt: startedAt,
+    }
 
+    activeGenerationRef.current = generation
+    lastGenerationRevisionRef.current = 0
+    finalizingGenerationRef.current = null
+    if (finalizationRetryRef.current.timerId != null) {
+      window.clearTimeout(finalizationRetryRef.current.timerId)
+    }
+    finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
+    presentationCancellationRef.current = null
     streamTargetMessageIdRef.current = assistantMessageId
-    streamAbortReasonRef.current = null
     streamBufferRef.current = ''
     displayedAssistantContentRef.current = ''
+    streamLastDisplayAtRef.current = 0
+    streamRevealNotBeforeRef.current = startedAt + MIN_THINKING_VISIBLE_MS
     streamDrainResolversRef.current = []
+    messagesRef.current = optimisticMessages
+    mergeSessionMessages(requestSessionId, optimisticMessages)
+    lastPartialPersistAtRef.current = startedAt
 
     flushSync(() => {
       setGenerating(true)
       stickToBottomOnNextRender()
-      setMessages([...baseMessages, userMsg, assistantMsg])
+      setMessages(optimisticMessages)
       setInput('')
       setAttachments([])
     })
-    persistCurrentSession([...baseMessages, userMsg])
 
-    const controller = new AbortController()
-    streamingControllerRef.current = controller
-    const requestTimeoutId = window.setTimeout(() => {
-      requestTimedOut = true
-      streamAbortReasonRef.current = 'timeout'
-      controller.abort()
-    }, REQUEST_TIMEOUT_MS)
-
-    try {
-      await waitForVisiblePaint(controller.signal)
-      if (controller.signal.aborted) {
-        throw new DOMException('Aborted', 'AbortError')
-      }
-
-      const geminiResolved = await resolveKeysForRequest('gemini')
-      if (geminiResolved.allInCooldown) {
-        const timeStr = new Date(geminiResolved.earliestCooldownEnd).toLocaleTimeString()
-        const cooldownError = new Error(t('chat.all_keys_cooldown', { time: timeStr }))
-        cooldownError.name = 'KeyCooldownError'
-        throw cooldownError
-      }
-
-      let tavilyResolved = null
-      if (mode === 'web') {
-        tavilyResolved = await resolveKeysForRequest('tavily')
-        if (tavilyResolved.allInCooldown) {
-          const timeStr = new Date(tavilyResolved.earliestCooldownEnd).toLocaleTimeString()
-          const cooldownError = new Error(t('chat.all_keys_cooldown', { time: timeStr }))
-          cooldownError.name = 'KeyCooldownError'
-          throw cooldownError
-        }
-      }
-
-      const requestOptions = {
-        systemInstruction: appConfig?.systemInstruction || '',
-        language: appConfig?.language || i18n.language || 'tr',
-      };
-
-      const keysForGemini = geminiResolved.keys
-      const keysForTavily = tavilyResolved ? tavilyResolved.keys : []
-
-      const events = mode === 'web'
-        ? streamResearch(requestMessages, keysForGemini, keysForTavily, controller.signal, selectedModel)
-        : mode === 'vision'
-          ? streamVision(requestMessages, null, requestOptions, keysForGemini, controller.signal, selectedModel)
-          : streamChat(requestMessages, requestOptions, keysForGemini, controller.signal, selectedModel)
-
-      for await (const evt of events) {
-        if (evt.event === 'chunk') {
-          const chunkText = evt.data.text || ''
-          assistantContent += chunkText
-          assistantStatus = 'streaming'
-          queueAssistantText(assistantMessageId, chunkText)
-        } else if (evt.event === 'sources') {
-          assistantSources = evt.data.sources || []
-          setMessages(prev => prev.map(message => (
-            message.id === assistantMessageId && message.role === 'model'
-              ? { ...message, sources: assistantSources }
-              : message
-          )))
-        } else if (evt.event === 'error') {
-          assistantStatus = 'error'
-          toast.error(evt.data.message, { duration: 5000 })
-          break;
-        } else if (evt.event === 'key_status') {
-          const { provider, keyId, status } = evt.data
-          if (status === 'cooldown') {
-            const cooldownMs = 60000
-            updateKeyMetadata(provider, keyId, {
-              cooldownUntil: Date.now() + cooldownMs,
-              lastErrorAt: Date.now(),
-              lastErrorType: 'rate_limited',
-            })
-          } else if (status === 'quota_exceeded') {
-            const cooldownMs = 120000
-            updateKeyMetadata(provider, keyId, {
-              cooldownUntil: Date.now() + cooldownMs,
-              lastErrorAt: Date.now(),
-              lastErrorType: 'quota_exceeded',
-            })
-          } else if (status === 'success') {
-            updateKeyMetadata(provider, keyId, {
-              lastSuccessAt: Date.now(),
-              failCount: 0,
-              cooldownUntil: null,
-              lastErrorType: null,
-            })
-          } else if (status === 'error') {
-            updateKeyMetadata(provider, keyId, {
-              lastErrorAt: Date.now(),
-              lastErrorType: 'invalid',
-            })
-          }
-        }
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (requestTimedOut || streamAbortReasonRef.current === 'timeout') {
-          assistantStatus = 'error'
-          toast.error(t('chat.connection_error'))
-        } else {
-          const displayedContent = displayedAssistantContentRef.current
-          assistantStatus = displayedContent ? 'cancelled' : 'cancelled_empty'
-          shouldDropEmptyAssistant = !displayedContent
-        }
-      } else {
-        assistantStatus = 'error'
-        if (err.name === 'KeyCooldownError') {
-          toast.error(err.message)
-        } else {
-          console.error("handleSend Error", err)
-          toast.error(t('chat.connection_error'))
-        }
-      }
-    } finally {
-      window.clearTimeout(requestTimeoutId)
-      const wasCancelledBeforeDrain = streamAbortReasonRef.current === 'user' || streamAbortReasonRef.current === 'session'
-      if (wasCancelledBeforeDrain) {
-        stopAssistantDisplayQueue(true)
-      } else {
-        await drainAssistantBuffer()
-      }
-
-      const displayedAssistantContent = displayedAssistantContentRef.current
-      const wasUserCancelled = streamAbortReasonRef.current === 'user' || streamAbortReasonRef.current === 'session'
-
-      if (wasUserCancelled) {
-        stopAssistantDisplayQueue(true)
-        assistantStatus = displayedAssistantContent ? 'cancelled' : 'cancelled_empty'
-        shouldDropEmptyAssistant = !displayedAssistantContent
-      }
-
-      if (assistantStatus === 'streaming') {
-        assistantStatus = 'done'
-      }
-
-      setMessages(prev => {
-        let next = prev.map(message => {
+    const persistLocalStartFailure = async (errorCode = 'generation_failed') => {
+      const storedSession = sessionsRef.current.find(session => session.id === requestSessionId)
+      if (storedSession) {
+        let found = false
+        let failedMessages = (storedSession.messages || []).map(message => {
           if (message.id !== assistantMessageId || message.role !== 'model') return message
-          return assistantStatus === 'error'
-            ? markAssistantError({ ...message, sources: assistantSources }, message.content || displayedAssistantContent)
-            : finalizeAssistantMessage(message, {
-              content: displayedAssistantContent,
-              status: assistantStatus,
-              sources: assistantSources
-            })
+          found = true
+          return {
+            ...message,
+            status: 'error',
+            errorCode,
+          }
         })
-
-        if (shouldDropEmptyAssistant) {
-          next = next.filter(message => (
-            message.id !== assistantMessageId || message.role !== 'model' || message.content
-          ))
+        if (!found) {
+          failedMessages = [
+            ...failedMessages,
+            {
+              ...assistantMsg,
+              status: 'error',
+              errorCode,
+            },
+          ]
         }
 
-        return next
-      })
+        if (activeSessionIdRef.current === requestSessionId) {
+          messagesRef.current = failedMessages
+          if (mountedRef.current) setMessages(failedMessages)
+        }
+        mergeSessionMessages(requestSessionId, failedMessages)
+        try {
+          await persistSessionMessagesFromLatestStorage(requestSessionId, failedMessages)
+        } catch (storageError) {
+          console.error('Failed to persist generation start error', storageError)
+        }
+      }
 
-      const persistedAssistantContent = assistantStatus === 'done'
-        ? assistantContent
-        : displayedAssistantContent
-      const shouldPersistAssistant = persistedAssistantContent || (assistantStatus !== 'error' && assistantStatus !== 'cancelled_empty')
-      finalMessages = shouldPersistAssistant
-        ? [...baseMessages, userMsg, { ...assistantMsg, content: persistedAssistantContent, status: assistantStatus, sources: assistantSources }]
-        : [...baseMessages, userMsg]
-      persistCurrentSession(finalMessages)
-      setGenerating(false)
-      streamingControllerRef.current = null
-      streamTargetMessageIdRef.current = null
-      streamAbortReasonRef.current = null
+      if (activeGenerationRef.current?.jobId === jobId) {
+        activeGenerationRef.current = null
+        lastGenerationRevisionRef.current = 0
+        streamTargetMessageIdRef.current = null
+        cancelRequestedJobIdsRef.current.delete(jobId)
+        stopAssistantDisplayQueue(true)
+        setGenerating(false)
+      }
+      if (activeSessionIdRef.current === requestSessionId) {
+        toast.error(t(`chat.generation_errors.${errorCode}`, {
+          defaultValue: t('chat.connection_error'),
+        }))
+      }
     }
-  }, [input, attachments, messages, appConfig, enableResearch, selectedModel, queueAssistantText, drainAssistantBuffer, persistCurrentSession, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t, waitForVisiblePaint])
+
+    const applyAuthoritativeStartState = async (authoritativeGeneration, errorCode) => {
+      if (!authoritativeGeneration) {
+        await persistLocalStartFailure(errorCode)
+        return
+      }
+
+      if (authoritativeGeneration.jobId !== jobId) {
+        await persistLocalStartFailure(errorCode || 'already_running')
+        activeGenerationRef.current = null
+        lastGenerationRevisionRef.current = 0
+        handleGenerationState(authoritativeGeneration)
+        return
+      }
+
+      handleGenerationState(authoritativeGeneration)
+    }
+
+    let startDispatched = false
+    try {
+      await storageWriteQueueRef.current.catch(() => undefined)
+      if (
+        activeGenerationRef.current?.jobId !== jobId
+        || cancelRequestedJobIdsRef.current.has(jobId)
+        || cancellationPromiseRef.current?.jobId === jobId
+      ) {
+        return
+      }
+      startDispatched = true
+      const response = await sendRuntimeMessage({
+        type: 'HERA_GENERATION_START',
+        jobId,
+        requestId,
+        sessionId: requestSessionId,
+        userMessageId,
+        assistantMessageId,
+        startedAt,
+        mode,
+        model: selectedModel,
+        language: generation.language,
+        sessionTitle,
+        systemInstruction: appConfig?.systemInstruction || '',
+        requestMessages,
+      })
+      if (response?.activeGeneration) {
+        await applyAuthoritativeStartState(
+          response.activeGeneration,
+          response.errorCode || 'already_running',
+        )
+        return
+      }
+      if (response?.ok === false) {
+        const error = new Error(response.errorCode || 'generation_failed')
+        error.errorCode = response.errorCode || 'generation_failed'
+        error.definitiveRejection = true
+        throw error
+      }
+
+      const state = await sendRuntimeMessage({ type: 'GET_STATE' })
+      if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+        throw new Error('Generation state response was invalid')
+      }
+      await applyAuthoritativeStartState(state.activeGeneration, 'generation_failed')
+    } catch (err) {
+      console.error('Generation start failed', err)
+      const errorCode = err?.errorCode || 'generation_failed'
+      if (!startDispatched || err?.definitiveRejection) {
+        await persistLocalStartFailure(errorCode)
+        return
+      }
+
+      try {
+        const state = await sendRuntimeMessage({ type: 'GET_STATE' })
+        if (!state || !Object.prototype.hasOwnProperty.call(state, 'activeGeneration')) {
+          throw new Error('Generation state response was invalid')
+        }
+        await applyAuthoritativeStartState(state.activeGeneration, errorCode)
+      } catch (reconciliationError) {
+        console.error('Generation start reconciliation failed', reconciliationError)
+        if (mountedRef.current && activeGenerationRef.current?.jobId === jobId) {
+          setGenerating(true)
+          toast.error(t('chat.connection_error'))
+        }
+      }
+    }
+  }, [input, attachments, appConfig, enableResearch, selectedModel, generateTitle, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
 
   const handleKeyDown = useCallback((e) => {
@@ -1178,7 +2225,7 @@ function App() {
     }
 
     setAttachments(prev => [...prev, ...newAttachments])
-    setGenerating(false)
+    setGenerating(Boolean(activeGenerationRef.current?.jobId))
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [t, setGenerating])
 
@@ -1258,7 +2305,7 @@ function App() {
             console.error("Paste error", err);
             toast.error(t('chat.file_error'));
           } finally {
-            setGenerating(false);
+            setGenerating(Boolean(activeGenerationRef.current?.jobId));
           }
         }
       }
@@ -1266,25 +2313,13 @@ function App() {
   }, [t, setGenerating])
 
   const cancelStream = useCallback(() => {
-    if (streamingControllerRef.current) {
-      const targetId = streamTargetMessageIdRef.current
-      streamAbortReasonRef.current = 'user'
-      streamingControllerRef.current.abort()
-      streamingControllerRef.current = null
-      stopAssistantDisplayQueue(true)
-      setGenerating(false)
-      if (targetId != null) {
-        setMessages(prev => prev.map(message => (
-          message.id === targetId && message.role === 'model'
-            ? { ...message, status: message.content ? 'cancelled' : 'cancelled_empty' }
-            : message
-        )))
-      }
+    if (activeGenerationRef.current?.jobId) {
+      void cancelActiveGeneration('user')
       toast.success(t('chat.cancelled'))
     }
-  }, [setGenerating, stopAssistantDisplayQueue, t])
+  }, [cancelActiveGeneration, t])
 
-  const scrollToBottom = useCallback((smooth = false) => {
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
@@ -1309,7 +2344,7 @@ function App() {
     if (!message || isGeneratingRef.current) return
 
     if (message.role === 'user' && message.content) {
-      handleSend(message.content)
+      handleSend(message.content, { retryUserMessage: message })
       return
     }
 
@@ -1318,7 +2353,9 @@ function App() {
       const previousUserMessage = messageIndex > 0
         ? [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user')
         : null
-      if (previousUserMessage?.content) handleSend(previousUserMessage.content)
+      if (previousUserMessage?.content) {
+        handleSend(previousUserMessage.content, { retryUserMessage: previousUserMessage })
+      }
     }
   }, [handleSend, messages])
 
@@ -1331,10 +2368,16 @@ function App() {
     if (isAtBottom) {
       userPausedAutoScrollRef.current = false
       autoScrollRef.current = true
+      forceScrollToBottomRef.current = false
       setShowScrollDownBtn(false)
       return
     }
 
+    if (scheduledScrollFrameRef.current != null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(scheduledScrollFrameRef.current)
+      scheduledScrollFrameRef.current = null
+    }
+    forceScrollToBottomRef.current = false
     if (userPausedAutoScrollRef.current) {
       autoScrollRef.current = false
       setShowScrollDownBtn(true)
@@ -1386,6 +2429,7 @@ function App() {
       <div className="flex flex-col h-screen bg-background text-foreground overflow-y-auto">
         <SettingsPanel
           currentConfig={{}}
+          currentModel={selectedModel}
           onSave={(newConfig) => {
             setAppConfig(newConfig)
             applyTheme(newConfig.theme, newConfig.customPrimaryColor)
@@ -1445,6 +2489,7 @@ function App() {
         <div className="absolute inset-0 z-50 overflow-y-auto bg-background">
           <SettingsPanel
             currentConfig={appConfig}
+            currentModel={selectedModel}
             onClose={() => setShowSettings(false)}
             onSave={(newConfig) => {
               setAppConfig(newConfig)
@@ -1457,6 +2502,7 @@ function App() {
 
       <main
         className="relative min-h-0 flex-1 overscroll-contain overflow-x-hidden overflow-y-auto"
+        style={{ overflowAnchor: 'none' }}
         ref={scrollRef}
         onScroll={handleChatScroll}
         onWheelCapture={handleChatWheel}
@@ -1486,12 +2532,10 @@ function App() {
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-5 pb-8">
             {messages.map((msg, idx) => {
-              const isLastAssistant = idx === messages.length - 1 && msg.role === 'model'
               return (
                 <ChatMessage
                   key={msg.id ?? idx}
                   message={msg}
-                  isPending={isLastAssistant && isGenerating}
                   onEdit={handleEditMessage}
                   onRetry={handleRetryMessage}
                 />
