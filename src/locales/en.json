@@ -144,6 +144,11 @@
             "stop": "Stop",
             "model_selector": "AI Model"
         },
+        "retry_model": {
+            "title": "Try again with a model",
+            "description": "Choose a model for this retry only",
+            "default": "Default"
+        },
         "extension_error": "Extension context not found. Please refresh.",
         "reading_page": "Reading page content...",
         "page_empty": "Could not extract text from the page.",

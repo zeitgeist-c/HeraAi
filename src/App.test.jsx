@@ -26,9 +26,9 @@ vi.mock('./lib/api', () => ({
   testKey: vi.fn(),
   MODELS: [
     'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-3.6-flash',
-    'gemini-3.5-flash-lite',
   ],
   DEFAULT_MODEL: 'gemini-3.1-flash-lite',
 }));
@@ -2096,9 +2096,9 @@ describe('HeraAi App', () => {
     const optionValues = Array.from(modelSelect.options).map(opt => opt.value);
     expect(optionValues).toEqual([
       'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
       'gemini-3.5-flash',
       'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
     ]);
   });
 
@@ -2130,6 +2130,190 @@ describe('HeraAi App', () => {
     expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.5-flash');
 
     expect(currentStorage.selectedModel).toBe('gemini-3.5-flash');
+  });
+
+  it('retries the same question with a one-off model without changing the composer model', async () => {
+    currentStorage = {
+      theme: 'light',
+      selectedModel: 'gemini-3.1-flash-lite',
+    };
+    api.streamChat
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.1' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.5 Lite' } }]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Compare this question' } });
+    fireEvent.click(getSendButton());
+
+    const firstAnswer = await screen.findByText('Answer from 3.1');
+    const assistantMessage = firstAnswer.closest('[data-testid="assistant-message"]');
+    const retryButton = assistantMessage.querySelector('button[aria-haspopup="dialog"]');
+    fireEvent.click(retryButton);
+
+    const retryDialog = screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i });
+    expect(Array.from(retryDialog.querySelectorAll('[data-retry-model]')).map(button => button.dataset.retryModel)).toEqual([
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+
+    expect(await screen.findByText('Answer from 3.5 Lite')).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(2);
+    expect(api.streamChat.mock.calls[1][0].map(message => message.content)).toEqual(['Compare this question']);
+    expect(api.streamChat.mock.calls[1][4]).toBe('gemini-3.5-flash-lite');
+
+    const startMessages = global.chrome.runtime.sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter(message => message?.type === 'HERA_GENERATION_START');
+    expect(startMessages.at(-1).model).toBe('gemini-3.5-flash-lite');
+    expect(document.querySelector('select[data-testid="model-selector"]').value).toBe('gemini-3.1-flash-lite');
+    expect(currentStorage.selectedModel).toBe('gemini-3.1-flash-lite');
+    expect(screen.queryByText('Answer from 3.1')).not.toBeInTheDocument();
+  });
+
+  it('preserves the original web mode when retrying an older research answer', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'research-retry-session',
+      sessions: [{
+        id: 'research-retry-session',
+        title: 'Research retry',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'research-user', role: 'user', content: 'Research this topic', mode: 'web' },
+          {
+            id: 'research-answer',
+            userMessageId: 'research-user',
+            role: 'model',
+            content: 'Older research answer',
+            status: 'done',
+            sources: [],
+          },
+        ],
+      }],
+    };
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Fresh research answer' } },
+    ]));
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('Older research answer');
+    const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
+    fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+
+    expect(await screen.findByText('Fresh research answer')).toBeInTheDocument();
+    expect(api.streamResearch).toHaveBeenCalledTimes(1);
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(api.streamResearch.mock.calls[0][0].map(message => message.content)).toEqual(['Research this topic']);
+    expect(api.streamResearch.mock.calls[0][4]).toBe('gemini-3.5-flash-lite');
+  });
+
+  it('preserves image attachments when retrying an attachment-only vision question', async () => {
+    const attachment = { name: 'diagram.png', mimeType: 'image/png', data: 'base64-image' };
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'vision-retry-session',
+      sessions: [{
+        id: 'vision-retry-session',
+        title: 'Vision retry',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'vision-user', role: 'user', content: '', mode: 'vision', attachments: [attachment] },
+          {
+            id: 'vision-answer',
+            userMessageId: 'vision-user',
+            role: 'model',
+            content: 'Older vision answer',
+            status: 'done',
+            sources: [],
+          },
+        ],
+      }],
+    };
+    api.streamVision.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Fresh vision answer' } },
+    ]));
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('Older vision answer');
+    const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
+    fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+
+    expect(await screen.findByText('Fresh vision answer')).toBeInTheDocument();
+    expect(api.streamVision).toHaveBeenCalledTimes(1);
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(api.streamVision.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        id: 'vision-user',
+        role: 'user',
+        mode: 'vision',
+        attachments: [attachment],
+      }),
+    ]);
+    expect(api.streamVision.mock.calls[0][5]).toBe('gemini-3.5-flash-lite');
+  });
+
+  it('does not send or clear an unrelated composer draft when retrying an older text answer', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'draft-safe-retry-session',
+      sessions: [{
+        id: 'draft-safe-retry-session',
+        title: 'Draft-safe retry',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'legacy-user', role: 'user', content: 'Older text question', mode: 'chat' },
+          {
+            id: 'legacy-answer',
+            userMessageId: 'legacy-user',
+            role: 'model',
+            content: 'Older text answer',
+            status: 'done',
+            sources: [],
+          },
+        ],
+      }],
+    };
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Retried text answer' } },
+    ]));
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('Older text answer');
+    const composer = document.querySelector('textarea');
+    fireEvent.change(composer, { target: { value: 'Unsent draft' } });
+    const fileInput = document.querySelector('input[type="file"][accept*="image"]');
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['draft-image'], 'draft.png', { type: 'image/png' })] },
+    });
+    await waitFor(() => expect(screen.getByText('draft.png')).toBeInTheDocument());
+
+    const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
+    fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+
+    expect(await screen.findByText('Retried text answer')).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(1);
+    expect(api.streamVision).not.toHaveBeenCalled();
+    expect(api.streamChat.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        id: 'legacy-user',
+        content: 'Older text question',
+        attachments: [],
+        mode: 'chat',
+      }),
+    ]);
+    expect(composer).toHaveValue('Unsent draft');
+    expect(screen.getByText('draft.png')).toBeInTheDocument();
   });
 
   it('starts generation through the background runtime after one atomic queued-state write', async () => {
