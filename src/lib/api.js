@@ -3,9 +3,9 @@ import { GoogleGenAI } from '@google/genai'
 export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const MODELS = [
   'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
   'gemini-3.5-flash',
   'gemini-3.6-flash',
-  'gemini-3.5-flash-lite',
 ]
 const GEMINI_API_VERSION = 'v1'
 const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 60000

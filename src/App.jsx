@@ -298,6 +298,7 @@ function App() {
   const generationStateHandlerRef = useRef(() => undefined)
   const cancellationPromiseRef = useRef(null)
   const cancelRequestedJobIdsRef = useRef(new Set())
+  const handleSendRef = useRef(null)
   const presentationCancellationRef = useRef(null)
   const storageWriteQueueRef = useRef(Promise.resolve())
   const storageWriteEpochRef = useRef(0)
@@ -1954,10 +1955,14 @@ function App() {
   }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
 
   const handleSend = useCallback(async (directActionText = null, actionOptions = {}) => {
-    const actualText = typeof directActionText === 'string' ? directActionText : null
+    const hasDirectActionText = typeof directActionText === 'string'
     const safeInput = typeof input === 'string' ? input : ''
-    const userText = actualText || safeInput.trim()
-    if (!userText && attachments.length === 0) return
+    const userText = hasDirectActionText ? directActionText : safeInput.trim()
+    const retryUserMessage = actionOptions?.retryUserMessage
+    const sourceAttachments = retryUserMessage
+      ? (Array.isArray(retryUserMessage.attachments) ? retryUserMessage.attachments : [])
+      : attachments
+    if (!userText && sourceAttachments.length === 0) return
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
       toast.error(t('chat.generation_errors.already_running', {
         defaultValue: t('chat.connection_error'),
@@ -1966,14 +1971,15 @@ function App() {
     }
     if (isGeneratingRef.current) return
 
-    const automaticMode = enableResearch ? 'web' : (attachments.length > 0 ? 'vision' : 'chat')
     const supportedModes = new Set(['chat', 'vision', 'web'])
+    const automaticMode = enableResearch ? 'web' : (sourceAttachments.length > 0 ? 'vision' : 'chat')
     const mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
-      : automaticMode
+      : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
+    const requestModel = MODELS.includes(actionOptions?.modelOverride)
+      ? actionOptions.modelOverride
+      : selectedModel
 
-    const retryUserMessage = actionOptions?.retryUserMessage
-    const sourceAttachments = retryUserMessage?.attachments || attachments
     const messageAttachments = sourceAttachments.map(att => ({
       data: att.data,
       mimeType: att.mimeType,
@@ -1987,7 +1993,7 @@ function App() {
     const jobId = requestId
     const startedAt = Date.now()
     const userMsg = retryUserMessage
-      ? { ...retryUserMessage, content: userText, attachments: messageAttachments, mode: retryUserMessage.mode || mode }
+      ? { ...retryUserMessage, content: userText, attachments: messageAttachments, mode }
       : createUserMessage({
           id: userMessageId,
           content: userText,
@@ -2021,7 +2027,7 @@ function App() {
       startedAt,
       completedAt: null,
       mode,
-      model: selectedModel,
+      model: requestModel,
       language: appConfig?.language || i18n.language || 'tr',
       status: 'queued',
       revision: 0,
@@ -2054,8 +2060,10 @@ function App() {
       setGenerating(true)
       stickToBottomOnNextRender()
       setMessages(optimisticMessages)
-      setInput('')
-      setAttachments([])
+      if (!retryUserMessage) {
+        setInput('')
+        setAttachments([])
+      }
     })
 
     const persistLocalStartFailure = async (errorCode = 'generation_failed') => {
@@ -2146,7 +2154,7 @@ function App() {
         assistantMessageId,
         startedAt,
         mode,
-        model: selectedModel,
+        model: requestModel,
         language: generation.language,
         sessionTitle,
         systemInstruction: appConfig?.systemInstruction || '',
@@ -2194,6 +2202,8 @@ function App() {
       }
     }
   }, [input, attachments, appConfig, enableResearch, selectedModel, generateTitle, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+
+  handleSendRef.current = handleSend
 
 
   const handleKeyDown = useCallback((e) => {
@@ -2340,24 +2350,34 @@ function App() {
     }, 50)
   }, [])
 
-  const handleRetryMessage = useCallback((message) => {
+  const handleRetryMessage = useCallback((message, modelOverride) => {
     if (!message || isGeneratingRef.current) return
 
-    if (message.role === 'user' && message.content) {
-      handleSend(message.content, { retryUserMessage: message })
+    const retryOptions = (retryUserMessage) => ({
+      retryUserMessage,
+      ...(MODELS.includes(modelOverride) ? { modelOverride } : {}),
+    })
+
+    if (message.role === 'user' && (message.content || message.attachments?.length)) {
+      handleSendRef.current?.(message.content || '', retryOptions(message))
       return
     }
 
     if (message.role === 'model') {
-      const messageIndex = messages.findIndex((item) => item.id === message.id)
-      const previousUserMessage = messageIndex > 0
-        ? [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user')
+      const currentMessages = messagesRef.current
+      const linkedUserMessage = message.userMessageId != null
+        ? currentMessages.find((item) => item.role === 'user' && item.id === message.userMessageId)
         : null
-      if (previousUserMessage?.content) {
-        handleSend(previousUserMessage.content, { retryUserMessage: previousUserMessage })
+      const messageIndex = currentMessages.findIndex((item) => item.id === message.id)
+      const previousUserMessage = messageIndex > 0
+        ? [...currentMessages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user')
+        : null
+      const retryUserMessage = linkedUserMessage || previousUserMessage
+      if (retryUserMessage && (retryUserMessage.content || retryUserMessage.attachments?.length)) {
+        handleSendRef.current?.(retryUserMessage.content || '', retryOptions(retryUserMessage))
       }
     }
-  }, [handleSend, messages])
+  }, [])
 
   const handleChatScroll = useCallback((event) => {
     const container = event.currentTarget
@@ -2538,6 +2558,10 @@ function App() {
                   message={msg}
                   onEdit={handleEditMessage}
                   onRetry={handleRetryMessage}
+                  retryModels={MODELS}
+                  modelLabels={MODEL_LABELS}
+                  currentModel={selectedModel}
+                  retryDisabled={isGenerating}
                 />
               )
             })}

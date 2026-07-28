@@ -144,6 +144,11 @@
             "stop": "Durdur",
             "model_selector": "AI Modeli"
         },
+        "retry_model": {
+            "title": "Model ile yeniden dene",
+            "description": "Bu denemeye özel modeli seçin",
+            "default": "Varsayılan"
+        },
         "extension_error": "Eklenti bağlamı bulunamadı. Lütfen sayfayı yenileyin.",
         "reading_page": "Sayfa içeriği okunuyor...",
         "page_empty": "Sayfadan okunabilecek bir metin bulunamadı.",
