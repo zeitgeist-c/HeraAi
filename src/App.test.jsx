@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import App from './App';
 import * as api from './lib/api';
+import i18n from './i18n';
 
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -116,6 +117,8 @@ function openSettingsPanel() {
 describe('HeraAi App', () => {
   let currentStorage = {};
   let storageListeners = [];
+  let runtimeListeners = [];
+  let generationControllers = new Map();
   let documentVisibility = 'visible';
 
   const triggerStorageChange = (changes) => {
@@ -124,9 +127,126 @@ describe('HeraAi App', () => {
     });
   };
 
+  const emitRuntimeMessage = (message) => {
+    act(() => {
+      runtimeListeners.forEach(listener => listener(message, {}, vi.fn()));
+    });
+  };
+
+  const readStorage = keys => new Promise(resolve => {
+    global.chrome.storage.local.get(keys, result => resolve(result || {}));
+  });
+
+  const nextBridgeEvent = (iterator, signal) => new Promise((resolve, reject) => {
+    const handleAbort = () => {
+      signal.removeEventListener('abort', handleAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+    signal.addEventListener('abort', handleAbort, { once: true });
+    Promise.resolve(iterator.next()).then(value => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve(value);
+    }, error => {
+      signal.removeEventListener('abort', handleAbort);
+      reject(error);
+    });
+  });
+
+  const runGenerationBridge = async (message) => {
+    const controller = new AbortController();
+    generationControllers.set(message.jobId, controller);
+    const geminiResult = await readStorage(['geminiApiKeys']);
+    const geminiKeys = geminiResult.geminiApiKeys || [];
+    const tavilyResult = message.mode === 'web'
+      ? await readStorage(['tavilyApiKeys'])
+      : { tavilyApiKeys: [] };
+    const tavilyKeys = tavilyResult.tavilyApiKeys || [];
+    const options = {
+      systemInstruction: message.systemInstruction || '',
+      language: message.language || 'tr',
+    };
+    let content = '';
+    let sources = [];
+    let revision = 0;
+    let errorCode = null;
+
+    if (
+      geminiKeys.length > 0
+      && geminiKeys.every(key => Number(key?.cooldownUntil || 0) > Date.now())
+    ) {
+      const terminal = {
+        ...currentStorage.activeGeneration,
+        ...message,
+        status: 'error',
+        errorCode: 'all_keys_cooldown',
+        revision,
+        content,
+        sources,
+      };
+      currentStorage.activeGeneration = terminal;
+      emitRuntimeMessage({ type: 'DONE', activeGeneration: terminal });
+      generationControllers.delete(message.jobId);
+      return;
+    }
+
+    try {
+      const events = message.mode === 'web'
+        ? api.streamResearch(message.requestMessages, geminiKeys, tavilyKeys, controller.signal, message.model)
+        : message.mode === 'vision'
+          ? api.streamVision(message.requestMessages, null, options, geminiKeys, controller.signal, message.model)
+          : api.streamChat(message.requestMessages, options, geminiKeys, controller.signal, message.model);
+      const iterator = events[Symbol.asyncIterator]();
+      while (true) {
+        const next = await nextBridgeEvent(iterator, controller.signal);
+        if (next.done) break;
+        const event = next.value;
+        if (event.event === 'chunk') content += event.data?.text || '';
+        if (event.event === 'sources') sources = event.data?.sources || [];
+        if (event.event === 'error') {
+          errorCode = event.data?.code || 'generation_failed';
+          break;
+        }
+        if (event.event !== 'chunk' && event.event !== 'sources') continue;
+        revision += 1;
+        const snapshot = {
+          ...currentStorage.activeGeneration,
+          ...message,
+          status: 'running',
+          revision,
+          content,
+          sources,
+        };
+        currentStorage.activeGeneration = snapshot;
+        emitRuntimeMessage({ type: 'ACTIVE_GEN_CHANGED', snapshot });
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') errorCode = 'generation_failed';
+    }
+
+    if (controller.signal.aborted) return;
+    const terminal = {
+      ...currentStorage.activeGeneration,
+      ...message,
+      status: errorCode ? 'error' : 'completed',
+      errorCode,
+      revision,
+      content,
+      sources,
+    };
+    currentStorage.activeGeneration = terminal;
+    emitRuntimeMessage({ type: 'DONE', activeGeneration: terminal });
+    generationControllers.delete(message.jobId);
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     storageListeners = [];
+    runtimeListeners = [];
+    generationControllers = new Map();
     documentVisibility = 'visible';
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -157,6 +277,83 @@ describe('HeraAi App', () => {
     global.chrome.storage.onChanged.removeListener.mockImplementation((listener) => {
       storageListeners = storageListeners.filter(item => item !== listener);
     });
+    global.chrome.runtime.onMessage.addListener.mockImplementation((listener) => {
+      runtimeListeners.push(listener);
+    });
+    global.chrome.runtime.onMessage.removeListener.mockImplementation((listener) => {
+      runtimeListeners = runtimeListeners.filter(item => item !== listener);
+    });
+    global.chrome.runtime.sendMessage.mockImplementation(async (message) => {
+      if (message?.type === 'GET_STATE') {
+        return { ok: true, activeGeneration: currentStorage.activeGeneration || null };
+      }
+      if (message?.type === 'HERA_GENERATION_START') {
+        const existingGeneration = currentStorage.activeGeneration;
+        if (
+          existingGeneration
+          && ['queued', 'running'].includes(existingGeneration.status)
+          && existingGeneration.jobId !== message.jobId
+        ) {
+          return { ok: false, errorCode: 'already_running', activeGeneration: existingGeneration };
+        }
+
+        const queued = {
+          ...message,
+          status: 'queued',
+          revision: 0,
+          content: '',
+          sources: [],
+          updatedAt: Date.now(),
+        };
+        const assistantMessage = {
+          id: message.assistantMessageId,
+          requestId: message.requestId,
+          userMessageId: message.userMessageId,
+          startedAt: message.startedAt,
+          role: 'model',
+          content: '',
+          status: 'thinking',
+          sources: [],
+        };
+        const nextSession = {
+          id: message.sessionId,
+          title: message.sessionTitle || message.requestMessages?.find(item => item.role === 'user')?.content || 'New Chat',
+          updatedAt: Date.now(),
+          messages: [...(message.requestMessages || []), assistantMessage],
+        };
+        const nextSessions = [
+          ...(currentStorage.sessions || []).filter(session => session.id !== message.sessionId),
+          nextSession,
+        ];
+        await global.chrome.storage.local.set({
+          sessions: nextSessions,
+          activeSessionId: message.sessionId,
+          activeGeneration: queued,
+        });
+
+        const running = { ...queued, status: 'running', updatedAt: Date.now() };
+        currentStorage.activeGeneration = running;
+        void runGenerationBridge(message);
+        return { ok: true, activeGeneration: running };
+      }
+      if (message?.type === 'CANCEL') {
+        const controller = generationControllers.get(message.jobId);
+        controller?.abort();
+        const cancelled = {
+          ...currentStorage.activeGeneration,
+          status: 'cancelled',
+          cancelReason: message.reason,
+        };
+        currentStorage.activeGeneration = cancelled;
+        emitRuntimeMessage({ type: 'CANCEL_DONE', activeGeneration: cancelled });
+        return { ok: true, activeGeneration: cancelled };
+      }
+      if (message?.type === 'DONE_ACK' || message?.type === 'CANCEL_DONE_ACK') {
+        await global.chrome.storage.local.remove(['activeGeneration']);
+        return { ok: true };
+      }
+      return { ok: true };
+    });
     global.chrome.tabs.query.mockResolvedValue([{ id: 1, url: 'https://example.com/article' }]);
     global.chrome.tabs.captureVisibleTab.mockResolvedValue('data:image/png;base64,visible-tab');
     global.chrome.scripting.executeScript.mockResolvedValue([{
@@ -171,6 +368,12 @@ describe('HeraAi App', () => {
     api.streamChat.mockImplementation(() => {
       return mockStream([{ event: 'chunk', data: { text: 'Hello from AI' } }]);
     });
+  });
+
+  afterEach(() => {
+    generationControllers.forEach(controller => controller.abort());
+    generationControllers.clear();
+    runtimeListeners = [];
   });
 
   it('should send a message, display it, clear input and show AI response', async () => {
@@ -234,6 +437,425 @@ describe('HeraAi App', () => {
     expect(await screen.findByText('Resolved answer')).toBeInTheDocument();
   });
 
+  it('keeps the composer unavailable until background generation state is reconciled', async () => {
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    let releaseState;
+    global.chrome.runtime.sendMessage.mockImplementation(message => {
+      if (message?.type === 'GET_STATE') {
+        return new Promise(resolve => {
+          releaseState = resolve;
+        });
+      }
+      return defaultRuntimeSend(message);
+    });
+
+    render(<App />);
+    await waitFor(() => expect(releaseState).toBeTypeOf('function'));
+    expect(document.querySelector('textarea')).not.toBeInTheDocument();
+
+    await act(async () => {
+      releaseState({ ok: true, activeGeneration: null });
+    });
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+  });
+
+  it('applies the stored language once without restarting bootstrap', async () => {
+    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'tr';
+    await i18n.changeLanguage('tr');
+    currentStorage = {
+      theme: 'light',
+      language: 'en',
+    };
+    const changeLanguageSpy = vi.spyOn(i18n, 'changeLanguage');
+
+    try {
+      render(<App />);
+
+      expect(await screen.findByText('Hello, how can I help?')).toBeInTheDocument();
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+      expect(changeLanguageSpy).toHaveBeenCalledTimes(1);
+      expect(changeLanguageSpy).toHaveBeenCalledWith('en');
+      expect(global.chrome.runtime.sendMessage.mock.calls.filter(([message]) => (
+        message?.type === 'GET_STATE'
+      ))).toHaveLength(1);
+    } finally {
+      changeLanguageSpy.mockRestore();
+      await i18n.changeLanguage(previousLanguage);
+    }
+  });
+
+  it('adopts an atomic session and generation change that lands during bootstrap', async () => {
+    const initialStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'old-session',
+      sessions: [{
+        id: 'old-session',
+        title: 'Old session',
+        updatedAt: Date.now() - 10_000,
+        messages: [{ id: 'old-user', role: 'user', content: 'Older question' }],
+      }],
+    };
+    let releaseInitialStorageRead;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => new Promise(resolve => {
+      releaseInitialStorageRead = () => {
+        if (typeof callback === 'function') callback(initialStorage);
+        resolve(initialStorage);
+      };
+    }));
+
+    render(<App />);
+    await waitFor(() => expect(releaseInitialStorageRead).toBeTypeOf('function'));
+
+    const runningGeneration = {
+      jobId: 'bootstrap-race-job',
+      requestId: 'bootstrap-race-job',
+      sessionId: 'new-session',
+      userMessageId: 'new-user',
+      assistantMessageId: 'new-assistant',
+      status: 'running',
+      revision: 0,
+      content: '',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const newSessions = [
+      ...initialStorage.sessions,
+      {
+        id: 'new-session',
+        title: 'New atomic session',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'new-user', role: 'user', content: 'Question claimed during bootstrap' },
+          {
+            id: 'new-assistant',
+            role: 'model',
+            content: '',
+            status: 'thinking',
+            sources: [],
+          },
+        ],
+      },
+    ];
+    currentStorage = {
+      ...initialStorage,
+      sessions: newSessions,
+      activeSessionId: 'new-session',
+      activeGeneration: runningGeneration,
+    };
+    triggerStorageChange({
+      sessions: { oldValue: initialStorage.sessions, newValue: newSessions },
+      activeSessionId: { oldValue: 'old-session', newValue: 'new-session' },
+      activeGeneration: { oldValue: undefined, newValue: runningGeneration },
+    });
+
+    await act(async () => {
+      releaseInitialStorageRead();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('Question claimed during bootstrap')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
+    expect(getStopButton()).toBeInTheDocument();
+
+    const terminalGeneration = {
+      ...runningGeneration,
+      status: 'completed',
+      revision: 1,
+      content: 'Answer persisted into the atomic session.',
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    currentStorage.activeGeneration = terminalGeneration;
+    emitRuntimeMessage({ type: 'DONE', activeGeneration: terminalGeneration });
+
+    expect(await screen.findByText(
+      'Answer persisted into the atomic session.',
+      {},
+      { timeout: 3000 },
+    )).toBeInTheDocument();
+    await waitFor(() => {
+      const persistedSession = currentStorage.sessions.find(session => session.id === 'new-session');
+      expect(persistedSession?.messages).toContainEqual(expect.objectContaining({
+        id: 'new-assistant',
+        content: 'Answer persisted into the atomic session.',
+        status: 'done',
+      }));
+    });
+    expect(currentStorage.sessions.some(session => session.id === 'old-session')).toBe(true);
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('merges a missing job session from an atomic storage change after bootstrap', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const runningGeneration = {
+      jobId: 'post-bootstrap-job',
+      requestId: 'post-bootstrap-job',
+      sessionId: 'post-bootstrap-session',
+      userMessageId: 'post-bootstrap-user',
+      assistantMessageId: 'post-bootstrap-assistant',
+      status: 'running',
+      revision: 0,
+      content: '',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const externalSession = {
+      id: 'post-bootstrap-session',
+      title: 'Externally claimed session',
+      updatedAt: Date.now(),
+      messages: [
+        { id: 'post-bootstrap-user', role: 'user', content: 'External panel question' },
+        {
+          id: 'post-bootstrap-assistant',
+          role: 'model',
+          content: '',
+          status: 'thinking',
+          sources: [],
+        },
+      ],
+    };
+    const previousSessions = currentStorage.sessions;
+    const nextSessions = [...previousSessions, externalSession];
+    const previousActiveSessionId = currentStorage.activeSessionId;
+    currentStorage = {
+      ...currentStorage,
+      sessions: nextSessions,
+      activeSessionId: externalSession.id,
+      activeGeneration: runningGeneration,
+    };
+
+    triggerStorageChange({
+      sessions: { oldValue: previousSessions, newValue: nextSessions },
+      activeSessionId: { oldValue: previousActiveSessionId, newValue: externalSession.id },
+      activeGeneration: { oldValue: undefined, newValue: runningGeneration },
+    });
+
+    expect(await screen.findByText('External panel question')).toBeInTheDocument();
+    expect(getStopButton()).toBeInTheDocument();
+
+    const terminalGeneration = {
+      ...runningGeneration,
+      status: 'completed',
+      revision: 1,
+      content: 'External answer was preserved.',
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    currentStorage.activeGeneration = terminalGeneration;
+    emitRuntimeMessage({ type: 'DONE', activeGeneration: terminalGeneration });
+
+    expect(await screen.findByText(
+      'External answer was preserved.',
+      {},
+      { timeout: 3000 },
+    )).toBeInTheDocument();
+    await waitFor(() => {
+      const persistedSession = currentStorage.sessions.find(session => (
+        session.id === externalSession.id
+      ));
+      expect(persistedSession?.messages).toContainEqual(expect.objectContaining({
+        id: 'post-bootstrap-assistant',
+        content: 'External answer was preserved.',
+        status: 'done',
+      }));
+    });
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('removes an orphaned thinking placeholder when GET_STATE clears a stale stored job', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'stale-session',
+      sessions: [{
+        id: 'stale-session',
+        title: 'Stale generation',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'stale-user', role: 'user', content: 'Was this request still running?' },
+          {
+            id: 'stale-assistant',
+            role: 'model',
+            content: '',
+            status: 'thinking',
+            sources: [],
+          },
+        ],
+      }],
+      activeGeneration: {
+        jobId: 'stale-job',
+        requestId: 'stale-job',
+        sessionId: 'stale-session',
+        userMessageId: 'stale-user',
+        assistantMessageId: 'stale-assistant',
+        status: 'running',
+        revision: 3,
+        content: '',
+        sources: [],
+        startedAt: Date.now() - 10_000,
+        updatedAt: Date.now() - 5_000,
+      },
+    };
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    global.chrome.runtime.sendMessage.mockImplementation(message => (
+      message?.type === 'GET_STATE'
+        ? Promise.resolve({ ok: true, activeGeneration: null })
+        : defaultRuntimeSend(message)
+    ));
+
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByText('Was this request still running?')).toBeInTheDocument();
+    expect(screen.queryByText(/Thinking|Düşünüyor|DÃ¼ÅŸÃ¼nÃ¼yor/i)).not.toBeInTheDocument();
+    expect(getStopButton()).toBeUndefined();
+    await waitFor(() => {
+      const storedSession = currentStorage.sessions.find(session => session.id === 'stale-session');
+      expect(storedSession.messages).toEqual([
+        expect.objectContaining({ id: 'stale-user', role: 'user' }),
+      ]);
+    });
+  });
+
+  it('falls back to the stored generation snapshot when bootstrap GET_STATE never responds', async () => {
+    vi.useFakeTimers();
+    try {
+      currentStorage = {
+        theme: 'light',
+        startupBehavior: 'resume',
+        activeSessionId: 'timeout-session',
+        sessions: [{
+          id: 'timeout-session',
+          title: 'Interrupted request',
+          updatedAt: Date.now(),
+          messages: [
+            { id: 'timeout-user', role: 'user', content: 'Keep my stored state' },
+            {
+              id: 'timeout-assistant',
+              role: 'model',
+              content: 'Stored partial answer',
+              status: 'interrupted',
+              sources: [],
+            },
+          ],
+        }],
+        activeGeneration: {
+          jobId: 'timeout-job',
+          requestId: 'timeout-job',
+          sessionId: 'timeout-session',
+          userMessageId: 'timeout-user',
+          assistantMessageId: 'timeout-assistant',
+          status: 'interrupted',
+          revision: 2,
+          content: 'Stored partial answer',
+          sources: [],
+          errorCode: null,
+          startedAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 5_000,
+        },
+      };
+      const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+      global.chrome.runtime.sendMessage.mockImplementation(message => (
+        message?.type === 'GET_STATE'
+          ? new Promise(() => {})
+          : defaultRuntimeSend(message)
+      ));
+
+      render(<App />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.querySelector('textarea')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(document.querySelector('textarea')).toBeInTheDocument();
+      expect(screen.getByText('Stored partial answer')).toBeInTheDocument();
+      expect(screen.getByText(/browser closed|Tarayıcı/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('repairs an active stored placeholder when a bootstrap GET_STATE retry returns no job', async () => {
+    vi.useFakeTimers();
+    try {
+      currentStorage = {
+        theme: 'light',
+        startupBehavior: 'resume',
+        activeSessionId: 'retry-session',
+        sessions: [{
+          id: 'retry-session',
+          title: 'Retry stale generation',
+          updatedAt: Date.now(),
+          messages: [
+            { id: 'retry-user', role: 'user', content: 'Is this still running?' },
+            {
+              id: 'retry-assistant',
+              role: 'model',
+              content: '',
+              status: 'thinking',
+              sources: [],
+            },
+          ],
+        }],
+        activeGeneration: {
+          jobId: 'retry-job',
+          requestId: 'retry-job',
+          sessionId: 'retry-session',
+          userMessageId: 'retry-user',
+          assistantMessageId: 'retry-assistant',
+          status: 'running',
+          revision: 4,
+          content: '',
+          sources: [],
+          startedAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 5_000,
+        },
+      };
+      const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+      let getStateAttempts = 0;
+      global.chrome.runtime.sendMessage.mockImplementation(message => {
+        if (message?.type !== 'GET_STATE') return defaultRuntimeSend(message);
+        getStateAttempts += 1;
+        if (getStateAttempts === 1) return new Promise(() => {});
+        return Promise.resolve({ ok: true, activeGeneration: null });
+      });
+
+      render(<App />);
+      await act(async () => {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(document.querySelector('textarea')).toBeInTheDocument();
+      expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
+      expect(getStopButton()).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+        await Promise.resolve();
+      });
+
+      expect(getStateAttempts).toBe(2);
+      expect(screen.queryByText(/Thinking|Düşünüyor/i)).not.toBeInTheDocument();
+      expect(getStopButton()).toBeUndefined();
+      expect(currentStorage.sessions[0].messages).toEqual([
+        expect.objectContaining({ id: 'retry-user', role: 'user' }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('paints the user message and thinking state before an immediately available response starts', async () => {
     api.streamChat.mockImplementationOnce(() => mockStream([
       { event: 'chunk', data: { text: 'Immediate provider answer' } },
@@ -247,10 +869,39 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     expect(screen.getByText('Paint me first')).toBeInTheDocument();
-    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
 
     expect(await screen.findByText('Immediate provider answer')).toBeInTheDocument();
+  });
+
+  it('keeps the thinking state visible before revealing a fast response progressively', async () => {
+    const fastAnswer = 'Fast responses must still arrive progressively.';
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: fastAnswer } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Keep thinking visible' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+    expect(screen.getByText(/^(Thinking|Düşünüyor)/i)).toBeInTheDocument();
+    expect(screen.queryByText(fastAnswer)).not.toBeInTheDocument();
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(screen.getByText(/^(Thinking|Düşünüyor)/i)).toBeInTheDocument();
+    expect(screen.queryByText(fastAnswer)).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const visibleText = screen.getByTestId('assistant-content').textContent;
+      expect(visibleText.length).toBeGreaterThan(0);
+      expect(visibleText.length).toBeLessThan(fastAnswer.length);
+    });
+    expect(await screen.findByText(fastAnswer)).toBeInTheDocument();
   });
 
   it('keeps new message ids distinct after reopening a persisted session', async () => {
@@ -279,7 +930,7 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     expect(screen.getByText('Question after reopening')).toBeInTheDocument();
-    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(screen.getByText('Persisted answer')).toBeInTheDocument();
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
@@ -355,8 +1006,12 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     expect(screen.getByText('Question after panel resume')).toBeInTheDocument();
-    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+    expect(screen.getByText(/^(Thinking|Düşünüyor)/i)).toBeInTheDocument();
+    expect(screen.queryByText('Answer after panel resume')).not.toBeInTheDocument();
 
     expect(await screen.findByText('Answer after panel resume')).toBeInTheDocument();
   });
@@ -384,7 +1039,7 @@ describe('HeraAi App', () => {
       controlled.finish();
     });
 
-    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(screen.queryByText(longAnswer)).not.toBeInTheDocument();
 
     act(() => {
@@ -399,8 +1054,8 @@ describe('HeraAi App', () => {
       expect(visibleText.length).toBeGreaterThan(0);
       expect(visibleText.length).toBeLessThan(longAnswer.length);
     });
-    expect(await screen.findByText(longAnswer, {}, { timeout: 5000 })).toBeInTheDocument();
-  });
+    expect(await screen.findByText(longAnswer, {}, { timeout: 7000 })).toBeInTheDocument();
+  }, 10000);
 
   it('preserves the same optimistic sequence after a full unmount and storage-backed remount', async () => {
     api.streamChat
@@ -433,12 +1088,51 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     expect(screen.getByText('Question after restart')).toBeInTheDocument();
-    expect(screen.getByText(/Thinking|DÃ¼ÅŸÃ¼nÃ¼yor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(1);
 
     expect(await screen.findByText('Answer after restart')).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps one background job alive across two panel close-and-reopen cycles', async () => {
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    const firstMount = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Survive panel restarts' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'Persistent partial response' } });
+    });
+    await waitFor(() => expect(currentStorage.activeGeneration?.content).toBe('Persistent partial response'));
+    firstMount.unmount();
+
+    const secondMount = render(<App />);
+    expect(await screen.findByText('Survive panel restarts')).toBeInTheDocument();
+    expect(await screen.findByText('Persistent partial response', {}, { timeout: 3000 })).toBeInTheDocument();
+    secondMount.unmount();
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: ' completed after the second close.' } });
+      controlled.finish();
+    });
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('completed'));
+
+    render(<App />);
+    expect(await screen.findByText(
+      'Persistent partial response completed after the second close.',
+      {},
+      { timeout: 5000 },
+    )).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(1);
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => message?.type === 'CANCEL')).toBe(false);
+    await waitFor(() => expect(currentStorage.activeGeneration).toBeUndefined());
+  }, 10000);
 
   it('reveals a large provider chunk progressively instead of displaying it all at once', async () => {
     const streamedAnswer = 'Bu cevap sağlayıcıdan büyük bir parça olarak gelse bile kullanıcıya kademeli biçimde görünmelidir. '.repeat(4).trim();
@@ -522,11 +1216,13 @@ describe('HeraAi App', () => {
     expect(screen.getAllByText('Hello from AI')).toHaveLength(1);
 
     const sessionWrites = global.chrome.storage.local.set.mock.calls.filter(([data]) => data?.sessions);
-    expect(sessionWrites).toHaveLength(2);
+    expect(sessionWrites.length).toBeGreaterThanOrEqual(2);
     expect(sessionWrites[0][0].sessions[0].messages.map(message => message.content)).toEqual([
       'stream test',
+      '',
     ]);
-    expect(sessionWrites[1][0].sessions[0].messages.map(message => message.content)).toEqual([
+    expect(sessionWrites[0][0].sessions[0].messages.at(-1).status).toBe('thinking');
+    expect(sessionWrites.at(-1)[0].sessions[0].messages.map(message => message.content)).toEqual([
       'stream test',
       'Hello from AI',
     ]);
@@ -602,7 +1298,7 @@ describe('HeraAi App', () => {
       expect(api.streamChat).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText(/Response failed|Yan/)).toBeInTheDocument();
+    expect(await screen.findByText(/could not be generated|oluşturulamadı/i)).toBeInTheDocument();
     expect(screen.getByText('error test')).toBeInTheDocument();
   });
 
@@ -622,6 +1318,7 @@ describe('HeraAi App', () => {
     fireEvent.click(sendBtn);
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
+    await screen.findByText(/could not be generated|oluşturulamadı/i);
 
     fireEvent.change(input, { target: { value: 'second works' } });
     fireEvent.click(sendBtn);
@@ -644,6 +1341,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'This fails' } });
     fireEvent.click(getSendButton());
     await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
+    await screen.findByText(/could not be generated|oluşturulamadı/i);
 
     fireEvent.change(input, { target: { value: 'Follow-up after failure' } });
     fireEvent.click(getSendButton());
@@ -675,6 +1373,7 @@ describe('HeraAi App', () => {
     fireEvent.click(sendBtn);
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
+    await screen.findByText(/could not be generated|oluşturulamadı/i);
 
     fireEvent.change(input, { target: { value: 'try again' } });
     fireEvent.click(sendBtn);
@@ -806,6 +1505,36 @@ describe('HeraAi App', () => {
     });
   });
 
+  it('preserves streamed line breaks while the response is still arriving', async () => {
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'line break test' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'First line\nSecond line' } });
+    });
+
+    const streamedContent = await screen.findByTestId('assistant-content');
+    await waitFor(() => expect(streamedContent.textContent).toBe('First line\nSecond line'));
+    expect(streamedContent.querySelector('p')).not.toBeInTheDocument();
+
+    await act(async () => {
+      controlled.finish();
+    });
+
+    await waitFor(() => {
+      const completedContent = screen.getByTestId('assistant-content');
+      expect(completedContent.querySelector('p')).toBeInTheDocument();
+      expect(completedContent.textContent).toBe('First line\nSecond line');
+    });
+  });
+
   it('should preserve partial assistant text when the stream is stopped', async () => {
     api.streamChat.mockImplementationOnce((_messages, _options, _keys, signal) => {
       return (async function* partialStream() {
@@ -877,7 +1606,7 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
-    expect(scrollContainer.scrollTop).toBe(scrollContainer.scrollHeight);
+    await waitFor(() => expect(scrollContainer.scrollTop).toBe(scrollContainer.scrollHeight));
 
     scrollContainer.scrollTop = 120;
     fireEvent.scroll(scrollContainer);
@@ -972,13 +1701,9 @@ describe('HeraAi App', () => {
 
   it('should keep all image attachments when a quick translate action sends a vision request', async () => {
     api.streamVision.mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Translated all crops' } }]));
-    const runtimeListeners = [];
     const originalCreateElement = document.createElement.bind(document);
     const OriginalImage = global.Image;
     let canvasIndex = 0;
-    global.chrome.runtime.onMessage.addListener.mockImplementation((listener) => {
-      runtimeListeners.push(listener);
-    });
     global.Image = class MockImage {
       naturalWidth = 10;
       naturalHeight = 10;
@@ -1005,25 +1730,21 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    await act(async () => {
-      runtimeListeners[0]({
-        type: 'HERAAI_CROP_DONE',
-        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
-      });
+    emitRuntimeMessage({
+      type: 'HERAAI_CROP_DONE',
+      coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
     });
     await waitFor(() => expect(screen.getByText(/screenshot-/)).toBeInTheDocument());
-    await act(async () => {
-      runtimeListeners[0]({
-        type: 'HERAAI_CROP_DONE',
-        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
-      });
+    emitRuntimeMessage({
+      type: 'HERAAI_CROP_DONE',
+      coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
     });
     await waitFor(() => expect(screen.getAllByText(/screenshot-/)).toHaveLength(2));
 
     const translateButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-languages'));
     fireEvent.click(translateButton);
 
-    expect(await screen.findByText('Translated all crops')).toBeInTheDocument();
+    expect(await screen.findByText('Translated all crops', {}, { timeout: 3000 })).toBeInTheDocument();
     const requestMessages = api.streamVision.mock.calls[0][0];
     const userMessage = requestMessages.at(-1);
     expect(userMessage.attachments).toHaveLength(2);
@@ -1157,7 +1878,7 @@ describe('HeraAi App', () => {
       controlled.push({ event: 'chunk', data: { text: 'Extracted OCR text' } });
       controlled.finish();
     });
-    expect(await screen.findByText('Extracted OCR text')).toBeInTheDocument();
+    expect(await screen.findByText('Extracted OCR text', {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it('renders Gemini and Tavily key inputs as type=password', async () => {
@@ -1268,12 +1989,13 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
 
     expect(await screen.findByText('please answer while all keys are rate-limited')).toBeInTheDocument();
-    expect(await screen.findByText(/Response failed|Yanıt alınamadı/i)).toBeInTheDocument();
+    expect(await screen.findByText(/temporarily rate limited|geçici olarak hız sınırında/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
   });
 
   it('calls testKey once per saved Gemini key when clicking Test All', async () => {
     api.testKey.mockResolvedValue({ success: true, provider: 'gemini' });
+    currentStorage.selectedModel = 'gemini-3.5-flash';
 
     currentStorage.geminiApiKeys = [
       { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
@@ -1296,6 +2018,18 @@ describe('HeraAi App', () => {
     await waitFor(() => {
       expect(api.testKey).toHaveBeenCalledTimes(2);
     });
+    expect(api.testKey).toHaveBeenNthCalledWith(
+      1,
+      'gemini',
+      'AIza-aaaaaaaaaaaaa-key1',
+      'gemini-3.5-flash',
+    );
+    expect(api.testKey).toHaveBeenNthCalledWith(
+      2,
+      'gemini',
+      'AIza-bbbbbbbbbbbbbb-key2',
+      'gemini-3.5-flash',
+    );
   });
 
   it('moves a chosen Gemini key above the previous primary when clicking Set as Primary', async () => {
@@ -1396,5 +2130,349 @@ describe('HeraAi App', () => {
     expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.5-flash');
 
     expect(currentStorage.selectedModel).toBe('gemini-3.5-flash');
+  });
+
+  it('starts generation through the background runtime after one atomic queued-state write', async () => {
+    api.streamChat.mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Background answer' } }]));
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Persistent question' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Persistent question')).toBeInTheDocument();
+    expect(await screen.findByText('Background answer', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(api.streamChat).toHaveBeenCalledTimes(1);
+
+    const initialWrite = global.chrome.storage.local.set.mock.calls.find(([value]) => (
+      Array.isArray(value?.sessions)
+      && value?.activeGeneration?.status === 'queued'
+      && value.sessions.at(-1)?.messages.at(-1)?.status === 'thinking'
+    ));
+    expect(initialWrite).toBeTruthy();
+    const persistedMessages = initialWrite[0].sessions.at(-1).messages;
+    expect(persistedMessages.at(-2).content).toBe('Persistent question');
+    expect(persistedMessages.at(-1).status).toBe('thinking');
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'HERA_GENERATION_START',
+      jobId: initialWrite[0].activeGeneration.jobId,
+      sessionId: initialWrite[0].activeGeneration.sessionId,
+    }));
+  });
+
+  it('does not dispatch START when New Chat cancels a local job at the pre-START barrier', async () => {
+    const defaultStorageSet = global.chrome.storage.local.set.getMockImplementation();
+    let releaseInitialSessionWrite;
+    let blockedInitialSessionWrite = false;
+    global.chrome.storage.local.set.mockImplementation((data, callback) => {
+      if (
+        !blockedInitialSessionWrite
+        && Array.isArray(data?.sessions)
+        && !data?.activeGeneration
+      ) {
+        blockedInitialSessionWrite = true;
+        return new Promise(resolve => {
+          releaseInitialSessionWrite = async () => {
+            await defaultStorageSet(data, callback);
+            resolve();
+          };
+        });
+      }
+      return defaultStorageSet(data, callback);
+    });
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    await waitFor(() => expect(releaseInitialSessionWrite).toBeTypeOf('function'));
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Cancel before START' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Cancel before START')).toBeInTheDocument();
+    expect(getStopButton()).toBeInTheDocument();
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
+      message?.type === 'HERA_GENERATION_START'
+    ))).toBe(false);
+
+    fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CANCEL',
+    })));
+
+    await act(async () => {
+      await releaseInitialSessionWrite();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(currentStorage.sessions?.length).toBeGreaterThan(1));
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
+      message?.type === 'HERA_GENERATION_START'
+    ))).toBe(false);
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('preserves a session added by another panel until the worker claims START atomically', async () => {
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    await waitFor(() => expect(currentStorage.sessions?.length).toBe(1));
+
+    const otherPanelSession = {
+      id: 'other-panel-session',
+      title: 'Other panel',
+      updatedAt: Date.now(),
+      messages: [{ id: 'other-panel-user', role: 'user', content: 'Keep this session' }],
+    };
+    currentStorage.sessions = [...currentStorage.sessions, otherPanelSession];
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Claim without stale prewrite' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'HERA_GENERATION_START',
+    })));
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+    expect(currentStorage.sessions.some(session => session.id === otherPanelSession.id)).toBe(true);
+
+    const atomicClaimWrite = global.chrome.storage.local.set.mock.calls.find(([value]) => (
+      value?.activeGeneration?.status === 'queued'
+    ));
+    expect(atomicClaimWrite?.[0].sessions.some(session => session.id === otherPanelSession.id)).toBe(true);
+  });
+
+  it('does not overwrite a job claimed by another panel when START is rejected', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const otherPanelGeneration = {
+      jobId: 'other-panel-job',
+      requestId: 'other-panel-job',
+      sessionId: 'other-panel-session',
+      userMessageId: 'other-panel-user',
+      assistantMessageId: 'other-panel-assistant',
+      status: 'running',
+      revision: 4,
+      content: 'Still running elsewhere',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    currentStorage.activeGeneration = otherPanelGeneration;
+    global.chrome.storage.local.set.mockClear();
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Competing request' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'HERA_GENERATION_START',
+    })));
+    await waitFor(() => expect(currentStorage.activeGeneration).toEqual(otherPanelGeneration));
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(global.chrome.storage.local.set.mock.calls.some(([value]) => (
+      value?.activeGeneration?.jobId && value.activeGeneration.jobId !== 'other-panel-job'
+    ))).toBe(false);
+  });
+
+  it('resumes a completed stored generation progressively and acknowledges it after presentation', async () => {
+    const sessionId = 'persisted-session';
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: sessionId,
+      sessions: [{
+        id: sessionId,
+        title: 'Persistent',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'user-persisted', role: 'user', content: 'Question' },
+          { id: 'assistant-persisted', role: 'model', content: '', status: 'thinking', sources: [] },
+        ],
+      }],
+      activeGeneration: {
+        jobId: 'job-persisted',
+        sessionId,
+        userMessageId: 'user-persisted',
+        assistantMessageId: 'assistant-persisted',
+        model: 'gemini-3.1-flash-lite',
+        mode: 'chat',
+        status: 'completed',
+        revision: 7,
+        content: 'A naturally revealed persisted response.',
+        sources: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    };
+
+    render(<App />);
+    expect(await screen.findByText('Question')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
+    expect(screen.queryByText('A naturally revealed persisted response.')).not.toBeInTheDocument();
+
+    expect(await screen.findByText('A naturally revealed persisted response.', {}, { timeout: 3000 })).toBeInTheDocument();
+    await waitFor(() => expect(global.chrome.storage.local.remove).toHaveBeenCalledWith(['activeGeneration']));
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'DONE_ACK',
+      jobId: 'job-persisted',
+      finalRevision: 7,
+    });
+  });
+
+  it('reconciles a no-op DONE_ACK and adopts the worker replacement job', async () => {
+    const oldSessionId = 'ack-old-session';
+    const replacementSessionId = 'ack-replacement-session';
+    const oldGeneration = {
+      jobId: 'ack-old-job',
+      requestId: 'ack-old-job',
+      sessionId: oldSessionId,
+      userMessageId: 'ack-old-user',
+      assistantMessageId: 'ack-old-assistant',
+      model: 'gemini-3.1-flash-lite',
+      mode: 'chat',
+      status: 'completed',
+      revision: 7,
+      content: 'Old completed answer',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const replacementGeneration = {
+      jobId: 'ack-replacement-job',
+      requestId: 'ack-replacement-job',
+      sessionId: replacementSessionId,
+      userMessageId: 'ack-replacement-user',
+      assistantMessageId: 'ack-replacement-assistant',
+      model: 'gemini-3.1-flash-lite',
+      mode: 'chat',
+      status: 'running',
+      revision: 3,
+      content: 'Authoritative replacement partial',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: replacementSessionId,
+      sessions: [
+        {
+          id: oldSessionId,
+          title: 'Old generation',
+          updatedAt: Date.now(),
+          messages: [
+            { id: 'ack-old-user', role: 'user', content: 'Old question' },
+            { id: 'ack-old-assistant', role: 'model', content: 'Old completed answer', status: 'streaming', sources: [] },
+          ],
+        },
+        {
+          id: replacementSessionId,
+          title: 'Replacement generation',
+          updatedAt: Date.now(),
+          messages: [
+            { id: 'ack-replacement-user', role: 'user', content: 'Replacement question' },
+            { id: 'ack-replacement-assistant', role: 'model', content: '', status: 'thinking', sources: [] },
+          ],
+        },
+      ],
+      activeGeneration: oldGeneration,
+    };
+
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    let oldAcknowledged = false;
+    global.chrome.runtime.sendMessage.mockImplementation(async message => {
+      if (message?.type === 'GET_STATE') {
+        return {
+          ok: true,
+          activeGeneration: oldAcknowledged ? replacementGeneration : oldGeneration,
+        };
+      }
+      if (message?.type === 'DONE_ACK' && message.jobId === oldGeneration.jobId) {
+        oldAcknowledged = true;
+        currentStorage.activeGeneration = replacementGeneration;
+        return { ok: true, removed: false, ignored: true };
+      }
+      return defaultRuntimeSend(message);
+    });
+
+    render(<App />);
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'DONE_ACK',
+      jobId: oldGeneration.jobId,
+      finalRevision: oldGeneration.revision,
+    }));
+    await waitFor(() => expect(global.chrome.runtime.sendMessage.mock.calls.filter(([message]) => (
+      message?.type === 'GET_STATE'
+    ))).toHaveLength(2));
+    expect(await screen.findByText('Authoritative replacement partial', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(getStopButton()).toBeInTheDocument();
+    expect(api.streamChat).not.toHaveBeenCalled();
+
+    fireEvent.click(getStopButton());
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CANCEL',
+      jobId: replacementGeneration.jobId,
+    })));
+  });
+
+  it('ignores an equal-revision duplicate snapshot instead of rewinding visible content', async () => {
+    const sessionId = 'revision-session';
+    const baseGeneration = {
+      jobId: 'revision-job',
+      requestId: 'revision-job',
+      sessionId,
+      userMessageId: 'revision-user',
+      assistantMessageId: 'revision-assistant',
+      model: 'gemini-3.1-flash-lite',
+      mode: 'chat',
+      status: 'running',
+      revision: 0,
+      content: '',
+      sources: [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: sessionId,
+      sessions: [{
+        id: sessionId,
+        title: 'Revision guard',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'revision-user', role: 'user', content: 'Keep the newest revision' },
+          { id: 'revision-assistant', role: 'model', content: '', status: 'thinking', sources: [] },
+        ],
+      }],
+      activeGeneration: baseGeneration,
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    emitRuntimeMessage({
+      type: 'ACTIVE_GEN_CHANGED',
+      snapshot: { ...baseGeneration, revision: 1, content: 'Authoritative snapshot' },
+    });
+    emitRuntimeMessage({
+      type: 'ACTIVE_GEN_CHANGED',
+      snapshot: { ...baseGeneration, revision: 1, content: 'Stale replacement' },
+    });
+
+    expect(await screen.findByText('Authoritative snapshot', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText('Stale replacement')).not.toBeInTheDocument();
+
+    emitRuntimeMessage({
+      type: 'DONE',
+      activeGeneration: {
+        ...baseGeneration,
+        status: 'completed',
+        revision: 2,
+        content: 'Authoritative snapshot',
+      },
+    });
+    await waitFor(() => expect(currentStorage.activeGeneration).toBeUndefined());
   });
 });

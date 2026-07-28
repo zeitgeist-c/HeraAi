@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
 export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const MODELS = [
@@ -7,7 +7,10 @@ export const MODELS = [
   'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
 ]
-const GEMINI_TIMEOUT_MS = 30000
+const GEMINI_API_VERSION = 'v1'
+const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 60000
+const GEMINI_REASONING_REQUEST_TIMEOUT_MS = 120000
+const GEMINI_STREAM_IDLE_TIMEOUT_MS = 120000
 const TAVILY_TIMEOUT_MS = 15000
 const RESEARCH_CONTEXT_TURNS = 6
 const RESEARCH_CONTEXT_MAX_CHARS = 2200
@@ -23,27 +26,204 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw createAbortError()
 }
 
-function withTimeout(promise, ms) {
+function createTimeoutError() {
+  const error = new Error('Request timeout')
+  error.name = 'TimeoutError'
+  return error
+}
+
+function getGeminiRequestTimeoutMs(modelId) {
+  return modelId === 'gemini-3.5-flash' || modelId === 'gemini-3.6-flash'
+    ? GEMINI_REASONING_REQUEST_TIMEOUT_MS
+    : GEMINI_DEFAULT_REQUEST_TIMEOUT_MS
+}
+
+function createGeminiClient(apiKey) {
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      apiVersion: GEMINI_API_VERSION,
+    },
+  })
+}
+
+async function startGeminiRequest(createRequest, timeoutMs, parentSignal) {
+  throwIfAborted(parentSignal)
+  const controller = new AbortController()
+  const forwardParentAbort = () => controller.abort()
+  parentSignal?.addEventListener('abort', forwardParentAbort, { once: true })
+  if (parentSignal?.aborted) {
+    parentSignal.removeEventListener('abort', forwardParentAbort)
+    throw createAbortError()
+  }
+
+  let timedOut = false
   let timeoutId
   const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Request timeout')), ms)
+    timeoutId = setTimeout(() => {
+      timedOut = true
+      const error = createTimeoutError()
+      reject(error)
+      controller.abort()
+    }, timeoutMs)
   })
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId))
+
+  const cleanup = () => {
+    clearTimeout(timeoutId)
+    parentSignal?.removeEventListener('abort', forwardParentAbort)
+  }
+
+  try {
+    const result = await Promise.race([
+      Promise.resolve().then(() => createRequest(controller.signal)),
+      timeout,
+    ])
+    clearTimeout(timeoutId)
+    return {
+      result,
+      requestSignal: controller.signal,
+      abortRequest: () => controller.abort(),
+      cleanup,
+    }
+  } catch (error) {
+    cleanup()
+    if (parentSignal?.aborted) throw createAbortError()
+    if (timedOut || error?.name === 'AbortError') throw createTimeoutError()
+    throw error
+  }
+}
+
+async function runGeminiRequest(createRequest, timeoutMs, signal) {
+  const request = await startGeminiRequest(createRequest, timeoutMs, signal)
+  try {
+    return request.result
+  } finally {
+    request.cleanup()
+  }
+}
+
+function nextStreamChunk(iterator, signal, abortRequest) {
+  throwIfAborted(signal)
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', handleAbort)
+      callback(value)
+    }
+    const handleAbort = () => finish(reject, createAbortError())
+    const timeoutId = setTimeout(() => {
+      const error = new Error('Gemini response stream timed out')
+      error.name = 'StreamTimeoutError'
+      finish(reject, error)
+      abortRequest?.()
+    }, GEMINI_STREAM_IDLE_TIMEOUT_MS)
+
+    signal?.addEventListener('abort', handleAbort, { once: true })
+    Promise.resolve().then(() => iterator.next()).then(
+      result => finish(resolve, result),
+      error => finish(reject, error),
+    )
+  })
 }
 
 function validKeys(keys) {
   return (keys || []).filter(entry => entry?.key?.trim())
 }
 
-function classifyGeminiError(err) {
-  const msg = err?.message || ''
-  const status = err?.status || err?.code || 0
+function getGeminiErrorText(err) {
+  return [
+    err?.message,
+    err?.statusText,
+    err?.error?.message,
+    err?.cause?.message,
+  ].filter(Boolean).join(' ').toLowerCase()
+}
 
-  if (status === 429 || msg.includes('RATE_LIMIT') || msg.includes('rate_limit')) return 'cooldown'
-  if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('exhausted')) return 'quota_exceeded'
-  if (status === 400 || status === 401 || status === 403 || msg.includes('API_KEY_INVALID')) return 'error'
-  if (msg.includes('SAFETY') || msg.includes('blocked') || msg.includes('safety')) return 'error'
-  return 'cooldown'
+function getGeminiHttpStatus(err) {
+  const candidates = [err?.status, err?.error?.code, err?.code]
+  for (const candidate of candidates) {
+    const numericStatus = Number(candidate)
+    if (Number.isInteger(numericStatus) && numericStatus >= 100 && numericStatus <= 599) {
+      return numericStatus
+    }
+  }
+
+  const match = getGeminiErrorText(err).match(/\b(400|401|403|404|408|409|429|500|502|503|504)\b/)
+  return match ? Number(match[1]) : 0
+}
+
+function classifyGeminiError(err) {
+  const message = getGeminiErrorText(err)
+  const status = getGeminiHttpStatus(err)
+
+  if (
+    err?.name === 'TimeoutError'
+    || err?.name === 'StreamTimeoutError'
+    || err?.name === 'AbortError'
+    || status === 408
+    || status === 504
+    || message.includes('timed out')
+    || message.includes('timeout')
+  ) return 'timeout'
+  if (message.includes('rate_limit') || message.includes('rate limit') || message.includes('too many requests')) return 'cooldown'
+  if (message.includes('resource_exhausted') || message.includes('quota') || message.includes('exhausted')) return 'quota_exceeded'
+  if (status === 429) return 'cooldown'
+  if (message.includes('safety') || message.includes('blocked')) return 'safety'
+  if (message.includes('api_key_invalid') || status === 401) return 'invalid_key'
+  if (message.includes('failed_precondition') || message.includes('billing')) return 'billing_required'
+  if (
+    status === 404
+    || message.includes('not_found')
+    || message.includes('not found')
+    || (message.includes('model') && message.includes('unsupported'))
+  ) return 'model_unavailable'
+  if (status === 403 || message.includes('permission_denied')) return 'permission_denied'
+  if (status >= 500) return 'service_unavailable'
+  if (status === 400 || message.includes('invalid_argument')) return 'invalid_request'
+  if (
+    err instanceof TypeError
+    || message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('econnreset')
+    || message.includes('enotfound')
+  ) return 'network'
+  return 'generation_failed'
+}
+
+function geminiErrorCode(classification) {
+  const codes = {
+    timeout: 'timeout',
+    cooldown: 'rate_limited',
+    quota_exceeded: 'quota_exceeded',
+    invalid_key: 'api_key_invalid',
+    permission_denied: 'permission_denied',
+    model_unavailable: 'model_unavailable',
+    billing_required: 'billing_required',
+    service_unavailable: 'service_unavailable',
+    invalid_request: 'invalid_request',
+    network: 'network_error',
+  }
+  return codes[classification] || 'generation_failed'
+}
+
+function geminiKeyStatus(classification) {
+  if (classification === 'cooldown') return 'cooldown'
+  if (classification === 'quota_exceeded') return 'quota_exceeded'
+  if (classification === 'invalid_key') return 'error'
+  if (classification === 'network') return 'network'
+  return null
+}
+
+function logGeminiFailure(modelId, classification, err) {
+  console.error('Gemini request failed', {
+    model: modelId,
+    reason: classification,
+    httpStatus: getGeminiHttpStatus(err) || null,
+  })
 }
 
 function classifyTavilyStatus(status) {
@@ -56,13 +236,16 @@ function classifyTavilyStatus(status) {
 function testKeyErrorType(provider, err) {
   if (err?.name === 'AbortError') return 'timeout'
   if (provider === 'gemini') {
-    const status = err?.status || err?.code || 0
-    const msg = err?.message || ''
-    if (status === 429 || msg.includes('RATE_LIMIT') || msg.includes('rate_limit')) return 'rate_limit'
-    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('exhausted')) return 'quota'
-    if (status === 400 || status === 401 || status === 403 || msg.includes('API_KEY_INVALID')) return 'invalid'
-    if (msg.includes('SAFETY') || msg.includes('blocked') || msg.includes('safety')) return 'invalid'
-    return 'network'
+    const classification = classifyGeminiError(err)
+    if (classification === 'cooldown') return 'rate_limit'
+    if (classification === 'quota_exceeded') return 'quota'
+    if (classification === 'timeout') return 'timeout'
+    if (classification === 'model_unavailable') return 'model_unavailable'
+    if (classification === 'service_unavailable') return 'service_unavailable'
+    if (classification === 'billing_required') return 'billing_required'
+    if (classification === 'permission_denied') return 'permission_denied'
+    if (classification === 'network') return 'network'
+    return 'invalid'
   }
   if (provider === 'tavily') {
     const status = err?.status || 0
@@ -74,10 +257,10 @@ function testKeyErrorType(provider, err) {
   return 'network'
 }
 
-function toGeminiHistory(messages) {
-  const history = []
+function toGeminiContents(messages, fallbackImage = null) {
+  const contents = []
 
-  for (const message of (messages || []).slice(0, -1)) {
+  for (const message of messages || []) {
     if (!message || (message.role !== 'user' && message.role !== 'model')) continue
     const text = typeof message.content === 'string' ? message.content.trim() : ''
     const isEmptyUiState = (
@@ -86,16 +269,31 @@ function toGeminiHistory(messages) {
     )
     const isEmptyError = message.role === 'model' && message.status === 'error' && !text
     if (isEmptyUiState || isEmptyError) continue
-    if (!text) continue
-    if (message.role === 'model' && history.length === 0) continue
+    const imageAttachments = (message.attachments || [])
+      .filter(attachment => attachment?.mimeType?.startsWith('image/') && attachment?.data)
+    const parts = []
+    if (text) parts.push({ text })
+    for (const attachment of imageAttachments) {
+      parts.push({
+        inlineData: {
+          data: attachment.data,
+          mimeType: attachment.mimeType || 'image/png',
+        },
+      })
+    }
+    if (message === (messages || []).at(-1) && imageAttachments.length === 0 && fallbackImage) {
+      parts.push({ inlineData: { data: fallbackImage, mimeType: 'image/png' } })
+    }
+    if (parts.length === 0) continue
+    if (message.role === 'model' && contents.length === 0) continue
 
-    history.push({
+    contents.push({
       role: message.role === 'model' ? 'model' : 'user',
-      parts: [{ text }],
+      parts,
     })
   }
 
-  return history
+  return contents
 }
 
 function normalizeTextMessages(messages) {
@@ -118,104 +316,178 @@ function normalizeTextMessages(messages) {
   return normalized
 }
 
-function toVisionParts(message, fallbackImage) {
-  const parts = [{ text: message?.content || '' }]
-  const imageAttachments = (message?.attachments || [])
-    .filter(att => att?.mimeType?.startsWith('image/') && att?.data)
-
-  if (imageAttachments.length > 0) {
-    for (const imageAttachment of imageAttachments) {
-      parts.push({
-        inlineData: {
-          data: imageAttachment.data,
-          mimeType: imageAttachment.mimeType || 'image/png',
-        },
-      })
-    }
-  } else if (fallbackImage) {
-    parts.push({
-      inlineData: {
-        data: fallbackImage,
-        mimeType: 'image/png',
-      },
-    })
-  }
-
-  return parts
-}
-
-async function* streamGeminiWithFallback(keys, createRequest, signal) {
+async function* streamGeminiWithFallback(keys, createStreamRequest, createFallbackRequest, signal, modelId) {
   const entries = validKeys(keys)
   if (entries.length === 0) {
-    yield { event: 'error', data: { message: 'Gemini API key gerekli. Ayarlardan bir Gemini anahtari ekleyin.' } }
+    yield { event: 'error', data: { code: 'api_key_missing', message: 'Gemini API key gerekli. Ayarlardan bir Gemini anahtari ekleyin.' } }
     return
   }
 
   let lastError = null
+  let lastClassification = 'generation_failed'
+  const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
 
   for (const entry of entries) {
     let hasStartedStreaming = false
+    let reportedSuccess = false
+    let streamRequest = null
+    const genAI = createGeminiClient(entry.key.trim())
     try {
       throwIfAborted(signal)
-      const genAI = new GoogleGenerativeAI(entry.key.trim())
-      const stream = await withTimeout(createRequest(genAI), GEMINI_TIMEOUT_MS)
+      streamRequest = await startGeminiRequest(
+        requestSignal => createStreamRequest(genAI, requestSignal),
+        requestTimeoutMs,
+        signal,
+      )
+      const stream = streamRequest.result
 
-      yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: 'success' } }
-
-      for await (const chunk of stream) {
+      const iterator = stream[Symbol.asyncIterator]()
+      while (true) {
+        const { value: chunk, done } = await nextStreamChunk(
+          iterator,
+          streamRequest.requestSignal,
+          streamRequest.abortRequest,
+        )
+        if (done) break
         throwIfAborted(signal)
-        const text = chunk.text()
+        const text = chunk.text || ''
         if (text) {
           hasStartedStreaming = true
+          if (!reportedSuccess) {
+            reportedSuccess = true
+            yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: 'success' } }
+          }
           yield { event: 'chunk', data: { text } }
         }
       }
+
+      if (!hasStartedStreaming) {
+        const error = new Error('Gemini returned an empty response')
+        error.name = 'EmptyResponseError'
+        throw error
+      }
       return
     } catch (err) {
-      if (err.name === 'AbortError') throw err
-      lastError = err
-      const status = classifyGeminiError(err)
-      yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status } }
-
-      if (hasStartedStreaming || status === 'error') {
-        yield { event: 'error', data: { message: 'Gemini yaniti olusturulamadi. Lutfen API anahtarinizi kontrol edin.' } }
+      streamRequest?.abortRequest()
+      streamRequest?.cleanup()
+      streamRequest = null
+      if (err.name === 'AbortError' && signal?.aborted) throw err
+      if (err.name === 'EmptyResponseError') {
+        yield { event: 'error', data: { code: 'empty_response', message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.' } }
         return
       }
+      let resolvedError = err
+      let status = classifyGeminiError(resolvedError)
+
+      if (!hasStartedStreaming && status === 'network' && createFallbackRequest) {
+        try {
+          throwIfAborted(signal)
+          const response = await runGeminiRequest(
+            requestSignal => createFallbackRequest(genAI, requestSignal),
+            requestTimeoutMs,
+            signal,
+          )
+          throwIfAborted(signal)
+          const fallbackText = response?.text || ''
+          if (!fallbackText) {
+            const emptyError = new Error('Gemini returned an empty response')
+            emptyError.name = 'EmptyResponseError'
+            throw emptyError
+          }
+          yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: 'success' } }
+          yield { event: 'chunk', data: { text: fallbackText } }
+          return
+        } catch (fallbackError) {
+          if (fallbackError.name === 'AbortError' && signal?.aborted) throw fallbackError
+          if (fallbackError.name === 'EmptyResponseError') {
+            yield { event: 'error', data: { code: 'empty_response', message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.' } }
+            return
+          }
+          resolvedError = fallbackError
+          status = classifyGeminiError(resolvedError)
+        }
+      }
+
+      lastError = resolvedError
+      lastClassification = status
+      const keyStatus = geminiKeyStatus(status)
+      if (keyStatus) {
+        yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: keyStatus } }
+      }
+
+      const requestScopedFailure = [
+        'timeout',
+        'model_unavailable',
+        'service_unavailable',
+        'invalid_request',
+        'safety',
+        'generation_failed',
+      ].includes(status)
+      if (hasStartedStreaming || requestScopedFailure) {
+        logGeminiFailure(modelId, status, resolvedError)
+        yield {
+          event: 'error',
+          data: {
+            code: geminiErrorCode(status),
+            message: 'Gemini yaniti olusturulamadi.',
+          },
+        }
+        return
+      }
+    } finally {
+      streamRequest?.cleanup()
     }
   }
 
-  console.error('Gemini keys exhausted')
-  yield { event: 'error', data: { message: 'Tum Gemini anahtarlari denendi ancak yanit alinamadi.' } }
+  const code = geminiErrorCode(lastClassification)
+  const message = lastClassification === 'network'
+    ? 'Gemini ile baglanti kurulamadi. Internet baglantinizi ve tarayici konsolunu kontrol edin.'
+    : 'Tum Gemini anahtarlari denendi ancak yanit alinamadi.'
+  logGeminiFailure(modelId, lastClassification, lastError)
+  yield { event: 'error', data: { code, message } }
+}
+
+function createGeminiRequestParameters(messages, options, requestSignal, modelId, fallbackImage = null) {
+  return {
+    model: modelId,
+    contents: toGeminiContents(messages, fallbackImage),
+    config: {
+      abortSignal: requestSignal,
+      ...(options.systemInstruction?.trim() ? { systemInstruction: options.systemInstruction.trim() } : {}),
+    },
+  }
 }
 
 export async function* streamChat(messages, options = {}, geminiKeys = [], signal, model) {
-  const lastMsg = messages[messages.length - 1]
   const modelId = model || DEFAULT_MODEL
 
-  yield* streamGeminiWithFallback(geminiKeys, async (genAI) => {
-    const genModel = genAI.getGenerativeModel({
-      model: modelId,
-      ...(options.systemInstruction?.trim() ? { systemInstruction: options.systemInstruction.trim() } : {}),
-    })
-    const chat = genModel.startChat({ history: toGeminiHistory(messages) })
-    const result = await chat.sendMessageStream(lastMsg?.content || '')
-    return result.stream
-  }, signal)
+  yield* streamGeminiWithFallback(
+    geminiKeys,
+    (genAI, requestSignal) => genAI.models.generateContentStream(
+      createGeminiRequestParameters(messages, options, requestSignal, modelId)
+    ),
+    (genAI, requestSignal) => genAI.models.generateContent(
+      createGeminiRequestParameters(messages, options, requestSignal, modelId)
+    ),
+    signal,
+    modelId,
+  )
 }
 
 export async function* streamVision(messages, image, options = {}, geminiKeys = [], signal, model) {
-  const lastMsg = messages[messages.length - 1]
   const modelId = model || DEFAULT_MODEL
 
-  yield* streamGeminiWithFallback(geminiKeys, async (genAI) => {
-    const genModel = genAI.getGenerativeModel({
-      model: modelId,
-      ...(options.systemInstruction?.trim() ? { systemInstruction: options.systemInstruction.trim() } : {}),
-    })
-    const chat = genModel.startChat({ history: toGeminiHistory(messages) })
-    const result = await chat.sendMessageStream(toVisionParts(lastMsg, image))
-    return result.stream
-  }, signal)
+  yield* streamGeminiWithFallback(
+    geminiKeys,
+    (genAI, requestSignal) => genAI.models.generateContentStream(
+      createGeminiRequestParameters(messages, options, requestSignal, modelId, image)
+    ),
+    (genAI, requestSignal) => genAI.models.generateContent(
+      createGeminiRequestParameters(messages, options, requestSignal, modelId, image)
+    ),
+    signal,
+    modelId,
+  )
 }
 
 async function searchTavily(question, tavilyKeys, signal) {
@@ -353,21 +625,26 @@ async function generateResearchQuery(conversationMessages, question, geminiKeys,
   for (const entry of entries) {
     try {
       throwIfAborted(signal)
-      const genAI = new GoogleGenerativeAI(entry.key.trim())
-      const genModel = genAI.getGenerativeModel({ model: modelId })
-      const result = await withTimeout(
-        genModel.generateContent(buildResearchQueryPrompt(context, question)),
-        GEMINI_TIMEOUT_MS
+      const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
+      const genAI = createGeminiClient(entry.key.trim())
+      const result = await runGeminiRequest(
+        requestSignal => genAI.models.generateContent({
+          model: modelId,
+          contents: buildResearchQueryPrompt(context, question),
+          config: { abortSignal: requestSignal },
+        }),
+        requestTimeoutMs,
+        signal,
       )
-      const text = sanitizeResearchQuery(result?.response?.text?.() || '')
+      const text = sanitizeResearchQuery(result?.text || '')
       if (text) {
         keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: 'success' })
         return { query: text, context, keyStatuses }
       }
-      keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: 'cooldown' })
     } catch (err) {
-      if (err.name === 'AbortError') throw err
-      keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: classifyGeminiError(err) })
+      if (err.name === 'AbortError' && signal?.aborted) throw err
+      const keyStatus = geminiKeyStatus(classifyGeminiError(err))
+      if (keyStatus) keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: keyStatus })
     }
   }
 
@@ -403,7 +680,13 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
 
   const entries = validKeys(tavilyKeys)
   if (entries.length === 0) {
-    yield { event: 'error', data: { message: 'Web arastirma icin Tavily API key gerekli. Ayarlardan Tavily anahtari ekleyin.' } }
+    yield {
+      event: 'error',
+      data: {
+        code: 'tavily_key_missing',
+        message: 'Web arastirma icin Tavily API key gerekli. Ayarlardan Tavily anahtari ekleyin.',
+      },
+    }
     return
   }
 
@@ -424,12 +707,18 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
 
   if (!searchResult?.results) {
     console.error('Tavily search failed')
-    yield { event: 'error', data: { message: searchResult?.error?.message || 'Web aramasi yapilamadi.' } }
+    yield {
+      event: 'error',
+      data: {
+        code: 'research_failed',
+        message: searchResult?.error?.message || 'Web aramasi yapilamadi.',
+      },
+    }
     return
   }
 
   if (searchResult.results.length === 0) {
-    yield { event: 'error', data: { message: 'Web aramasi sonuc vermedi.' } }
+    yield { event: 'error', data: { code: 'research_failed', message: 'Web aramasi sonuc vermedi.' } }
     return
   }
 
@@ -458,13 +747,22 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
   }
 }
 
-export async function testKey(provider, key) {
+export async function testKey(provider, key, model = DEFAULT_MODEL) {
   const normalizedKey = typeof key === 'string' ? key.trim() : ''
   if (provider === 'gemini') {
+    const modelId = MODELS.includes(model) ? model : DEFAULT_MODEL
+    const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
     try {
-      const genAI = new GoogleGenerativeAI(normalizedKey)
-      const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL })
-      await model.generateContent('test')
+      const genAI = createGeminiClient(normalizedKey)
+      await runGeminiRequest(
+        requestSignal => genAI.models.generateContent({
+          model: modelId,
+          contents: 'test',
+          config: { abortSignal: requestSignal },
+        }),
+        requestTimeoutMs,
+        undefined,
+      )
       return { success: true, provider }
     } catch (err) {
       if (err?.name === 'AbortError') {

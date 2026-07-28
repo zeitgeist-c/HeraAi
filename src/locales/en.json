@@ -55,6 +55,10 @@
             "test_rate_limit": "Rate limited",
             "test_network": "Connection error",
             "test_timeout": "Timeout",
+            "test_model_unavailable": "The selected model is unavailable for this API key or project.",
+            "test_service_unavailable": "Gemini is temporarily unavailable. Please retry shortly.",
+            "test_billing_required": "This model requires billing or project access.",
+            "test_permission_denied": "This API key does not have permission to use the selected model.",
             "test_unknown": "Test failed",
             "test_all_progress": "Testing {{done}}/{{total}}"
         },
@@ -163,7 +167,29 @@
         "status": {
             "thinking": "Thinking...",
             "cancelled": "Cancelled",
-            "error": "Response failed"
+            "error": "Response failed",
+            "interrupted": "The browser closed before the response finished. You can retry safely."
+        },
+        "generation_errors": {
+            "api_key_missing": "Add a Gemini API key in Settings to continue.",
+            "tavily_key_missing": "Add a Tavily API key in Settings to use web research.",
+            "all_keys_cooldown": "All API keys are temporarily rate limited. Please retry shortly.",
+            "quota_exceeded": "The API quota is exhausted. Check your provider quota and retry.",
+            "rate_limited": "The provider is rate limiting requests. Please retry shortly.",
+            "timeout": "The request timed out. Check your connection and retry.",
+            "network_error": "Gemini could not be reached. Check your connection and retry.",
+            "model_unavailable": "The selected Gemini model is unavailable for this API key or project. Check model access in Google AI Studio.",
+            "service_unavailable": "Gemini is busy or temporarily unavailable. Please retry shortly.",
+            "api_key_invalid": "The Gemini API key is invalid. Check the key in Settings.",
+            "permission_denied": "This API key does not have permission to use the selected model.",
+            "billing_required": "The selected model requires billing or project access.",
+            "empty_response": "The selected model returned an empty response. Please retry or choose another model.",
+            "research_failed": "Web research could not be completed.",
+            "already_running": "Another response is already running. Stop it before starting a new one.",
+            "invalid_request": "The response request was incomplete. Please retry.",
+            "generation_start_failed": "The background response process could not start.",
+            "generation_failed": "The AI response could not be generated.",
+            "storage_failed": "The message could not be saved locally. Free some extension storage and retry."
         },
         "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",

@@ -35,13 +35,13 @@ export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
   });
 
   const btnConfirm = document.createElement('button');
-  btnConfirm.innerHTML = confirm;
+  btnConfirm.textContent = confirm;
   Object.assign(btnConfirm.style, {
     padding: '6px 14px', background: PRIMARY_COLOR, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', fontFamily: 'sans-serif'
   });
 
   const btnCancel = document.createElement('button');
-  btnCancel.innerHTML = cancel;
+  btnCancel.textContent = cancel;
   Object.assign(btnCancel.style, {
     padding: '6px 14px', background: DESTRUCTIVE_COLOR, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', fontFamily: 'sans-serif'
   });

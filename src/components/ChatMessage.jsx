@@ -68,11 +68,15 @@ function CodeBlock({ className, children, ...props }) {
   )
 }
 
-const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
+const ChatMessage = ({ message, onEdit, onRetry }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
   const [copied, setCopied] = useState(false)
   const sources = Array.isArray(message.sources) ? message.sources : []
+  const isPending = message.status === 'thinking' || message.status === 'streaming'
+  const errorMessage = message.errorCode
+    ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
+    : t('chat.status.error')
 
   const handleCopyMessage = () => {
     copyText(message.content || '', {
@@ -145,9 +149,9 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
           <span className="block pt-1 text-[11px] text-muted-foreground">{t('chat.status.thinking')}</span>
         </div>
       ) : (
-        <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
+        <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:whitespace-pre-wrap prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
           {isPending ? (
-            message.content
+            <div className="whitespace-pre-wrap">{message.content}</div>
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -165,7 +169,7 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
                 },
               }}
             >
-              {message.content}
+              {message.content || ''}
             </ReactMarkdown>
           )}
         </div>
@@ -175,7 +179,10 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
         <span className="mt-1 block text-[11px] text-muted-foreground">{t('chat.status.cancelled')}</span>
       )}
       {message.status === 'error' && (
-        <span className="mt-1 block text-[11px] text-destructive">{t('chat.status.error')}</span>
+        <span className="mt-1 block text-[11px] text-destructive">{errorMessage}</span>
+      )}
+      {message.status === 'interrupted' && (
+        <span className="mt-1 block text-[11px] text-amber-500">{t('chat.status.interrupted')}</span>
       )}
 
       {sources.length > 0 && (
@@ -200,7 +207,7 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
         </div>
       )}
 
-      {message.content && (
+      {(message.content || message.status === 'interrupted' || message.status === 'error') && (
         <div className="mt-1.5 flex min-h-8 items-center gap-0.5 border-t border-border/45 pt-1.5">
           <button
             type="button"
@@ -237,7 +244,6 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.content === nextMessage.content &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
-    prevProps.isPending === nextProps.isPending &&
     prevMessage.attachments === nextMessage.attachments
   )
 }
