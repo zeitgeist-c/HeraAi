@@ -97,6 +97,8 @@
             "research_description": "Research with current sources",
             "crop_title": "Select from screen",
             "crop_description": "Crop an area and ask",
+            "crop_cancel_title": "Cancel selection",
+            "crop_cancel_description": "Close the active area selection",
             "attach_title": "Attach a file",
             "attach_description": "Image, PDF, or text"
         },
@@ -108,11 +110,39 @@
         "history_title": "Chat History",
         "no_history": "No chat history found.",
         "new_chat": "New Chat",
+        "session_title": {
+            "input_label": "Chat name",
+            "empty_error": "Chat name cannot be empty.",
+            "updated": "Chat name updated.",
+            "renamed": "Chat renamed.",
+            "save_error": "Chat name could not be saved."
+        },
+        "history_groups": {
+            "starred": "Starred",
+            "other": "Other chats"
+        },
+        "bulk_delete": {
+            "action": "Bulk delete",
+            "title": "Delete unstarred chats?",
+            "description": "Unstarred chats to be permanently deleted: {{count}}.",
+            "protected": "Starred chats that will be kept: {{count}}.",
+            "cancel": "Cancel",
+            "confirm": "Delete {{count}}",
+            "deleting": "Deleting...",
+            "success": "Deleted {{count}} unstarred chats.",
+            "none": "There are no unstarred chats to delete.",
+            "error": "Chats could not be deleted.",
+            "cancel_failed": "The response could not be stopped, so the chat was not deleted.",
+            "save_error": "Chat could not be updated."
+        },
         "tooltips": {
             "new_chat": "Start New Chat",
             "history": "View Chat History",
             "clear_chat": "Clear Chat",
             "delete_session": "Delete chat",
+            "rename_session": "Rename chat",
+            "star_session": "Star chat",
+            "unstar_session": "Remove star",
             "settings": "Settings - Switch API Key",
             "attach_file": "Attach File (Image or PDF)",
             "remove_attachment": "Remove attachment",
@@ -206,6 +236,7 @@
             "summarize": "Summarize",
             "explain": "Explain",
             "crop_tooltip": "Select an area on screen",
+            "crop_cancel_tooltip": "Cancel area selection",
             "web_tooltip": "Search the web",
             "ocr_tooltip": "Extract text from image",
             "translate_tooltip": "Translate selected text or image",

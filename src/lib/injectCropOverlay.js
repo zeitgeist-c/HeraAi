@@ -2,20 +2,36 @@
  * Injects a crop selection overlay into the active tab's page.
  * @param {object} translations - { confirm, cancel } button labels
  * @param {string} primaryColor - Hex color for the selection border (defaults to sky-500)
+ * @param {string} requestId - Unique identifier used to synchronize the page and side panel
  */
-export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
+export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff', requestId = '') {
   // Scope all constants inside so they're accessible during chrome.scripting.executeScript serialization
   const MAX_Z_INDEX = '2147483647';
   const PRIMARY_COLOR = primaryColor || '#7c5cff';
   const DESTRUCTIVE_COLOR = '#ef4444';
   const { confirm = '✔', cancel = '✖' } = translations;
 
-  if (document.getElementById('heraai-crop-overlay')) {
-    document.getElementById('heraai-crop-overlay').remove();
+  const existingOverlay = document.getElementById('heraai-crop-overlay');
+  if (existingOverlay) {
+    const existingRequestId = existingOverlay.dataset.heraaiCropRequestId || '';
+    if (!requestId || existingRequestId === requestId) {
+      return {
+        active: true,
+        existing: true,
+        requestId: existingRequestId || null
+      };
+    }
+
+    existingOverlay.dispatchEvent(new CustomEvent('heraai-crop-cancel', {
+      detail: { requestId: existingRequestId }
+    }));
+    // Compatibility fallback for an overlay injected by an older HeraAi build.
+    if (existingOverlay.isConnected) existingOverlay.remove();
   }
 
   const overlay = document.createElement('div');
   overlay.id = 'heraai-crop-overlay';
+  overlay.dataset.heraaiCropRequestId = requestId;
   Object.assign(overlay.style, {
     position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
     zIndex: MAX_Z_INDEX, cursor: 'crosshair', pointerEvents: 'auto',
@@ -67,6 +83,8 @@ export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
   document.body.appendChild(overlay);
 
   let startX, startY, isDrawing = false, isDragging = false, isResizing = null;
+  let confirmTimerId = null;
+  let cleanedUp = false;
   let rect = { x: 0, y: 0, w: 0, h: 0 };
 
   const updateSelection = () => {
@@ -136,16 +154,47 @@ export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
     isResizing = null;
   };
 
-  window.addEventListener('mousemove', mousemove);
-  window.addEventListener('mouseup', mouseup);
-
-  const cleanup = () => {
-    window.removeEventListener('mousemove', mousemove);
-    window.removeEventListener('mouseup', mouseup);
-    if (document.body.contains(overlay)) {
-      document.body.removeChild(overlay);
+  const notifyCancelled = () => {
+    try {
+      const response = chrome.runtime.sendMessage({
+        type: 'HERAAI_CROP_CANCELLED',
+        requestId
+      });
+      response?.catch?.(() => undefined);
+    } catch (_error) {
+      // The side panel may already be closed; local cleanup is still complete.
     }
   };
+
+  const cleanup = ({ sendCancelled = true } = {}) => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (confirmTimerId != null) {
+      window.clearTimeout(confirmTimerId);
+      confirmTimerId = null;
+    }
+    window.removeEventListener('mousemove', mousemove);
+    window.removeEventListener('mouseup', mouseup);
+    window.removeEventListener('keydown', handleKeyDown);
+    overlay.removeEventListener('heraai-crop-cancel', handleExternalCancel);
+    overlay.remove();
+    if (sendCancelled) notifyCancelled();
+  };
+
+  const handleExternalCancel = (event) => {
+    const requestedId = event?.detail?.requestId;
+    if (requestedId && requestId && requestedId !== requestId) return;
+    cleanup();
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Escape') cleanup();
+  };
+
+  window.addEventListener('mousemove', mousemove);
+  window.addEventListener('mouseup', mouseup);
+  window.addEventListener('keydown', handleKeyDown);
+  overlay.addEventListener('heraai-crop-cancel', handleExternalCancel);
 
   btnCancel.onclick = (e) => {
     e.stopPropagation();
@@ -154,6 +203,7 @@ export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
 
   btnConfirm.onclick = (e) => {
     e.stopPropagation();
+    if (cleanedUp || confirmTimerId != null) return;
     if (rect.w < 10 || rect.h < 10) {
       cleanup();
       return;
@@ -164,27 +214,48 @@ export function injectCropOverlay(translations = {}, primaryColor = '#7c5cff') {
     btnContainer.style.display = 'none';
     handles.forEach(h => h.el.style.display = 'none');
 
-    setTimeout(() => {
-      chrome.runtime.sendMessage({
-        type: 'HERAAI_CROP_DONE',
-        coords: {
-          x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-          pixelRatio: window.devicePixelRatio,
-          viewportWidth: window.innerWidth,
-          viewportHeight: window.innerHeight
-        }
-      }).catch(() => {
-        // Fallback: use storage
-        chrome.storage.local.set({
-          heraaiCropData: {
-            x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-            pixelRatio: window.devicePixelRatio,
-            viewportWidth: window.innerWidth,
-            viewportHeight: window.innerHeight
-          }
+    confirmTimerId = window.setTimeout(() => {
+      confirmTimerId = null;
+      const cropData = {
+        x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+        pixelRatio: window.devicePixelRatio,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+      };
+      try {
+        const response = chrome.runtime.sendMessage({
+          type: 'HERAAI_CROP_DONE',
+          requestId,
+          coords: cropData
         });
-      });
-      cleanup();
+        response?.catch?.(() => notifyCancelled());
+      } catch (_error) {
+        notifyCancelled();
+      }
+      cleanup({ sendCancelled: false });
     }, 50);
   };
+
+  return { active: true, existing: false, requestId };
+}
+
+/**
+ * Cancels the active crop overlay without creating a replacement.
+ * @param {string} requestId - Identifier of the crop request to cancel
+ */
+export function cancelCropOverlay(requestId = '') {
+  const overlay = document.getElementById('heraai-crop-overlay');
+  if (!overlay) return { active: false, cancelled: false, requestId: null };
+
+  const activeRequestId = overlay.dataset.heraaiCropRequestId || '';
+  if (requestId && activeRequestId && requestId !== activeRequestId) {
+    return { active: true, cancelled: false, requestId: activeRequestId };
+  }
+
+  overlay.dispatchEvent(new CustomEvent('heraai-crop-cancel', {
+    detail: { requestId }
+  }));
+  // Compatibility fallback for overlays injected by an older HeraAi build.
+  if (overlay.isConnected) overlay.remove();
+  return { active: false, cancelled: true, requestId: activeRequestId || requestId || null };
 }

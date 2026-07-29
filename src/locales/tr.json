@@ -97,6 +97,8 @@
             "research_description": "Güncel kaynaklarla araştır",
             "crop_title": "Ekrandan seç",
             "crop_description": "Bir alan kırpıp sor",
+            "crop_cancel_title": "Seçimi iptal et",
+            "crop_cancel_description": "Etkin alan seçimini kapat",
             "attach_title": "Dosya ekle",
             "attach_description": "Görsel, PDF veya metin"
         },
@@ -108,11 +110,39 @@
         "history_title": "Sohbet Geçmişi",
         "no_history": "Henüz sohbet geçmişi yok.",
         "new_chat": "Yeni Sohbet",
+        "session_title": {
+            "input_label": "Sohbet adı",
+            "empty_error": "Sohbet adı boş bırakılamaz.",
+            "updated": "Sohbet adı güncellendi.",
+            "renamed": "Sohbet yeniden adlandırıldı.",
+            "save_error": "Sohbet adı kaydedilemedi."
+        },
+        "history_groups": {
+            "starred": "Yıldızlı",
+            "other": "Diğer sohbetler"
+        },
+        "bulk_delete": {
+            "action": "Toplu sil",
+            "title": "Yıldızsız sohbetler silinsin mi?",
+            "description": "Kalıcı olarak silinecek yıldızsız sohbet sayısı: {{count}}.",
+            "protected": "Korunacak yıldızlı sohbet sayısı: {{count}}.",
+            "cancel": "İptal",
+            "confirm": "{{count}} sohbeti sil",
+            "deleting": "Siliniyor...",
+            "success": "{{count}} yıldızsız sohbet silindi.",
+            "none": "Silinecek yıldızsız sohbet yok.",
+            "error": "Sohbetler silinemedi.",
+            "cancel_failed": "Yanıt durdurulamadığı için sohbet silinmedi.",
+            "save_error": "Sohbet güncellenemedi."
+        },
         "tooltips": {
             "new_chat": "Yeni Sohbet Başlat",
             "history": "Sohbet Geçmişini Gör",
             "clear_chat": "Sohbeti Temizle",
             "delete_session": "Sohbeti sil",
+            "rename_session": "Sohbeti yeniden adlandır",
+            "star_session": "Sohbeti yıldızla",
+            "unstar_session": "Yıldızı kaldır",
             "settings": "Ayarlar - API Anahtarı Değiştir",
             "attach_file": "Dosya Ekle (Resim veya PDF)",
             "remove_attachment": "Eki kaldır",
@@ -206,6 +236,7 @@
             "summarize": "Özet",
             "explain": "Açıkla",
             "crop_tooltip": "Ekrandan alan seç",
+            "crop_cancel_tooltip": "Alan seçimini iptal et",
             "web_tooltip": "Web'de araştır",
             "ocr_tooltip": "Ekli görselden metin çıkar",
             "translate_tooltip": "Seçili metni veya görseli çevir",

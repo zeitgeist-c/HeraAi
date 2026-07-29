@@ -279,14 +279,18 @@ describe('background service worker browser compatibility', () => {
     });
   });
 
-  it('continues forwarding crop messages without holding the response channel open', async () => {
+  it('continues forwarding crop completion and cancellation without holding the response channel open', async () => {
     const mock = createChromeMock();
     const listener = await loadWorker(mock);
     const sendResponse = vi.fn();
 
     expect(listener({ type: 'HERAAI_CROP_DONE', image: 'data:image/png' }, {}, sendResponse)).toBe(false);
+    expect(listener({ type: 'HERAAI_CROP_CANCELLED', requestId: 'crop-1' }, {}, sendResponse)).toBe(false);
     expect(runtimeMessages(mock, 'HERAAI_CROP_DONE')).toEqual([
       { type: 'HERAAI_CROP_DONE', image: 'data:image/png' },
+    ]);
+    expect(runtimeMessages(mock, 'HERAAI_CROP_CANCELLED')).toEqual([
+      { type: 'HERAAI_CROP_CANCELLED', requestId: 'crop-1' },
     ]);
     expect(sendResponse).not.toHaveBeenCalled();
   });
@@ -398,6 +402,66 @@ describe('background generation coordinator', () => {
     expect(mock.events.indexOf('offscreen:create')).toBeLessThan(
       mock.events.indexOf('runtime:HERA_GENERATION_START'),
     );
+  });
+
+  it('keeps an internal vision prompt for the model without using it as the session title', async () => {
+    const internalPrompt = 'Internal OCR instruction for the model only';
+    const requestMessages = [{
+      id: 'user-1',
+      role: 'user',
+      content: internalPrompt,
+      displayContent: '',
+      mode: 'vision',
+      attachments: [{ name: 'scan.png', mimeType: 'image/png', data: 'image-data' }],
+    }];
+    const mock = createChromeMock({ initialStorage: { sessions: [] } });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage({
+      mode: 'vision',
+      sessionTitle: `${internalPrompt.slice(0, 30)}...`,
+      requestMessages,
+    }));
+
+    expect(response.ok).toBe(true);
+    expect(mock.storageSet.mock.calls[0][0].sessions[0]).toMatchObject({
+      title: 'New Chat',
+      messages: [
+        expect.objectContaining({ content: internalPrompt, displayContent: '' }),
+        expect.objectContaining({ role: 'model', status: 'thinking' }),
+      ],
+    });
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0].requestMessages).toEqual(requestMessages);
+  });
+
+  it('preserves custom titles and starred metadata when START carries an automatic title', async () => {
+    const mock = createChromeMock({
+      initialStorage: {
+        activeSessionId: 'session-1',
+        sessions: [{
+          id: 'session-1',
+          title: 'My permanent title',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 1,
+          messages: [{ id: 'older-user', role: 'user', content: 'Older message' }],
+        }],
+      },
+    });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage({
+      sessionTitle: 'Automatic title from START',
+    }));
+
+    expect(response.ok).toBe(true);
+    const persistedSession = mock.storageSet.mock.calls[0][0].sessions
+      .find(session => session.id === 'session-1');
+    expect(persistedSession).toMatchObject({
+      title: 'My permanent title',
+      isTitleCustom: true,
+      isStarred: true,
+    });
   });
 
   it('resolves Tavily keys for web mode and reuses an existing offscreen document', async () => {

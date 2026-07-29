@@ -1,14 +1,17 @@
 export const exportSessions = (sessions) => {
   const exportData = {
-    version: '1.0',
+    version: '1.1',
     exportedAt: new Date().toISOString(),
     sessions: sessions.map(s => ({
       id: s.id,
       title: s.title,
+      isTitleCustom: s.isTitleCustom === true,
+      isStarred: s.isStarred === true,
       updatedAt: s.updatedAt,
       messages: s.messages.map(m => ({
         role: m.role,
         content: m.content,
+        ...(typeof m.displayContent === 'string' ? { displayContent: m.displayContent } : {}),
         attachments: m.attachments ? m.attachments.map(a => ({
           name: a.name,
           mimeType: a.mimeType,
@@ -44,6 +47,8 @@ export const importSessions = (file) => {
         const sessions = data.sessions.map(s => ({
           id: s.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
           title: s.title || 'Imported Chat',
+          isTitleCustom: s.isTitleCustom === true,
+          isStarred: s.isStarred === true,
           updatedAt: s.updatedAt || Date.now(),
           messages: s.messages || []
         }))

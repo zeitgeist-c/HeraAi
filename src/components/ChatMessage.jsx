@@ -6,6 +6,8 @@ import rehypeSanitize from 'rehype-sanitize'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 
+import { getMessageDisplayContent } from '../lib/messageDisplay'
+
 const COPY_TIMEOUT_MS = 2000
 const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
 
@@ -80,6 +82,7 @@ const ChatMessage = ({
 }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
+  const visibleContent = getMessageDisplayContent(message)
   const [copied, setCopied] = useState(false)
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
   const [retryMenuPlacement, setRetryMenuPlacement] = useState('up')
@@ -95,7 +98,7 @@ const ChatMessage = ({
     : t('chat.status.error')
 
   const handleCopyMessage = () => {
-    copyText(message.content || '', {
+    copyText(visibleContent, {
       onSuccess: () => {
         setCopied(true)
         setTimeout(() => setCopied(false), COPY_TIMEOUT_MS)
@@ -263,12 +266,14 @@ const ChatMessage = ({
     return (
       <article className="group flex w-full justify-end">
         <div className="max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm">
-          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
-            {message.content}
-          </div>
+          {visibleContent && (
+            <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
+              {visibleContent}
+            </div>
+          )}
 
           {message.attachments?.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className={`${visibleContent ? 'mt-2 ' : ''}flex flex-wrap gap-1.5`}>
               {message.attachments.map((attachment, index) => (
                 <div
                   key={`${attachment.name || 'attachment'}-${index}`}
@@ -283,10 +288,10 @@ const ChatMessage = ({
             </div>
           )}
 
-          {(message.content || message.attachments?.length > 0) && (
+          {(visibleContent || message.attachments?.length > 0) && (
             <div className="relative mt-1.5 flex flex-col items-end gap-1.5">
               <div className="flex justify-end gap-0.5">
-                {message.content && (
+                {visibleContent && (
                   <button
                     type="button"
                     onClick={handleCopyMessage}
@@ -298,10 +303,10 @@ const ChatMessage = ({
                   </button>
                 )}
                 {renderRetryButton(true)}
-                {message.content && (
+                {visibleContent && (
                   <button
                     type="button"
-                    onClick={() => onEdit?.(message.content)}
+                    onClick={() => onEdit?.(visibleContent)}
                     title={t('chat.tooltips.edit')}
                     aria-label={t('chat.tooltips.edit')}
                     className="hera-icon-button h-7 w-7"
@@ -414,6 +419,7 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.id === nextMessage.id &&
     prevMessage.role === nextMessage.role &&
     prevMessage.content === nextMessage.content &&
+    prevMessage.displayContent === nextMessage.displayContent &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
     prevMessage.attachments === nextMessage.attachments &&
