@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import App from './App';
@@ -88,6 +88,21 @@ function getSendButton() {
 
 function getStopButton() {
   return Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-square'));
+}
+
+function getChatSurface() {
+  const main = document.querySelector('main');
+  if (!main) throw new Error('Chat surface is not rendered');
+  return within(main);
+}
+
+async function findChatText(text, queryOptions, waitOptions) {
+  const main = await waitFor(() => {
+    const chatSurface = document.querySelector('main');
+    if (!chatSurface) throw new Error('Chat surface is not rendered');
+    return chatSurface;
+  });
+  return within(main).findByText(text, queryOptions, waitOptions);
 }
 
 function setScrollMetrics(element, { scrollHeight, clientHeight, scrollTop }) {
@@ -315,9 +330,16 @@ describe('HeraAi App', () => {
           status: 'thinking',
           sources: [],
         };
+        const existingSession = (currentStorage.sessions || [])
+          .find(session => session.id === message.sessionId);
         const nextSession = {
+          ...(existingSession || {}),
           id: message.sessionId,
-          title: message.sessionTitle || message.requestMessages?.find(item => item.role === 'user')?.content || 'New Chat',
+          title: existingSession?.isTitleCustom === true
+            ? existingSession.title
+            : message.sessionTitle || message.requestMessages?.find(item => item.role === 'user')?.content || 'New Chat',
+          isTitleCustom: existingSession?.isTitleCustom === true,
+          isStarred: existingSession?.isStarred === true,
           updatedAt: Date.now(),
           messages: [...(message.requestMessages || []), assistantMessage],
         };
@@ -354,6 +376,7 @@ describe('HeraAi App', () => {
       }
       return { ok: true };
     });
+    global.chrome.windows.getAll.mockResolvedValue([{ id: 1, type: 'normal' }]);
     global.chrome.tabs.query.mockResolvedValue([{ id: 1, url: 'https://example.com/article' }]);
     global.chrome.tabs.captureVisibleTab.mockResolvedValue('data:image/png;base64,visible-tab');
     global.chrome.scripting.executeScript.mockResolvedValue([{
@@ -387,7 +410,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'Hello Gemini, fun fact.' } });
     fireEvent.click(sendBtn);
 
-    expect(await screen.findByText('Hello Gemini, fun fact.')).toBeInTheDocument();
+    expect(await findChatText('Hello Gemini, fun fact.')).toBeInTheDocument();
     expect(input.value).toBe('');
     expect(await screen.findByText('Hello from AI')).toBeInTheDocument();
   });
@@ -428,7 +451,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'Show this immediately' } });
     fireEvent.click(getSendButton());
 
-    expect(screen.getByText('Show this immediately')).toBeInTheDocument();
+    expect(getChatSurface().getByText('Show this immediately')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
 
@@ -497,12 +520,21 @@ describe('HeraAi App', () => {
       }],
     };
     let releaseInitialStorageRead;
-    global.chrome.storage.local.get.mockImplementation((keys, callback) => new Promise(resolve => {
-      releaseInitialStorageRead = () => {
-        if (typeof callback === 'function') callback(initialStorage);
-        resolve(initialStorage);
-      };
-    }));
+    let initialStorageReadStarted = false;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (!initialStorageReadStarted) {
+        initialStorageReadStarted = true;
+        return new Promise(resolve => {
+          releaseInitialStorageRead = () => {
+            if (typeof callback === 'function') callback(initialStorage);
+            resolve(initialStorage);
+          };
+        });
+      }
+
+      if (typeof callback === 'function') callback(currentStorage);
+      return Promise.resolve(currentStorage);
+    });
 
     render(<App />);
     await waitFor(() => expect(releaseInitialStorageRead).toBeTypeOf('function'));
@@ -555,7 +587,7 @@ describe('HeraAi App', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByText('Question claimed during bootstrap')).toBeInTheDocument();
+    expect(await findChatText('Question claimed during bootstrap')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(getStopButton()).toBeInTheDocument();
 
@@ -635,7 +667,7 @@ describe('HeraAi App', () => {
       activeGeneration: { oldValue: undefined, newValue: runningGeneration },
     });
 
-    expect(await screen.findByText('External panel question')).toBeInTheDocument();
+    expect(await findChatText('External panel question')).toBeInTheDocument();
     expect(getStopButton()).toBeInTheDocument();
 
     const terminalGeneration = {
@@ -868,7 +900,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'Paint me first' } });
     fireEvent.click(getSendButton());
 
-    expect(screen.getByText('Paint me first')).toBeInTheDocument();
+    expect(getChatSurface().getByText('Paint me first')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
 
@@ -929,7 +961,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'Question after reopening' } });
     fireEvent.click(getSendButton());
 
-    expect(screen.getByText('Question after reopening')).toBeInTheDocument();
+    expect(getChatSurface().getByText('Question after reopening')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(screen.getByText('Persisted answer')).toBeInTheDocument();
 
@@ -1005,7 +1037,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'Question after panel resume' } });
     fireEvent.click(getSendButton());
 
-    expect(screen.getByText('Question after panel resume')).toBeInTheDocument();
+    expect(getChatSurface().getByText('Question after panel resume')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
 
@@ -1081,13 +1113,13 @@ describe('HeraAi App', () => {
 
     firstMount.unmount();
     render(<App />);
-    expect(await screen.findByText('Question before restart')).toBeInTheDocument();
+    expect(await findChatText('Question before restart')).toBeInTheDocument();
 
     input = document.querySelector('textarea');
     fireEvent.change(input, { target: { value: 'Question after restart' } });
     fireEvent.click(getSendButton());
 
-    expect(screen.getByText('Question after restart')).toBeInTheDocument();
+    expect(getChatSurface().getByText('Question after restart')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(1);
 
@@ -1113,7 +1145,7 @@ describe('HeraAi App', () => {
     firstMount.unmount();
 
     const secondMount = render(<App />);
-    expect(await screen.findByText('Survive panel restarts')).toBeInTheDocument();
+    expect(await findChatText('Survive panel restarts')).toBeInTheDocument();
     expect(await screen.findByText('Persistent partial response', {}, { timeout: 3000 })).toBeInTheDocument();
     secondMount.unmount();
 
@@ -1299,7 +1331,7 @@ describe('HeraAi App', () => {
     });
 
     expect(await screen.findByText(/could not be generated|oluşturulamadı/i)).toBeInTheDocument();
-    expect(screen.getByText('error test')).toBeInTheDocument();
+    expect(getChatSurface().getByText('error test')).toBeInTheDocument();
   });
 
   it('should allow another question after an API error event', async () => {
@@ -1490,7 +1522,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'show me immediately' } });
     fireEvent.click(getSendButton());
 
-    expect(await screen.findByText('show me immediately')).toBeInTheDocument();
+    expect(await findChatText('show me immediately')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|D/)).toBeInTheDocument();
     expect(screen.queryByText('Delayed answer')).not.toBeInTheDocument();
 
@@ -1811,6 +1843,105 @@ describe('HeraAi App', () => {
       .toEqual([...buttons].map(button => Array.from(document.querySelectorAll('button')).indexOf(button)).sort((a, b) => a - b));
   });
 
+  it('toggles an active screen selection off with the same crop button', async () => {
+    await i18n.changeLanguage('en');
+    global.chrome.scripting.executeScript
+      .mockResolvedValueOnce([{ result: { active: true, existing: false, requestId: 'crop-request-1' } }])
+      .mockResolvedValueOnce([{ result: { active: false, cancelled: true, requestId: 'crop-request-1' } }]);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const cropButton = screen.getByRole('button', { name: 'Select an area on screen' });
+    expect(cropButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(cropButton);
+
+    await waitFor(() => expect(cropButton).toHaveAttribute('aria-pressed', 'true'));
+    expect(cropButton).toHaveAccessibleName('Cancel area selection');
+    expect(screen.getByRole('button', { name: /Cancel selection/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(global.chrome.scripting.executeScript.mock.calls[0][0].func.name).toBe('injectCropOverlay');
+    expect(global.chrome.scripting.executeScript.mock.calls[0][0].target).toEqual({ tabId: 1 });
+    await waitFor(() => expect(currentStorage.stats?.screenshots).toBe(1));
+
+    global.chrome.tabs.query.mockResolvedValue([{ id: 99, url: 'https://example.com/another-tab' }]);
+    fireEvent.click(cropButton);
+
+    await waitFor(() => expect(cropButton).toHaveAttribute('aria-pressed', 'false'));
+    expect(cropButton).toHaveAccessibleName('Select an area on screen');
+    expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(2);
+    expect(global.chrome.scripting.executeScript.mock.calls[1][0]).toMatchObject({
+      target: { tabId: 1 },
+      args: ['crop-request-1'],
+    });
+    expect(global.chrome.scripting.executeScript.mock.calls[1][0].func.name).toBe('cancelCropOverlay');
+    expect(currentStorage.stats.screenshots).toBe(1);
+  });
+
+  it('honors the second crop-button click while overlay injection is still pending', async () => {
+    await i18n.changeLanguage('en');
+    let resolveInjection;
+    const pendingInjection = new Promise(resolve => {
+      resolveInjection = resolve;
+    });
+    global.chrome.scripting.executeScript
+      .mockImplementationOnce(() => pendingInjection)
+      .mockResolvedValueOnce([{ result: { active: false, cancelled: true } }]);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const cropButton = screen.getByRole('button', { name: 'Select an area on screen' });
+    fireEvent.click(cropButton);
+
+    await waitFor(() => expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(1));
+    expect(cropButton).toHaveAttribute('aria-pressed', 'true');
+    const requestId = global.chrome.scripting.executeScript.mock.calls[0][0].args[2];
+
+    fireEvent.click(cropButton);
+
+    expect(cropButton).toHaveAttribute('aria-pressed', 'false');
+    expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveInjection([{
+        result: { active: true, existing: false, requestId },
+      }]);
+      await pendingInjection;
+    });
+
+    await waitFor(() => expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(2));
+    expect(global.chrome.scripting.executeScript.mock.calls[1][0]).toMatchObject({
+      target: { tabId: 1 },
+      args: [requestId],
+    });
+    expect(global.chrome.scripting.executeScript.mock.calls[1][0].func.name).toBe('cancelCropOverlay');
+    expect(cropButton).toHaveAccessibleName('Select an area on screen');
+    expect(cropButton).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('clears the crop button when the page cancels the active selection', async () => {
+    await i18n.changeLanguage('en');
+    global.chrome.scripting.executeScript.mockResolvedValueOnce([{
+      result: { active: true, existing: false, requestId: 'crop-page-cancel' },
+    }]);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const cropButton = screen.getByRole('button', { name: 'Select an area on screen' });
+    fireEvent.click(cropButton);
+    await waitFor(() => expect(cropButton).toHaveAttribute('aria-pressed', 'true'));
+
+    emitRuntimeMessage({ type: 'HERAAI_CROP_CANCELLED', requestId: 'another-panel-crop' });
+    expect(cropButton).toHaveAttribute('aria-pressed', 'true');
+
+    emitRuntimeMessage({ type: 'HERAAI_CROP_CANCELLED', requestId: 'crop-page-cancel' });
+
+    await waitFor(() => expect(cropButton).toHaveAttribute('aria-pressed', 'false'));
+    expect(cropButton).toHaveAccessibleName('Select an area on screen');
+    expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps OCR disabled for a document and enables it for supported image types', async () => {
     render(<App />);
 
@@ -1866,6 +1997,7 @@ describe('HeraAi App', () => {
 
     const userMessage = api.streamVision.mock.calls[0][0].at(-1);
     expect(userMessage.mode).toBe('vision');
+    expect(userMessage.displayContent).toBe('');
     expect(userMessage.content).toMatch(/yalnızca görünen metni|only the visible text/i);
     expect(userMessage.content).toMatch(/açıklama, özet, çeviri|explanations, summaries, translations/i);
     expect(userMessage.content).toMatch(/okuma düzenini|reading order/i);
@@ -1873,12 +2005,58 @@ describe('HeraAi App', () => {
     expect(userMessage.content).toMatch(/Görsel 1|Image 1/i);
     expect(userMessage.content).not.toContain('translate this extra instruction');
     expect(userMessage.attachments.map(attachment => attachment.name)).toEqual(['first.png', 'second.webp']);
+    expect(screen.queryByText(userMessage.content)).not.toBeInTheDocument();
+    await waitFor(() => expect(currentStorage.sessions.some(session => (
+      session.messages?.some(message => (
+        message.id === userMessage.id
+        && message.content === userMessage.content
+        && message.displayContent === ''
+      ))
+    ))).toBe(true));
 
     await act(async () => {
       controlled.push({ event: 'chunk', data: { text: 'Extracted OCR text' } });
       controlled.finish();
     });
     expect(await screen.findByText('Extracted OCR text', {}, { timeout: 3000 })).toBeInTheDocument();
+  });
+
+  it('migrates a previously stored OCR prompt without exposing its message or automatic title', async () => {
+    await i18n.changeLanguage('en');
+    const legacyPrompt = 'Extract only the visible text from the attached image or images. Do not add explanations, summaries, translations, interpretations, or any text that is not visible. Preserve headings, paragraphs, lists, line order, and reading order as closely as possible. Mark every unreadable section as [unreadable]. If there is more than one image, process them in attachment order and separate the results with the headings Image 1, Image 2, and so on.';
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'legacy-ocr-session',
+      sessions: [{
+        id: 'legacy-ocr-session',
+        title: `${legacyPrompt.slice(0, 30)}...`,
+        isTitleCustom: false,
+        updatedAt: 100,
+        messages: [
+          {
+            id: 'legacy-ocr-user',
+            role: 'user',
+            content: legacyPrompt,
+            attachments: [{ name: 'legacy-scan.png', mimeType: 'image/png', data: 'legacy-image' }],
+          },
+          { id: 'legacy-ocr-answer', role: 'model', content: 'Stored extracted text' },
+        ],
+      }],
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText('Stored extracted text')).toBeInTheDocument();
+    expect(screen.queryByText(legacyPrompt)).not.toBeInTheDocument();
+    expect(screen.getByTitle('New Chat')).toBeInTheDocument();
+    await waitFor(() => expect(currentStorage.sessions[0]).toMatchObject({
+      title: 'New Chat',
+      messages: [
+        expect.objectContaining({ id: 'legacy-ocr-user', displayContent: '' }),
+        expect.objectContaining({ id: 'legacy-ocr-answer' }),
+      ],
+    }));
   });
 
   it('renders Gemini and Tavily key inputs as type=password', async () => {
@@ -1988,7 +2166,7 @@ describe('HeraAi App', () => {
     fireEvent.change(input, { target: { value: 'please answer while all keys are rate-limited' } });
     fireEvent.click(getSendButton());
 
-    expect(await screen.findByText('please answer while all keys are rate-limited')).toBeInTheDocument();
+    expect(await findChatText('please answer while all keys are rate-limited')).toBeInTheDocument();
     expect(await screen.findByText(/temporarily rate limited|geçici olarak hız sınırında/i)).toBeInTheDocument();
     expect(api.streamChat).not.toHaveBeenCalled();
   });
@@ -2225,7 +2403,14 @@ describe('HeraAi App', () => {
         title: 'Vision retry',
         updatedAt: Date.now(),
         messages: [
-          { id: 'vision-user', role: 'user', content: '', mode: 'vision', attachments: [attachment] },
+          {
+            id: 'vision-user',
+            role: 'user',
+            content: 'Hidden OCR retry instruction',
+            displayContent: '',
+            mode: 'vision',
+            attachments: [attachment],
+          },
           {
             id: 'vision-answer',
             userMessageId: 'vision-user',
@@ -2254,10 +2439,13 @@ describe('HeraAi App', () => {
       expect.objectContaining({
         id: 'vision-user',
         role: 'user',
+        content: 'Hidden OCR retry instruction',
+        displayContent: '',
         mode: 'vision',
         attachments: [attachment],
       }),
     ]);
+    expect(screen.queryByText('Hidden OCR retry instruction')).not.toBeInTheDocument();
     expect(api.streamVision.mock.calls[0][5]).toBe('gemini-3.5-flash-lite');
   });
 
@@ -2324,7 +2512,7 @@ describe('HeraAi App', () => {
     fireEvent.change(document.querySelector('textarea'), { target: { value: 'Persistent question' } });
     fireEvent.click(getSendButton());
 
-    expect(await screen.findByText('Persistent question')).toBeInTheDocument();
+    expect(await findChatText('Persistent question')).toBeInTheDocument();
     expect(await screen.findByText('Background answer', {}, { timeout: 3000 })).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(1);
 
@@ -2371,7 +2559,7 @@ describe('HeraAi App', () => {
 
     fireEvent.change(document.querySelector('textarea'), { target: { value: 'Cancel before START' } });
     fireEvent.click(getSendButton());
-    expect(await screen.findByText('Cancel before START')).toBeInTheDocument();
+    expect(await findChatText('Cancel before START')).toBeInTheDocument();
     expect(getStopButton()).toBeInTheDocument();
     expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
       message?.type === 'HERA_GENERATION_START'
@@ -2489,7 +2677,7 @@ describe('HeraAi App', () => {
     };
 
     render(<App />);
-    expect(await screen.findByText('Question')).toBeInTheDocument();
+    expect(await findChatText('Question')).toBeInTheDocument();
     expect(screen.getByText(/Thinking|Düşünüyor/i)).toBeInTheDocument();
     expect(screen.queryByText('A naturally revealed persisted response.')).not.toBeInTheDocument();
 
@@ -2658,5 +2846,1202 @@ describe('HeraAi App', () => {
       },
     });
     await waitFor(() => expect(currentStorage.activeGeneration).toBeUndefined());
+  });
+
+  it('keeps a header rename permanent across a new streamed response', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'rename-session',
+      sessions: [{
+        id: 'rename-session',
+        title: 'Automatic title',
+        updatedAt: 100,
+        messages: [{ id: 'rename-welcome', role: 'model', content: 'Welcome' }],
+      }],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat' }));
+    const titleInput = screen.getByRole('textbox', { name: 'Chat name' });
+    fireEvent.change(titleInput, { target: { value: '  Permanent project name  ' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
+
+    await waitFor(() => expect(currentStorage.sessions.find(session => (
+      session.id === 'rename-session'
+    ))).toMatchObject({
+      title: 'Permanent project name',
+      isTitleCustom: true,
+      isStarred: false,
+      updatedAt: 100,
+    }));
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'A new question' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Hello from AI')).toBeInTheDocument();
+
+    await waitFor(() => expect(currentStorage.sessions.find(session => (
+      session.id === 'rename-session'
+    ))).toMatchObject({
+      title: 'Permanent project name',
+      isTitleCustom: true,
+      isStarred: false,
+    }));
+    expect(screen.getByTitle('Permanent project name')).toBeInTheDocument();
+  });
+
+  it('persists stars, groups them first, and bulk-deletes only unstarred chats', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'drop-active',
+      sessions: [
+        {
+          id: 'keep-starred',
+          title: 'Already starred',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 200,
+          messages: [{ id: 'starred-user', role: 'user', content: 'Starred question' }],
+        },
+        {
+          id: 'pin-this',
+          title: 'Pin this chat',
+          isTitleCustom: false,
+          isStarred: false,
+          updatedAt: 300,
+          messages: [{ id: 'pin-user', role: 'user', content: 'Pin question' }],
+        },
+        {
+          id: 'drop-active',
+          title: 'Delete this chat',
+          isTitleCustom: false,
+          isStarred: false,
+          updatedAt: 400,
+          messages: [{ id: 'drop-user', role: 'user', content: 'Delete question' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+
+    const pinRow = screen.getByText('Pin this chat').closest('.group');
+    fireEvent.click(within(pinRow).getByRole('button', { name: 'Star chat' }));
+    await waitFor(() => expect(currentStorage.sessions.find(session => (
+      session.id === 'pin-this'
+    ))).toMatchObject({ isStarred: true, updatedAt: 300 }));
+
+    const starredHeading = screen.getByRole('heading', { name: 'Starred' });
+    const otherHeading = screen.getByRole('heading', { name: 'Other chats' });
+    expect(starredHeading.compareDocumentPosition(otherHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bulk delete' }));
+    expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+
+    await waitFor(() => expect(currentStorage.sessions.map(session => session.id).sort()).toEqual([
+      'keep-starred',
+      'pin-this',
+    ]));
+    expect(currentStorage.activeSessionId).toBe('pin-this');
+    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.queryByText('Delete this chat')).not.toBeInTheDocument();
+    expect(screen.getByText('Pin this chat')).toBeInTheDocument();
+    expect(screen.getByText('Already starred')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus());
+  });
+
+  it('uses the protected menu action and cancels a deleted active generation', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'running-unstarred',
+      sessions: [
+        {
+          id: 'protected-starred',
+          title: 'Protected starred chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 200,
+          messages: [{ id: 'protected-user', role: 'user', content: 'Keep me' }],
+        },
+        {
+          id: 'running-unstarred',
+          title: 'Running unstarred chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 300,
+          messages: [{ id: 'running-user-old', role: 'user', content: 'Earlier question' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Keep running until delete' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CANCEL',
+      reason: 'clear_history',
+    })));
+    await waitFor(() => expect(currentStorage.sessions).toEqual([
+      expect.objectContaining({
+        id: 'protected-starred',
+        isStarred: true,
+      }),
+    ]));
+    expect(currentStorage.activeSessionId).toBe('protected-starred');
+    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Delete unstarred chats?' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Running unstarred chat')).not.toBeInTheDocument();
+    expect(screen.getByText('Protected starred chat')).toBeInTheDocument();
+  });
+
+  it('creates one fresh unstarred chat and keeps history open when bulk deletion has no survivor', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'only-chat',
+      sessions: [{
+        id: 'only-chat',
+        title: 'Only unstarred chat',
+        isTitleCustom: true,
+        isStarred: false,
+        updatedAt: 100,
+        messages: [{ id: 'only-user', role: 'user', content: 'Delete me' }],
+      }],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+
+    await waitFor(() => expect(currentStorage.sessions[0]?.id).not.toBe('only-chat'));
+    expect(currentStorage.sessions).toHaveLength(1);
+    expect(currentStorage.sessions[0]).toMatchObject({
+      title: 'New Chat',
+      isTitleCustom: false,
+      isStarred: false,
+    });
+    expect(currentStorage.sessions[0].id).not.toBe('only-chat');
+    expect(currentStorage.activeSessionId).toBe(currentStorage.sessions[0].id);
+    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    expect(screen.queryByText('Only unstarred chat')).not.toBeInTheDocument();
+  });
+
+  it('preserves newer stored metadata and unrelated session order when a streamed message write is queued', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'race-active',
+      sessions: [
+        {
+          id: 'race-active',
+          title: 'Automatic race title',
+          isTitleCustom: false,
+          isStarred: false,
+          updatedAt: 300,
+          messages: [{ id: 'race-old-user', role: 'user', content: 'Earlier question' }],
+        },
+        {
+          id: 'race-existing',
+          title: 'Existing unrelated chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 100,
+          messages: [{ id: 'race-existing-user', role: 'user', content: 'Keep existing' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Queue this response' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+
+    const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
+    let releaseMetadataRead;
+    let shouldBlockNextSessionsRead = true;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (
+        shouldBlockNextSessionsRead
+        && Array.isArray(keys)
+        && keys.length === 1
+        && keys[0] === 'sessions'
+      ) {
+        shouldBlockNextSessionsRead = false;
+        return new Promise(resolve => {
+          releaseMetadataRead = (result) => {
+            if (typeof callback === 'function') callback(result);
+            resolve(result);
+          };
+        });
+      }
+      return defaultStorageGet(keys, callback);
+    });
+
+    const activeRow = document.querySelector('button[aria-current="true"]').closest('.group');
+    fireEvent.click(within(activeRow).getByRole('button', { name: 'Star chat' }));
+    await waitFor(() => expect(releaseMetadataRead).toBeTypeOf('function'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    const workerSession = currentStorage.sessions.find(session => session.id === 'race-active');
+    const existingSession = currentStorage.sessions.find(session => session.id === 'race-existing');
+    currentStorage.sessions = [
+      {
+        id: 'race-new-external',
+        title: 'New external chat',
+        isTitleCustom: true,
+        isStarred: false,
+        updatedAt: 500,
+        messages: [{ id: 'race-external-user', role: 'user', content: 'Keep new external' }],
+      },
+      {
+        ...workerSession,
+        title: 'Newest manual title',
+        isTitleCustom: true,
+        isStarred: true,
+        updatedAt: 400,
+      },
+      existingSession,
+    ];
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'Queued persistence answer' } });
+      controlled.finish();
+    });
+    expect(await screen.findByText('Queued persistence answer', {}, { timeout: 3000 })).toBeInTheDocument();
+
+    await act(async () => {
+      releaseMetadataRead({ sessions: currentStorage.sessions });
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(currentStorage.activeGeneration).toBeUndefined());
+    expect(currentStorage.sessions.map(session => session.id)).toEqual([
+      'race-new-external',
+      'race-active',
+      'race-existing',
+    ]);
+    expect(currentStorage.sessions.find(session => session.id === 'race-active')).toMatchObject({
+      title: 'Newest manual title',
+      isTitleCustom: true,
+      isStarred: true,
+    });
+    expect(currentStorage.sessions.find(session => session.id === 'race-active').messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', content: 'Queue this response' }),
+        expect.objectContaining({ role: 'model', content: 'Queued persistence answer' }),
+      ]),
+    );
+  });
+
+  it('aborts bulk deletion when the worker still reports the active generation', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'bulk-running',
+      sessions: [
+        {
+          id: 'bulk-starred',
+          title: 'Bulk protected chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 100,
+          messages: [{ id: 'bulk-starred-user', role: 'user', content: 'Keep protected' }],
+        },
+        {
+          id: 'bulk-running',
+          title: 'Bulk running chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 200,
+          messages: [{ id: 'bulk-running-user', role: 'user', content: 'Earlier running question' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Do not delete this running chat' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    global.chrome.runtime.sendMessage.mockImplementation(async message => {
+      if (message?.type === 'CANCEL') return { ok: false, errorCode: 'cancel_not_confirmed' };
+      if (message?.type === 'GET_STATE') {
+        return { ok: true, activeGeneration: currentStorage.activeGeneration };
+      }
+      return defaultRuntimeSend(message);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CANCEL',
+      jobId: currentStorage.activeGeneration.jobId,
+      reason: 'clear_history',
+    })));
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'GET_STATE' }));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(currentStorage.sessions.map(session => session.id).sort()).toEqual([
+      'bulk-running',
+      'bulk-starred',
+    ]);
+    expect(currentStorage.activeSessionId).toBe('bulk-running');
+    expect(currentStorage.activeGeneration?.status).toBe('running');
+    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete 1' })).toBeEnabled();
+    expect(screen.getByText('Bulk protected chat')).toBeInTheDocument();
+    expect(screen.getByText('Bulk running chat')).toBeInTheDocument();
+  });
+
+  it('aborts single-chat deletion when the worker still reports the active generation', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'single-running',
+      sessions: [
+        {
+          id: 'single-backup',
+          title: 'Single backup chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 100,
+          messages: [{ id: 'single-backup-user', role: 'user', content: 'Keep backup' }],
+        },
+        {
+          id: 'single-running',
+          title: 'Single running chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 200,
+          messages: [{ id: 'single-running-user', role: 'user', content: 'Earlier running question' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Keep this single chat alive' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    global.chrome.runtime.sendMessage.mockImplementation(async message => {
+      if (message?.type === 'CANCEL') return { ok: false, errorCode: 'cancel_not_confirmed' };
+      if (message?.type === 'GET_STATE') {
+        return { ok: true, activeGeneration: currentStorage.activeGeneration };
+      }
+      return defaultRuntimeSend(message);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    const runningRow = screen.getByText('Single running chat').closest('.group');
+    fireEvent.click(within(runningRow).getByRole('button', { name: 'Delete chat' }));
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CANCEL',
+      jobId: currentStorage.activeGeneration.jobId,
+      reason: 'session_deleted',
+    })));
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'GET_STATE' }));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(currentStorage.sessions.map(session => session.id).sort()).toEqual([
+      'single-backup',
+      'single-running',
+    ]);
+    expect(currentStorage.activeSessionId).toBe('single-running');
+    expect(currentStorage.activeGeneration?.status).toBe('running');
+  });
+
+  it('keeps pending rename and star metadata across pagehide, unmount, and remount', async () => {
+    await i18n.changeLanguage('en');
+    const originalSession = {
+      id: 'pagehide-metadata',
+      title: 'Original pagehide title',
+      isTitleCustom: true,
+      isStarred: false,
+      updatedAt: 100,
+      messages: [{ id: 'pagehide-user', role: 'user', content: 'Persist this conversation' }],
+    };
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: originalSession.id,
+      sessions: [originalSession],
+    };
+
+    const view = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
+    let releasePendingMetadataRead;
+    let blockNextSessionsRead = true;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (
+        blockNextSessionsRead
+        && Array.isArray(keys)
+        && keys.length === 1
+        && keys[0] === 'sessions'
+      ) {
+        blockNextSessionsRead = false;
+        return new Promise(resolve => {
+          releasePendingMetadataRead = (result) => {
+            if (typeof callback === 'function') callback(result);
+            resolve(result);
+          };
+        });
+      }
+      return defaultStorageGet(keys, callback);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat' }));
+    const titleInput = screen.getByRole('textbox', { name: 'Chat name' });
+    fireEvent.change(titleInput, { target: { value: 'Pagehide-safe title' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
+    await waitFor(() => expect(releasePendingMetadataRead).toBeTypeOf('function'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    const renamedRow = screen.getByText('Pagehide-safe title').closest('.group');
+    fireEvent.click(within(renamedRow).getByRole('button', { name: 'Star chat' }));
+    await waitFor(() => {
+      const starredRow = screen.getByText('Pagehide-safe title').closest('.group');
+      expect(within(starredRow).getByRole('button', { name: 'Remove star' })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(currentStorage.sessions[0]).toMatchObject({
+      id: originalSession.id,
+      title: 'Pagehide-safe title',
+      isTitleCustom: true,
+      isStarred: true,
+    }));
+
+    view.unmount();
+    await act(async () => {
+      await Promise.resolve();
+      releasePendingMetadataRead({ sessions: [originalSession] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(currentStorage.sessions[0]).toMatchObject({
+      id: originalSession.id,
+      title: 'Pagehide-safe title',
+      isTitleCustom: true,
+      isStarred: true,
+    });
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByTitle('Pagehide-safe title')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    const restoredRow = screen.getByText('Pagehide-safe title').closest('.group');
+    expect(within(restoredRow).getByRole('button', { name: 'Remove star' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not resurrect a deleted row when its star action was queued behind deletion', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'queue-survivor',
+      sessions: [
+        {
+          id: 'queue-target',
+          title: 'Queued deletion target',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 200,
+          messages: [{ id: 'queue-target-user', role: 'user', content: 'Delete this row' }],
+        },
+        {
+          id: 'queue-survivor',
+          title: 'Queued deletion survivor',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 100,
+          messages: [{ id: 'queue-survivor-user', role: 'user', content: 'Keep this row' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+
+    const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
+    let releaseDeletionRead;
+    let blockNextSessionsRead = true;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (
+        blockNextSessionsRead
+        && Array.isArray(keys)
+        && keys.length === 1
+        && keys[0] === 'sessions'
+      ) {
+        blockNextSessionsRead = false;
+        return new Promise(resolve => {
+          releaseDeletionRead = (result) => {
+            if (typeof callback === 'function') callback(result);
+            resolve(result);
+          };
+        });
+      }
+      return defaultStorageGet(keys, callback);
+    });
+
+    const targetRow = screen.getByText('Queued deletion target').closest('.group');
+    fireEvent.click(within(targetRow).getByRole('button', { name: 'Delete chat' }));
+    await waitFor(() => expect(releaseDeletionRead).toBeTypeOf('function'));
+    fireEvent.click(within(targetRow).getByRole('button', { name: 'Star chat' }));
+
+    const sessionsReadCountBeforeRelease = global.chrome.storage.local.get.mock.calls.filter(([keys]) => (
+      Array.isArray(keys) && keys.length === 1 && keys[0] === 'sessions'
+    )).length;
+    await act(async () => {
+      releaseDeletionRead({ sessions: currentStorage.sessions });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(global.chrome.storage.local.get.mock.calls.filter(([keys]) => (
+      Array.isArray(keys) && keys.length === 1 && keys[0] === 'sessions'
+    )).length).toBeGreaterThan(sessionsReadCountBeforeRelease));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(currentStorage.sessions.map(session => session.id)).toEqual(['queue-survivor']);
+    expect(screen.queryByText('Queued deletion target')).not.toBeInTheDocument();
+    expect(screen.getByText('Queued deletion survivor')).toBeInTheDocument();
+  });
+
+  it('does not resurrect an authoritatively removed session from a delayed message write', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'removed-message-session',
+      sessions: [
+        {
+          id: 'removed-message-session',
+          title: 'Removed message session',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 200,
+          messages: [{ id: 'removed-old-user', role: 'user', content: 'Earlier message' }],
+        },
+        {
+          id: 'message-survivor',
+          title: 'Message survivor',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 100,
+          messages: [{ id: 'message-survivor-user', role: 'user', content: 'Keep survivor' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'This write must not resurrect me' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+
+    const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
+    let releaseMessageRead;
+    let blockNextSessionsRead = true;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (
+        blockNextSessionsRead
+        && Array.isArray(keys)
+        && keys.length === 1
+        && keys[0] === 'sessions'
+      ) {
+        blockNextSessionsRead = false;
+        return new Promise(resolve => {
+          releaseMessageRead = (result) => {
+            if (typeof callback === 'function') callback(result);
+            resolve(result);
+          };
+        });
+      }
+      return defaultStorageGet(keys, callback);
+    });
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'Delayed final answer' } });
+      controlled.finish();
+    });
+    await waitFor(() => expect(releaseMessageRead).toBeTypeOf('function'), { timeout: 3000 });
+
+    const survivor = currentStorage.sessions.find(session => session.id === 'message-survivor');
+    currentStorage.sessions = [survivor];
+    const storageSetCountAtRemoval = global.chrome.storage.local.set.mock.calls.length;
+    await act(async () => {
+      releaseMessageRead({ sessions: [survivor] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(currentStorage.activeGeneration).toBeUndefined());
+    expect(currentStorage.sessions.map(session => session.id)).toEqual(['message-survivor']);
+    const writesAfterRemoval = global.chrome.storage.local.set.mock.calls
+      .slice(storageSetCountAtRemoval)
+      .filter(([data]) => Array.isArray(data?.sessions));
+    expect(writesAfterRemoval.every(([data]) => (
+      data.sessions.every(session => session.id !== 'removed-message-session')
+    ))).toBe(true);
+  });
+
+  it('keeps bulk-delete UI and storage unchanged after a failed write and allows retry', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'retry-starred',
+      sessions: [
+        {
+          id: 'retry-starred',
+          title: 'Retry protected chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 200,
+          messages: [{ id: 'retry-starred-user', role: 'user', content: 'Keep protected' }],
+        },
+        {
+          id: 'retry-unstarred',
+          title: 'Retry deletable chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 100,
+          messages: [{ id: 'retry-unstarred-user', role: 'user', content: 'Delete on retry' }],
+        },
+      ],
+    };
+    const defaultStorageSet = global.chrome.storage.local.set.getMockImplementation();
+    let rejectNextBulkWrite = true;
+    global.chrome.storage.local.set.mockImplementation((data, callback) => {
+      if (
+        rejectNextBulkWrite
+        && Array.isArray(data?.sessions)
+        && data.sessions.length === 1
+        && data.sessions[0]?.id === 'retry-starred'
+      ) {
+        rejectNextBulkWrite = false;
+        return Promise.reject(new Error('simulated bulk storage failure'));
+      }
+      return defaultStorageSet(data, callback);
+    });
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Bulk delete' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+
+      await waitFor(() => expect(rejectNextBulkWrite).toBe(false));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Delete 1' })).toBeEnabled());
+      expect(currentStorage.sessions.map(session => session.id).sort()).toEqual([
+        'retry-starred',
+        'retry-unstarred',
+      ]);
+      expect(screen.getByText('Retry protected chat')).toBeInTheDocument();
+      expect(screen.getByText('Retry deletable chat')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+      await waitFor(() => expect(currentStorage.sessions.map(session => session.id)).toEqual([
+        'retry-starred',
+      ]));
+      expect(screen.queryByRole('dialog', { name: 'Delete unstarred chats?' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Retry deletable chat')).not.toBeInTheDocument();
+      expect(screen.getByText('Retry protected chat')).toBeInTheDocument();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('keeps an active starred generation alive when bulk deletion precedes partial persistence', async () => {
+    await i18n.changeLanguage('en');
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'streaming-starred',
+      sessions: [
+        {
+          id: 'streaming-starred',
+          title: 'Streaming protected chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 200,
+          messages: [{ id: 'streaming-old-user', role: 'user', content: 'Earlier protected question' }],
+        },
+        {
+          id: 'streaming-unstarred',
+          title: 'Streaming deletable chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 100,
+          messages: [{ id: 'streaming-delete-user', role: 'user', content: 'Delete this chat' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Keep my live chunk' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+    global.chrome.storage.local.set.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        controlled.push({ event: 'chunk', data: { text: 'Protected live chunk' } });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(currentStorage.activeGeneration?.content).toBe('Protected live chunk');
+      expect(global.chrome.storage.local.set.mock.calls.some(([data]) => Array.isArray(data?.sessions))).toBe(false);
+
+      fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(currentStorage.sessions.map(session => session.id)).toEqual(['streaming-starred']);
+      expect(currentStorage.activeGeneration?.status).toBe('running');
+      expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => message?.type === 'CANCEL')).toBe(false);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(screen.getByText('Protected live chunk')).toBeInTheDocument();
+      expect(getStopButton()).toBeInTheDocument();
+      expect(currentStorage.activeGeneration?.status).toBe('running');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a non-active row rename and star across delayed metadata, pagehide, and remount', async () => {
+    await i18n.changeLanguage('en');
+    const originalSessions = [
+      {
+        id: 'nonactive-current',
+        title: 'Current chat',
+        isTitleCustom: true,
+        isStarred: false,
+        updatedAt: 200,
+        messages: [{ id: 'nonactive-current-user', role: 'user', content: 'Current conversation' }],
+      },
+      {
+        id: 'nonactive-target',
+        title: 'Background chat',
+        isTitleCustom: true,
+        isStarred: false,
+        updatedAt: 100,
+        messages: [{ id: 'nonactive-target-user', role: 'user', content: 'Background conversation' }],
+      },
+    ];
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'nonactive-current',
+      sessions: originalSessions,
+    };
+
+    const view = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+
+    const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
+    let releaseMetadataRead;
+    let blockNextSessionsRead = true;
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (
+        blockNextSessionsRead
+        && Array.isArray(keys)
+        && keys.length === 1
+        && keys[0] === 'sessions'
+      ) {
+        blockNextSessionsRead = false;
+        return new Promise(resolve => {
+          releaseMetadataRead = (result) => {
+            if (typeof callback === 'function') callback(result);
+            resolve(result);
+          };
+        });
+      }
+      return defaultStorageGet(keys, callback);
+    });
+
+    const targetRow = screen.getByText('Background chat').closest('.group');
+    fireEvent.click(within(targetRow).getByRole('button', { name: 'Rename chat' }));
+    const titleInput = screen.getByRole('textbox', { name: 'Chat name' });
+    fireEvent.change(titleInput, { target: { value: 'Background chat renamed' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
+    await waitFor(() => expect(releaseMetadataRead).toBeTypeOf('function'));
+
+    const renamedRow = screen.getByText('Background chat renamed').closest('.group');
+    fireEvent.click(within(renamedRow).getByRole('button', { name: 'Star chat' }));
+    await waitFor(() => {
+      const starredRow = screen.getByText('Background chat renamed').closest('.group');
+      expect(within(starredRow).getByRole('button', { name: 'Remove star' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(currentStorage.sessions.find(session => (
+      session.id === 'nonactive-target'
+    ))).toMatchObject({
+      title: 'Background chat renamed',
+      isTitleCustom: true,
+      isStarred: true,
+    }));
+
+    view.unmount();
+    await act(async () => {
+      releaseMetadataRead({ sessions: originalSessions });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(currentStorage.sessions.find(session => session.id === 'nonactive-target')).toMatchObject({
+      title: 'Background chat renamed',
+      isTitleCustom: true,
+      isStarred: true,
+    });
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByTitle('Current chat')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    const restoredTargetRow = screen.getByText('Background chat renamed').closest('.group');
+    expect(within(restoredTargetRow).getByRole('button', { name: 'Remove star' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not let pagehide immediate flush resurrect a session behind delayed structural deletion', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'structural-survivor',
+      sessions: [
+        {
+          id: 'structural-survivor',
+          title: 'Structural survivor',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 200,
+          messages: [{ id: 'structural-survivor-user', role: 'user', content: 'Keep active session' }],
+        },
+        {
+          id: 'structural-delete',
+          title: 'Structural delete target',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 100,
+          messages: [{ id: 'structural-delete-user', role: 'user', content: 'Remove this session' }],
+        },
+      ],
+    };
+
+    const defaultStorageSet = global.chrome.storage.local.set.getMockImplementation();
+    let releaseDeletionWrite;
+    let delayDeletionWrite = true;
+    global.chrome.storage.local.set.mockImplementation((data, callback) => {
+      if (
+        delayDeletionWrite
+        && Array.isArray(data?.sessions)
+        && data.sessions.length === 1
+        && data.sessions[0]?.id === 'structural-survivor'
+      ) {
+        delayDeletionWrite = false;
+        return new Promise(resolve => {
+          releaseDeletionWrite = async () => {
+            await defaultStorageSet(data, callback);
+            resolve();
+          };
+        });
+      }
+      return defaultStorageSet(data, callback);
+    });
+
+    const view = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    const targetRow = screen.getByText('Structural delete target').closest('.group');
+    fireEvent.click(within(targetRow).getByRole('button', { name: 'Delete chat' }));
+    await waitFor(() => expect(releaseDeletionWrite).toBeTypeOf('function'));
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+    });
+    view.unmount();
+    await act(async () => {
+      await releaseDeletionWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(currentStorage.sessions.map(session => session.id)).toEqual([
+      'structural-survivor',
+    ]));
+    const structuralWrites = global.chrome.storage.local.set.mock.calls.filter(([data]) => (
+      Array.isArray(data?.sessions)
+    ));
+    expect(structuralWrites.every(([data]) => (
+      data.sessions.every(session => session.id !== 'structural-delete')
+    ))).toBe(true);
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    expect(screen.getByText('Structural survivor')).toBeInTheDocument();
+    expect(screen.queryByText('Structural delete target')).not.toBeInTheDocument();
+  });
+
+  it('keeps a delayed two-session import authoritative across pagehide and remount', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'import-alpha',
+      sessions: [
+        {
+          id: 'import-alpha',
+          title: 'Old active chat',
+          isTitleCustom: true,
+          isStarred: false,
+          updatedAt: 200,
+          messages: [{ id: 'old-import-alpha-user', role: 'user', content: 'Old active content' }],
+        },
+        {
+          id: 'old-import-other',
+          title: 'Old other chat',
+          isTitleCustom: true,
+          isStarred: true,
+          updatedAt: 100,
+          messages: [{ id: 'old-import-other-user', role: 'user', content: 'Old other content' }],
+        },
+      ],
+    };
+    const importedSessions = [
+      {
+        id: 'import-alpha',
+        title: 'Imported Alpha',
+        isTitleCustom: true,
+        isStarred: true,
+        updatedAt: 400,
+        messages: [{ id: 'import-alpha-user', role: 'user', content: 'Alpha imported content' }],
+      },
+      {
+        id: 'import-beta',
+        title: 'Imported Beta',
+        isTitleCustom: true,
+        isStarred: false,
+        updatedAt: 300,
+        messages: [{ id: 'import-beta-user', role: 'user', content: 'Beta imported content' }],
+      },
+    ];
+
+    const defaultStorageSet = global.chrome.storage.local.set.getMockImplementation();
+    let releaseImportWrite;
+    let delayImportWrite = true;
+    global.chrome.storage.local.set.mockImplementation((data, callback) => {
+      if (
+        delayImportWrite
+        && Array.isArray(data?.sessions)
+        && data.sessions.map(session => session.id).join(',') === 'import-alpha,import-beta'
+      ) {
+        delayImportWrite = false;
+        return new Promise(resolve => {
+          releaseImportWrite = async () => {
+            await defaultStorageSet(data, callback);
+            resolve();
+          };
+        });
+      }
+      return defaultStorageSet(data, callback);
+    });
+
+    const view = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    const importInput = document.querySelector('input[type="file"][accept=".json"]');
+    const importFile = new File([JSON.stringify({
+      version: '1.1',
+      sessions: importedSessions,
+    })], 'two-sessions.json', { type: 'application/json' });
+    fireEvent.change(importInput, { target: { files: [importFile] } });
+    await waitFor(() => expect(releaseImportWrite).toBeTypeOf('function'));
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+    });
+    view.unmount();
+    await act(async () => {
+      await releaseImportWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(currentStorage.sessions.map(session => session.id)).toEqual([
+      'import-alpha',
+      'import-beta',
+    ]));
+    expect(currentStorage.sessions.some(session => session.id === 'old-import-other')).toBe(false);
+    expect(currentStorage.activeSessionId).toBe('import-alpha');
+    expect(currentStorage.sessions[0].messages).toEqual([
+      expect.objectContaining({ id: 'import-alpha-user', content: 'Alpha imported content' }),
+    ]);
+    expect(currentStorage.sessions[0].messages).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: 'Old active content' }),
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByTitle('Imported Alpha')).toBeInTheDocument();
+    expect(await findChatText('Alpha imported content')).toBeInTheDocument();
+    expect(screen.queryByText('Old active content')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    expect(screen.getByText('Imported Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Imported Beta')).toBeInTheDocument();
+    expect(screen.queryByText('Old active chat')).not.toBeInTheDocument();
+    expect(screen.queryByText('Old other chat')).not.toBeInTheDocument();
+  });
+
+  it('replaces old chats with one persisted default session after a valid empty import', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'empty-import-old',
+      sessions: [{
+        id: 'empty-import-old',
+        title: 'Old chat before empty import',
+        isTitleCustom: true,
+        isStarred: true,
+        updatedAt: 100,
+        messages: [{ id: 'empty-import-old-user', role: 'user', content: 'Replace old chat' }],
+      }],
+    };
+
+    const view = render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    const importInput = document.querySelector('input[type="file"][accept=".json"]');
+    const emptyImportFile = new File([JSON.stringify({
+      version: '1.1',
+      sessions: [],
+    })], 'empty-sessions.json', { type: 'application/json' });
+    fireEvent.change(importInput, { target: { files: [emptyImportFile] } });
+
+    await waitFor(() => {
+      expect(currentStorage.sessions).toHaveLength(1);
+      expect(currentStorage.sessions[0]).toMatchObject({
+        title: 'New Chat',
+        isTitleCustom: false,
+        isStarred: false,
+      });
+      expect(currentStorage.sessions[0].id).not.toBe('empty-import-old');
+      expect(currentStorage.activeSessionId).toBe(currentStorage.sessions[0].id);
+    });
+    expect(currentStorage.sessions[0].messages).toEqual([
+      expect.objectContaining({ role: 'model', content: expect.any(String) }),
+    ]);
+
+    view.unmount();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByTitle('New Chat')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    expect(screen.queryByText('Old chat before empty import')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bulk delete' })).toBeEnabled();
   });
 });

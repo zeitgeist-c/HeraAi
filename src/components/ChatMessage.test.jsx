@@ -49,6 +49,28 @@ describe('ChatMessage copy actions', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('Copy this question'))
   })
 
+  it('keeps an internal prompt hidden while preserving its attachment and retry action', () => {
+    const onEdit = vi.fn()
+    const onRetry = vi.fn()
+    const message = {
+      id: 10,
+      role: 'user',
+      content: 'Internal OCR instruction that must not be displayed',
+      displayContent: '',
+      attachments: [{ name: 'scan.png', mimeType: 'image/png', data: 'image-data' }],
+    }
+
+    render(<ChatMessage message={message} onEdit={onEdit} onRetry={onRetry} />)
+
+    expect(screen.queryByText(message.content)).not.toBeInTheDocument()
+    expect(screen.getByText('scan.png')).toBeInTheDocument()
+    expect(document.querySelector('svg.lucide-copy')).not.toBeInTheDocument()
+    expect(document.querySelector('svg.lucide-pencil')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Regenerate response|Retry|Yeniden dene/i }))
+    expect(onRetry).toHaveBeenCalledWith(message)
+    expect(onEdit).not.toHaveBeenCalled()
+  })
+
   it('retries a user question with the model selected from the retry menu', () => {
     const onRetry = vi.fn()
     const message = { id: 5, role: 'user', content: 'Compare this answer' }

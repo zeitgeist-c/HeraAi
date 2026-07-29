@@ -13,10 +13,16 @@ import StatsPanel from './components/StatsPanel'
 import ShortcutsPanel from './components/ShortcutsPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
-import { injectCropOverlay } from './lib/injectCropOverlay'
+import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
 import { MODELS, DEFAULT_MODEL } from './lib/api'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
+import {
+  getAutoMessageTitle,
+  getMessageDisplayContent,
+  isHiddenPromptAutoTitle,
+  isLegacyOcrPromptMessage,
+} from './lib/messageDisplay'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
 
@@ -37,6 +43,7 @@ const PARTIAL_PERSIST_INTERVAL_MS = 150
 const BOOTSTRAP_STATE_TIMEOUT_MS = 5_000
 const BOOTSTRAP_STATE_RETRY_DELAYS_MS = [250, 750, 1500]
 const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
+const SESSION_TITLE_MAX_LENGTH = 80
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const MODEL_LABELS = {
@@ -134,11 +141,18 @@ function repairMessageIds(messages, counterRef) {
   return { messages: repairedMessages, changed }
 }
 
-function repairStoredSessions(sessions, counterRef, activeGeneration = null) {
+function repairStoredSessions(sessions, counterRef, activeGeneration = null, newChatTitle = 'New Chat') {
   let changed = false
   const repairedSessions = (sessions || []).map(session => {
     const repaired = repairMessageIds(session?.messages, counterRef)
-    const messages = repaired.messages.flatMap(message => {
+    const displaySafeMessages = repaired.messages.map(message => {
+      if (!isLegacyOcrPromptMessage(message) || typeof message.displayContent === 'string') {
+        return message
+      }
+      changed = true
+      return { ...message, displayContent: '' }
+    })
+    const messages = displaySafeMessages.flatMap(message => {
       if (!message || message.role !== 'model') return message ? [message] : []
       const content = typeof message.content === 'string' ? message.content : ''
       const belongsToActiveGeneration = (
@@ -161,11 +175,24 @@ function repairStoredSessions(sessions, counterRef, activeGeneration = null) {
       }
       return [message]
     })
-    if (!repaired.changed && messages.length === repaired.messages.length && messages.every((message, index) => message === repaired.messages[index])) {
+    const shouldResetHiddenPromptTitle = (
+      session?.isTitleCustom !== true
+      && isHiddenPromptAutoTitle(session?.title, messages)
+    )
+    if (
+      !repaired.changed
+      && !shouldResetHiddenPromptTitle
+      && messages.length === repaired.messages.length
+      && messages.every((message, index) => message === repaired.messages[index])
+    ) {
       return session
     }
     changed = true
-    return { ...session, messages }
+    return {
+      ...session,
+      ...(shouldResetHiddenPromptTitle ? { title: newChatTitle } : {}),
+      messages,
+    }
   })
 
   return { sessions: repairedSessions, changed }
@@ -239,11 +266,12 @@ function setChromeStorage(values) {
   }
 }
 
-function createUserMessage({ id, content, attachments, mode }) {
+function createUserMessage({ id, content, displayContent, attachments, mode }) {
   return {
     id,
     role: 'user',
     content,
+    ...(typeof displayContent === 'string' ? { displayContent } : {}),
     attachments,
     mode
   }
@@ -262,6 +290,52 @@ function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
   }
 }
 
+function createSession({ id, title, messages, updatedAt = Date.now() }) {
+  return {
+    id,
+    title,
+    isTitleCustom: false,
+    isStarred: false,
+    updatedAt,
+    messages,
+  }
+}
+
+function normalizeSessionMetadata(session) {
+  if (!session) return session
+  const shouldResetHiddenPromptTitle = (
+    session.isTitleCustom !== true
+    && isHiddenPromptAutoTitle(session.title, session.messages)
+  )
+  return {
+    ...session,
+    ...(shouldResetHiddenPromptTitle ? { title: i18n.t('chat.new_chat') } : {}),
+    isTitleCustom: session.isTitleCustom === true,
+    isStarred: session.isStarred === true,
+  }
+}
+
+function applySessionMetadataPatch(session, metadataPatch = {}) {
+  const normalizedSession = normalizeSessionMetadata(session)
+  if (!normalizedSession) return normalizedSession
+  return {
+    ...normalizedSession,
+    ...metadataPatch,
+    isTitleCustom: Object.prototype.hasOwnProperty.call(metadataPatch, 'isTitleCustom')
+      ? metadataPatch.isTitleCustom === true
+      : normalizedSession.isTitleCustom,
+    isStarred: Object.prototype.hasOwnProperty.call(metadataPatch, 'isStarred')
+      ? metadataPatch.isStarred === true
+      : normalizedSession.isStarred,
+  }
+}
+
+function sortSessionsByUpdatedAt(sessions) {
+  return [...(sessions || [])].sort((a, b) => (
+    Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0)
+  ))
+}
+
 function App() {
   const { t } = useTranslation()
   const [appConfig, setAppConfig] = useState(null)
@@ -271,10 +345,13 @@ function App() {
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [enableResearch, setEnableResearch] = useState(false)
   const [activeMode, setActiveMode] = useState(null)
+  const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
@@ -302,6 +379,10 @@ function App() {
   const presentationCancellationRef = useRef(null)
   const storageWriteQueueRef = useRef(Promise.resolve())
   const storageWriteEpochRef = useRef(0)
+  const pendingStructuralStorageWriteRef = useRef(null)
+  const persistedSessionIdsRef = useRef(new Set())
+  const pendingSessionMetadataRef = useRef(new Map())
+  const sessionMetadataRevisionRef = useRef(0)
   const partialPersistTimerRef = useRef(null)
   const lastPartialPersistAtRef = useRef(0)
   const flushVisibleSessionRef = useRef(() => Promise.resolve())
@@ -309,6 +390,8 @@ function App() {
   const panelVisibleRef = useRef(document.visibilityState !== 'hidden')
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
+  const cropTargetRef = useRef(null)
+  const cropTogglePendingRef = useRef(false)
   const autoScrollRef = useRef(true)
   const userPausedAutoScrollRef = useRef(false)
   const forceScrollToBottomRef = useRef(false)
@@ -451,28 +534,53 @@ function App() {
   }
 
   const generateTitle = useCallback((msgs) => {
-    const firstUserMsg = msgs.find(m => m.role === 'user')
-    if (firstUserMsg && firstUserMsg.content) {
-      return firstUserMsg.content.length > 30 ? firstUserMsg.content.substring(0, 30) + '...' : firstUserMsg.content
-    }
+    const firstUserMsg = msgs.find(message => (
+      message.role === 'user' && getMessageDisplayContent(message)
+    ))
+    const visibleContent = getMessageDisplayContent(firstUserMsg)
+    if (visibleContent) return getAutoMessageTitle(visibleContent)
     return t('chat.new_chat')
   }, [t])
 
+  const resolveSessionTitle = useCallback((session, nextMessages) => {
+    const currentTitle = typeof session?.title === 'string' ? session.title.trim() : ''
+    if (session?.isTitleCustom === true && currentTitle) return currentTitle
+    return generateTitle(nextMessages)
+  }, [generateTitle])
+
+  const trackStructuralStorageWrite = useCallback((writePromise) => {
+    pendingStructuralStorageWriteRef.current = writePromise
+    const clearTrackedWrite = () => {
+      if (pendingStructuralStorageWriteRef.current === writePromise) {
+        pendingStructuralStorageWriteRef.current = null
+      }
+    }
+    void writePromise.then(clearTrackedWrite, clearTrackedWrite)
+    return writePromise
+  }, [])
+
   const enqueueStorageWrite = useCallback((values) => {
     const writeEpoch = storageWriteEpochRef.current
-    const write = () => (
-      writeEpoch === storageWriteEpochRef.current
-        ? setChromeStorage(values)
-        : Promise.resolve()
-    )
+    const write = async () => {
+      if (writeEpoch !== storageWriteEpochRef.current) return false
+      await setChromeStorage(values)
+      if (Array.isArray(values?.sessions)) {
+        values.sessions.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
+      }
+      return true
+    }
     const queuedWrite = storageWriteQueueRef.current
       .catch(() => undefined)
       .then(write)
     storageWriteQueueRef.current = queuedWrite.catch(error => {
       console.error('Chrome storage write failed', error)
     })
-    return queuedWrite
-  }, [])
+    return Array.isArray(values?.sessions)
+      ? trackStructuralStorageWrite(queuedWrite)
+      : queuedWrite
+  }, [trackStructuralStorageWrite])
 
   const mergeSessionMessages = useCallback((sessionId, nextMessages) => {
     if (!sessionId || !nextMessages?.length) return null
@@ -483,8 +591,11 @@ function App() {
     const nextSessions = [
       ...previous.filter(session => session.id !== sessionId),
       {
+        ...normalizeSessionMetadata(existing),
         id: sessionId,
-        title: generateTitle(nextMessages),
+        title: resolveSessionTitle(existing, nextMessages),
+        isTitleCustom: existing?.isTitleCustom === true,
+        isStarred: existing?.isStarred === true,
         updatedAt: Date.now(),
         messages: nextMessages,
       },
@@ -492,44 +603,132 @@ function App() {
     sessionsRef.current = nextSessions
     if (mountedRef.current) setSessions(nextSessions)
     return nextSessions
-  }, [generateTitle])
+  }, [resolveSessionTitle])
 
-  const persistSessionMessages = useCallback((sessionId, nextMessages, extraStorage = {}) => {
-    const nextSessions = mergeSessionMessages(sessionId, nextMessages)
-    if (!nextSessions) return Promise.resolve()
-    return enqueueStorageWrite({
-      sessions: nextSessions,
-      activeSessionId: activeSessionIdRef.current || sessionId,
-      ...extraStorage,
-    })
-  }, [enqueueStorageWrite, mergeSessionMessages])
+  const writeSessionMessagesToLatestStorage = useCallback(async (
+    sessionId,
+    nextMessages,
+    storagePatch,
+    writeEpoch,
+  ) => {
+    if (writeEpoch !== storageWriteEpochRef.current) return false
+    const localSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!localSession) return false
 
-  const persistSessionMessagesFromLatestStorage = useCallback((sessionId, nextMessages) => {
-    if (!sessionId || !nextMessages?.length) return Promise.resolve()
-    const writeEpoch = storageWriteEpochRef.current
-    const write = async () => {
-      if (writeEpoch !== storageWriteEpochRef.current) return
-      if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return
-
+    let sourceSessions = sessionsRef.current
+    let hasStoredSessionsSnapshot = false
+    if (typeof chrome !== 'undefined' && chrome.storage?.local?.get) {
       const stored = await chrome.storage.local.get(['sessions'])
-      if (writeEpoch !== storageWriteEpochRef.current) return
-      const localSession = sessionsRef.current.find(session => session.id === sessionId)
-      if (!localSession) return
-
-      const storedSessions = Array.isArray(stored?.sessions) ? stored.sessions : []
-      const storedSession = storedSessions.find(session => session?.id === sessionId)
-      const nextSessions = [
-        ...storedSessions.filter(session => session?.id !== sessionId),
-        {
-          ...(storedSession || localSession),
-          id: sessionId,
-          title: generateTitle(nextMessages),
-          updatedAt: Date.now(),
-          messages: nextMessages,
-        },
-      ]
-      await setChromeStorage({ sessions: nextSessions })
+      if (writeEpoch !== storageWriteEpochRef.current) return false
+      if (Array.isArray(stored?.sessions)) {
+        sourceSessions = stored.sessions
+        hasStoredSessionsSnapshot = true
+      }
     }
+
+    const latestLocalSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!latestLocalSession || writeEpoch !== storageWriteEpochRef.current) return false
+
+    const pendingMetadataSnapshot = new Map(pendingSessionMetadataRef.current)
+    const appliedPendingMetadata = new Map()
+    const sourceSessionIds = new Set(sourceSessions.map(session => session?.id).filter(Boolean))
+    let mergedSourceSessions = sourceSessions.map(session => {
+      const pendingMetadata = pendingMetadataSnapshot.get(session?.id)
+      if (!pendingMetadata) return session
+      appliedPendingMetadata.set(session.id, pendingMetadata)
+      return applySessionMetadataPatch(session, pendingMetadata.patch)
+    })
+
+    pendingMetadataSnapshot.forEach((pendingMetadata, pendingSessionId) => {
+      if (sourceSessionIds.has(pendingSessionId)) return
+      if (
+        hasStoredSessionsSnapshot
+        && persistedSessionIdsRef.current.has(pendingSessionId)
+      ) {
+        if (
+          pendingSessionMetadataRef.current.get(pendingSessionId)?.revision
+          === pendingMetadata.revision
+        ) {
+          pendingSessionMetadataRef.current.delete(pendingSessionId)
+        }
+        return
+      }
+
+      const pendingLocalSession = sessionsRef.current.find(session => (
+        session?.id === pendingSessionId
+      ))
+      if (!pendingLocalSession) return
+      appliedPendingMetadata.set(pendingSessionId, pendingMetadata)
+      mergedSourceSessions = [
+        ...mergedSourceSessions,
+        applySessionMetadataPatch(pendingLocalSession, pendingMetadata.patch),
+      ]
+    })
+
+    const storedSession = mergedSourceSessions.find(session => session?.id === sessionId)
+    const targetWasDeleted = (
+      hasStoredSessionsSnapshot
+      && !storedSession
+      && persistedSessionIdsRef.current.has(sessionId)
+    )
+    if (targetWasDeleted) {
+      if (appliedPendingMetadata.size > 0) {
+        if (writeEpoch !== storageWriteEpochRef.current) return false
+        await setChromeStorage({ sessions: mergedSourceSessions })
+        mergedSourceSessions.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
+        appliedPendingMetadata.forEach((pendingMetadata, pendingSessionId) => {
+          if (
+            pendingSessionMetadataRef.current.get(pendingSessionId)?.revision
+            === pendingMetadata.revision
+          ) {
+            pendingSessionMetadataRef.current.delete(pendingSessionId)
+          }
+        })
+      }
+      return false
+    }
+
+    const metadataSource = normalizeSessionMetadata(storedSession || latestLocalSession)
+    const nextSession = {
+      ...metadataSource,
+      id: sessionId,
+      title: resolveSessionTitle(metadataSource, nextMessages),
+      isTitleCustom: metadataSource?.isTitleCustom === true,
+      isStarred: metadataSource?.isStarred === true,
+      updatedAt: latestLocalSession.updatedAt || Date.now(),
+      messages: nextMessages,
+    }
+    const nextSessions = storedSession
+      ? mergedSourceSessions.map(session => (session?.id === sessionId ? nextSession : session))
+      : [...mergedSourceSessions, nextSession]
+
+    if (writeEpoch !== storageWriteEpochRef.current) return false
+    await setChromeStorage({ sessions: nextSessions, ...storagePatch })
+    nextSessions.forEach(session => {
+      if (session?.id) persistedSessionIdsRef.current.add(session.id)
+    })
+    appliedPendingMetadata.forEach((pendingMetadata, pendingSessionId) => {
+      if (
+        pendingSessionMetadataRef.current.get(pendingSessionId)?.revision
+        === pendingMetadata.revision
+      ) {
+        pendingSessionMetadataRef.current.delete(pendingSessionId)
+      }
+    })
+    return true
+  }, [resolveSessionTitle])
+
+  const queueSessionMessageWrite = useCallback((sessionId, nextMessages, storagePatch = {}) => {
+    if (!sessionId || !nextMessages?.length) return Promise.resolve(false)
+    const writeEpoch = storageWriteEpochRef.current
+    const write = () => writeSessionMessagesToLatestStorage(
+      sessionId,
+      nextMessages,
+      storagePatch,
+      writeEpoch,
+    )
     const queuedWrite = storageWriteQueueRef.current
       .catch(() => undefined)
       .then(write)
@@ -537,13 +736,144 @@ function App() {
       console.error('Chrome storage merged session write failed', error)
     })
     return queuedWrite
-  }, [generateTitle])
+  }, [writeSessionMessagesToLatestStorage])
+
+  const persistSessionMessages = useCallback((sessionId, nextMessages, extraStorage = {}) => {
+    const nextSessions = mergeSessionMessages(sessionId, nextMessages)
+    if (!nextSessions) return Promise.resolve(false)
+    return queueSessionMessageWrite(sessionId, nextMessages, {
+      activeSessionId: activeSessionIdRef.current || sessionId,
+      ...extraStorage,
+    })
+  }, [mergeSessionMessages, queueSessionMessageWrite])
+
+  const persistSessionMessagesFromLatestStorage = useCallback((sessionId, nextMessages) => (
+    queueSessionMessageWrite(sessionId, nextMessages)
+  ), [queueSessionMessageWrite])
+
+  const updateSessionMetadata = useCallback((sessionId, metadataPatch) => {
+    if (!sessionId || !metadataPatch) return Promise.resolve(false)
+    const currentSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!currentSession) return Promise.resolve(false)
+
+    const previousPendingMetadata = pendingSessionMetadataRef.current.get(sessionId)
+    sessionMetadataRevisionRef.current += 1
+    const pendingMetadata = {
+      revision: sessionMetadataRevisionRef.current,
+      patch: {
+        ...(previousPendingMetadata?.patch || {}),
+        ...metadataPatch,
+      },
+    }
+    pendingSessionMetadataRef.current.set(sessionId, pendingMetadata)
+
+    const nextLocalSessions = sessionsRef.current.map(session => (
+      session?.id === sessionId
+        ? applySessionMetadataPatch(session, metadataPatch)
+        : session
+    ))
+    sessionsRef.current = nextLocalSessions
+    if (mountedRef.current) setSessions(nextLocalSessions)
+
+    const writeEpoch = storageWriteEpochRef.current
+    const write = async () => {
+      if (writeEpoch !== storageWriteEpochRef.current) return false
+      if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return true
+
+      const stored = await chrome.storage.local.get(['sessions'])
+      if (writeEpoch !== storageWriteEpochRef.current) return false
+      const storedSessions = Array.isArray(stored?.sessions) ? stored.sessions : []
+      const storedSession = storedSessions.find(session => session?.id === sessionId)
+      if (
+        Array.isArray(stored?.sessions)
+        && !storedSession
+        && persistedSessionIdsRef.current.has(sessionId)
+      ) {
+        if (pendingSessionMetadataRef.current.get(sessionId)?.revision === pendingMetadata.revision) {
+          pendingSessionMetadataRef.current.delete(sessionId)
+        }
+        return false
+      }
+
+      const latestPendingMetadata = pendingSessionMetadataRef.current.get(sessionId) || pendingMetadata
+      const nextSession = applySessionMetadataPatch(
+        storedSession || currentSession,
+        latestPendingMetadata.patch,
+      )
+      const nextStoredSessions = storedSession
+        ? storedSessions.map(session => (session?.id === sessionId ? nextSession : session))
+        : [...storedSessions, nextSession]
+      await setChromeStorage({ sessions: nextStoredSessions })
+      persistedSessionIdsRef.current.add(sessionId)
+      if (
+        pendingSessionMetadataRef.current.get(sessionId)?.revision === latestPendingMetadata.revision
+      ) {
+        pendingSessionMetadataRef.current.delete(sessionId)
+      }
+      return true
+    }
+
+    const queuedWrite = storageWriteQueueRef.current
+      .catch(() => undefined)
+      .then(write)
+    storageWriteQueueRef.current = queuedWrite.catch(error => {
+      console.error('Chrome session metadata write failed', error)
+    })
+    return queuedWrite
+  }, [])
+
+  const renameSession = useCallback((sessionId, nextTitle) => {
+    const normalizedTitle = typeof nextTitle === 'string'
+      ? nextTitle.trim().slice(0, SESSION_TITLE_MAX_LENGTH)
+      : ''
+    if (!normalizedTitle) {
+      toast.error(t('chat.session_title.empty_error', {
+        defaultValue: 'Chat name cannot be empty.',
+      }))
+      return false
+    }
+
+    const currentSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!currentSession) return false
+    if (currentSession.title === normalizedTitle && currentSession.isTitleCustom === true) {
+      return true
+    }
+
+    void updateSessionMetadata(sessionId, {
+      title: normalizedTitle,
+      isTitleCustom: true,
+    }).then((saved) => {
+      if (saved) {
+        toast.success(t('chat.session_title.renamed', {
+          defaultValue: 'Chat renamed.',
+        }))
+      }
+    }).catch(() => {
+      toast.error(t('chat.session_title.save_error', {
+        defaultValue: 'Chat name could not be saved.',
+      }))
+    })
+    return true
+  }, [t, updateSessionMetadata])
+
+  const toggleStarSession = useCallback((sessionId) => {
+    const currentSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!currentSession) return
+    void updateSessionMetadata(sessionId, {
+      isStarred: currentSession.isStarred !== true,
+    }).catch(() => {
+      toast.error(t('chat.bulk_delete.save_error', {
+        defaultValue: 'Chat could not be updated.',
+      }))
+    })
+  }, [t, updateSessionMetadata])
 
   const persistAuthoritativeSessionRepair = useCallback((authoritativeGeneration) => {
     const repaired = repairStoredSessions(
       sessionsRef.current,
       msgIdCounter,
       authoritativeGeneration,
+      t('chat.new_chat'),
     )
     if (!repaired.changed) return Promise.resolve(false)
 
@@ -561,34 +891,48 @@ function App() {
     return enqueueStorageWrite({
       sessions: repaired.sessions,
       activeSessionId: activeSessionIdRef.current,
-    }).then(() => true)
-  }, [enqueueStorageWrite])
+    })
+  }, [enqueueStorageWrite, t])
 
   const flushVisibleSession = useCallback((immediate = false) => {
-    const sessionId = activeSessionIdRef.current
-    const visibleMessages = messagesRef.current
-    if (!sessionId || !visibleMessages?.length) return Promise.resolve()
     if (partialPersistTimerRef.current != null) {
       window.clearTimeout(partialPersistTimerRef.current)
       partialPersistTimerRef.current = null
     }
     lastPartialPersistAtRef.current = Date.now()
     if (immediate) {
-      const nextSessions = mergeSessionMessages(sessionId, visibleMessages)
-      if (!nextSessions) return Promise.resolve()
-      storageWriteEpochRef.current += 1
       const precedingWrites = storageWriteQueueRef.current.catch(() => undefined)
-      const immediateWrite = setChromeStorage({
-        sessions: nextSessions,
-        activeSessionId: activeSessionIdRef.current || sessionId,
-      }).catch(error => {
-        console.error('Immediate Chrome storage flush failed', error)
-      })
+      const pendingStructuralWrite = pendingStructuralStorageWriteRef.current
+      const writeImmediately = () => {
+        const latestSessionId = activeSessionIdRef.current
+        const latestVisibleMessages = messagesRef.current
+        if (!latestSessionId || !latestVisibleMessages?.length) return Promise.resolve(false)
+        const nextSessions = mergeSessionMessages(latestSessionId, latestVisibleMessages)
+        if (!nextSessions) return Promise.resolve(false)
+        storageWriteEpochRef.current += 1
+        const writeEpoch = storageWriteEpochRef.current
+        return writeSessionMessagesToLatestStorage(
+          latestSessionId,
+          latestVisibleMessages,
+          { activeSessionId: activeSessionIdRef.current || latestSessionId },
+          writeEpoch,
+        )
+      }
+      const immediateWrite = (
+        pendingStructuralWrite
+          ? pendingStructuralWrite.catch(() => undefined).then(writeImmediately)
+          : writeImmediately()
+      ).catch(error => {
+          console.error('Immediate Chrome storage flush failed', error)
+        })
       storageWriteQueueRef.current = Promise.all([precedingWrites, immediateWrite]).then(() => undefined)
       return immediateWrite
     }
+    const sessionId = activeSessionIdRef.current
+    const visibleMessages = messagesRef.current
+    if (!sessionId || !visibleMessages?.length) return Promise.resolve()
     return persistSessionMessages(sessionId, visibleMessages)
-  }, [mergeSessionMessages, persistSessionMessages])
+  }, [mergeSessionMessages, persistSessionMessages, writeSessionMessagesToLatestStorage])
 
   useEffect(() => {
     flushVisibleSessionRef.current = flushVisibleSession
@@ -1216,9 +1560,23 @@ function App() {
     };
   }, [])
 
+  const clearCropSelectionState = useCallback((requestId = null) => {
+    const activeCrop = cropTargetRef.current
+    if (requestId && activeCrop?.requestId !== requestId) return false
+    cropTargetRef.current = null
+    setIsCropActive(false)
+    setActiveMode(previous => (previous === 'crop' ? null : previous))
+    return true
+  }, [])
+
   useEffect(() => {
     const listener = (msg) => {
+      if (msg.type === 'HERAAI_CROP_CANCELLED') {
+        clearCropSelectionState(msg.requestId || null)
+        return false
+      }
       if (msg.type === 'HERAAI_CROP_DONE' && !cropProcessingRef.current) {
+        if (!clearCropSelectionState(msg.requestId || null)) return false
         cropProcessingRef.current = true;
         void (async () => {
           try {
@@ -1246,7 +1604,23 @@ function App() {
         chrome.runtime.onMessage.removeListener(listener);
       }
     }
-  }, [captureScreenshot, setGenerating, t])
+  }, [captureScreenshot, clearCropSelectionState, setGenerating, t])
+
+  useEffect(() => () => {
+    const activeCrop = cropTargetRef.current
+    cropTargetRef.current = null
+    if (!activeCrop?.tabId || typeof chrome === 'undefined' || !chrome.scripting?.executeScript) return
+    try {
+      const cancellation = chrome.scripting.executeScript({
+        target: { tabId: activeCrop.tabId },
+        func: cancelCropOverlay,
+        args: [activeCrop.requestId],
+      })
+      cancellation?.catch?.(() => undefined)
+    } catch (_error) {
+      // The tab may have closed while the side panel was shutting down.
+    }
+  }, [])
 
   useEffect(() => {
     if (prevIsGeneratingRef.current && !isGenerating && activeMode && activeMode !== 'web') {
@@ -1261,7 +1635,11 @@ function App() {
       const id = Date.now().toString()
       const welcomeMessages = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: translate('chat.welcome') }]
       activeSessionIdRef.current = id
-      sessionsRef.current = [{ id, title: translate('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMessages }]
+      sessionsRef.current = [createSession({
+        id,
+        title: translate('chat.new_chat'),
+        messages: welcomeMessages,
+      })]
       messagesRef.current = welcomeMessages
       setActiveSessionId(id)
       setSessions(sessionsRef.current)
@@ -1385,7 +1763,11 @@ function App() {
       // Do not repair transient assistant states until GET_STATE has supplied the
       // authoritative generation. A stale storage snapshot can otherwise preserve
       // an orphaned "thinking" message, or remove the placeholder for a newer job.
-      let nextSessions = Array.isArray(result.sessions) ? result.sessions : []
+      const storedSessions = Array.isArray(result.sessions) ? result.sessions : []
+      storedSessions.forEach(session => {
+        if (session?.id) persistedSessionIdsRef.current.add(session.id)
+      })
+      let nextSessions = storedSessions.map(normalizeSessionMetadata)
       let nextActiveSessionId = null
       let nextMessages = welcomeMessages
       let shouldPersistSessions = false
@@ -1398,47 +1780,43 @@ function App() {
           nextMessages = currentSession.messages || welcomeMessages
         } else {
           nextActiveSessionId = Date.now().toString()
-          const newSession = {
+          const newSession = createSession({
             id: nextActiveSessionId,
             title: translate('chat.new_chat'),
-            updatedAt: Date.now(),
             messages: welcomeMessages,
-          }
+          })
           nextSessions = [...nextSessions, newSession]
           shouldPersistSessions = true
         }
       } else if (Array.isArray(result.chatHistory) && result.chatHistory.length > 1) {
         const repairedHistory = repairMessageIds(result.chatHistory, msgIdCounter).messages
         const historyId = Date.now().toString()
-        const historySession = {
+        const historySession = createSession({
           id: historyId,
           title: translate('chat.history_title'),
-          updatedAt: Date.now(),
           messages: repairedHistory,
-        }
+        })
         if (config.startupBehavior === 'resume') {
           nextActiveSessionId = historyId
           nextSessions = [historySession]
           nextMessages = repairedHistory
         } else {
           nextActiveSessionId = `${Date.now()}1`
-          const welcomeSession = {
+          const welcomeSession = createSession({
             id: nextActiveSessionId,
             title: translate('chat.new_chat'),
-            updatedAt: Date.now(),
             messages: welcomeMessages,
-          }
+          })
           nextSessions = [historySession, welcomeSession]
         }
         shouldPersistSessions = true
       } else {
         nextActiveSessionId = Date.now().toString()
-        nextSessions = [{
+        nextSessions = [createSession({
           id: nextActiveSessionId,
           title: translate('chat.new_chat'),
-          updatedAt: Date.now(),
           messages: welcomeMessages,
-        }]
+        })]
         shouldPersistSessions = true
       }
 
@@ -1481,7 +1859,12 @@ function App() {
       // read is pending, adopt all three fields together so finalization can
       // always resolve the generation's session.
       if (hasPendingSessionsChange) {
-        nextSessions = Array.isArray(pendingSessionsChange) ? pendingSessionsChange : []
+        nextSessions = Array.isArray(pendingSessionsChange)
+          ? pendingSessionsChange.map(normalizeSessionMetadata)
+          : []
+        nextSessions.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
       }
       if (hasPendingActiveSessionIdChange) {
         nextActiveSessionId = pendingActiveSessionIdChange || null
@@ -1491,6 +1874,7 @@ function App() {
         nextSessions,
         msgIdCounter,
         generation,
+        translate('chat.new_chat'),
       )
       nextSessions = authoritativeSessionRepair.sessions
       shouldPersistSessions = shouldPersistSessions || authoritativeSessionRepair.changed
@@ -1553,6 +1937,44 @@ function App() {
           hasPendingGenerationChange = true
         }
         return
+      }
+      if (changes.sessions && Array.isArray(changes.sessions.newValue)) {
+        changes.sessions.newValue.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
+        const storedById = new Map(
+          changes.sessions.newValue
+            .filter(session => session?.id)
+            .map(session => [session.id, normalizeSessionMetadata(session)])
+        )
+        let metadataChanged = false
+        const metadataSyncedSessions = sessionsRef.current.map(session => {
+          const storedSession = storedById.get(session?.id)
+          if (!storedSession) return session
+          const storedTitle = typeof storedSession.title === 'string' && storedSession.title.trim()
+            ? storedSession.title
+            : session.title
+          const isTitleCustom = storedSession.isTitleCustom === true
+          const isStarred = storedSession.isStarred === true
+          if (
+            storedTitle === session.title
+            && isTitleCustom === (session.isTitleCustom === true)
+            && isStarred === (session.isStarred === true)
+          ) {
+            return session
+          }
+          metadataChanged = true
+          return {
+            ...session,
+            title: storedTitle,
+            isTitleCustom,
+            isStarred,
+          }
+        })
+        if (metadataChanged) {
+          sessionsRef.current = metadataSyncedSessions
+          setSessions(metadataSyncedSessions)
+        }
       }
       if (changes.activeGeneration) {
         const nextGeneration = changes.activeGeneration.newValue || null
@@ -1824,7 +2246,7 @@ function App() {
     const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
     const nextSessions = [
       ...sessionsRef.current,
-      { id, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg },
+      createSession({ id, title: t('chat.new_chat'), messages: welcomeMsg }),
     ]
     activeSessionIdRef.current = id
     sessionsRef.current = nextSessions
@@ -1833,6 +2255,7 @@ function App() {
     setSessions(nextSessions)
     setMessages(welcomeMsg)
     void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: id })
+    setShowBulkDeleteConfirm(false)
     setShowHistory(false)
     stickToBottomOnNextRender()
   }, [cancelActiveGeneration, enqueueStorageWrite, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
@@ -1865,56 +2288,242 @@ function App() {
         queueGenerationContent(generation)
       }
     }
+    setShowBulkDeleteConfirm(false)
     setShowHistory(false)
   }, [cancelActiveGeneration, enqueueStorageWrite, prepareGenerationPresentation, queueGenerationContent, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue])
 
-  const deleteSession = useCallback((id) => {
-    if (activeGenerationRef.current?.sessionId === id) {
-      void cancelActiveGeneration('session_deleted')
-    }
-    const remainingSessions = sessionsRef.current.filter(session => session.id !== id)
-    const wasActiveSession = activeSessionIdRef.current === id
-    let nextSessions = remainingSessions
-    let nextActiveSessionId = activeSessionIdRef.current
-    let nextMessages = messagesRef.current
-
-    if (wasActiveSession) {
-      if (remainingSessions.length > 0) {
-        const nextSession = remainingSessions[0]
-        nextActiveSessionId = nextSession.id
-        nextMessages = nextSession.messages || []
-      } else {
-        const newId = Date.now().toString()
-        const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
-        const newSession = { id: newId, title: t('chat.new_chat'), updatedAt: Date.now(), messages: welcomeMsg }
-        nextSessions = [newSession]
-        nextActiveSessionId = newId
-        nextMessages = welcomeMsg
+  const deleteSession = useCallback(async (id) => {
+    try {
+      if (activeGenerationRef.current?.sessionId === id) {
+        await cancelActiveGeneration('session_deleted')
+        if (activeGenerationRef.current?.jobId) {
+          toast.error(t('chat.bulk_delete.cancel_failed', {
+            defaultValue: 'The response could not be stopped, so the chat was not deleted.',
+          }))
+          return
+        }
       }
+
+      const write = async () => {
+        let sourceSessions = sessionsRef.current
+        if (typeof chrome !== 'undefined' && chrome.storage?.local?.get) {
+          const stored = await chrome.storage.local.get(['sessions'])
+          if (Array.isArray(stored?.sessions)) sourceSessions = stored.sessions
+        }
+
+        const remainingSessions = sourceSessions
+          .filter(session => session?.id !== id)
+          .map(normalizeSessionMetadata)
+        if (remainingSessions.length === sourceSessions.length) return null
+
+        const wasActiveSession = activeSessionIdRef.current === id
+        let nextSessions = remainingSessions
+        let nextActiveSessionId = activeSessionIdRef.current
+        let nextMessages = messagesRef.current
+
+        if (wasActiveSession) {
+          if (remainingSessions.length > 0) {
+            const nextSession = remainingSessions[0]
+            nextActiveSessionId = nextSession.id
+            nextMessages = nextSession.messages || []
+          } else {
+            const newId = Date.now().toString()
+            const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
+            const newSession = createSession({ id: newId, title: t('chat.new_chat'), messages: welcomeMsg })
+            nextSessions = [newSession]
+            nextActiveSessionId = newId
+            nextMessages = welcomeMsg
+          }
+        }
+
+        await setChromeStorage({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
+        nextSessions.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
+        return { nextSessions, nextActiveSessionId, nextMessages, wasActiveSession }
+      }
+
+      const queuedWrite = storageWriteQueueRef.current
+        .catch(() => undefined)
+        .then(write)
+      storageWriteQueueRef.current = queuedWrite.catch(error => {
+        console.error('Chrome session deletion failed', error)
+      })
+      const result = await trackStructuralStorageWrite(queuedWrite)
+      if (!result) return
+
+      const remainingSessionIds = new Set(result.nextSessions.map(session => session?.id))
+      pendingSessionMetadataRef.current.forEach((_pendingMetadata, pendingSessionId) => {
+        if (!remainingSessionIds.has(pendingSessionId)) {
+          pendingSessionMetadataRef.current.delete(pendingSessionId)
+        }
+      })
+      sessionsRef.current = result.nextSessions
+      activeSessionIdRef.current = result.nextActiveSessionId
+      setSessions(result.nextSessions)
+      setActiveSessionId(result.nextActiveSessionId)
+      if (result.wasActiveSession) {
+        messagesRef.current = result.nextMessages
+        setMessages(result.nextMessages)
+        stickToBottomOnNextRender()
+      }
+    } catch (error) {
+      console.error('Chat deletion failed', error)
+      toast.error(t('chat.bulk_delete.error', {
+        defaultValue: 'Chat could not be deleted.',
+      }))
+    }
+  }, [cancelActiveGeneration, stickToBottomOnNextRender, t, trackStructuralStorageWrite])
+
+  const requestBulkDelete = useCallback(() => {
+    const unstarredCount = sessionsRef.current.filter(session => session?.isStarred !== true).length
+    if (unstarredCount === 0) {
+      toast(t('chat.bulk_delete.none', {
+        defaultValue: 'There are no unstarred chats to delete.',
+      }))
+      return
+    }
+    setShowHistory(true)
+    setShowBulkDeleteConfirm(true)
+  }, [t])
+
+  const deleteUnstarredSessions = useCallback(async () => {
+    if (isBulkDeleting) return
+
+    const initialSessions = sessionsRef.current
+    const initialUnstarredCount = initialSessions.filter(session => session?.isStarred !== true).length
+    if (initialUnstarredCount === 0) {
+      setShowBulkDeleteConfirm(false)
+      return
     }
 
-    sessionsRef.current = nextSessions
-    activeSessionIdRef.current = nextActiveSessionId
-    setSessions(nextSessions)
-    setActiveSessionId(nextActiveSessionId)
-    if (wasActiveSession) {
-      messagesRef.current = nextMessages
-      setMessages(nextMessages)
-      stickToBottomOnNextRender()
-    }
-    void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
-  }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
+    setIsBulkDeleting(true)
+    const currentActiveSessionId = activeSessionIdRef.current
+    const generationSessionId = activeGenerationRef.current?.sessionId || null
+    const generationSession = initialSessions.find(session => session?.id === generationSessionId)
 
-  const clearHistory = useCallback(() => {
-    void cancelActiveGeneration('clear_history')
-    sessionsRef.current = []
-    setSessions([])
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      void chrome.storage.local.remove(['chatHistory'])
+    try {
+      if (
+        generationSessionId
+        && generationSession?.isStarred !== true
+      ) {
+        await cancelActiveGeneration('clear_history')
+        if (activeGenerationRef.current?.jobId) {
+          toast.error(t('chat.bulk_delete.cancel_failed', {
+            defaultValue: 'The response could not be stopped, so the chats were not deleted.',
+          }))
+          return
+        }
+      }
+
+      const write = async () => {
+        let storedSessions = null
+        if (typeof chrome !== 'undefined' && chrome.storage?.local?.get) {
+          const stored = await chrome.storage.local.get(['sessions'])
+          storedSessions = Array.isArray(stored?.sessions) ? stored.sessions : null
+        }
+
+        const localSessions = sessionsRef.current
+        const localById = new Map(localSessions.map(session => [session?.id, session]))
+        const sourceSessions = (storedSessions ?? localSessions)
+          .map(normalizeSessionMetadata)
+          .map(session => {
+            const localSession = localById.get(session?.id)
+            if (!localSession || session?.id !== generationSessionId) return session
+            const generationMessages = session?.id === activeSessionIdRef.current
+              ? messagesRef.current
+              : localSession.messages
+            return { ...session, messages: generationMessages || session.messages || [] }
+          })
+        const preservedSessions = sourceSessions.filter(session => session?.isStarred === true)
+        const deletedCount = sourceSessions.length - preservedSessions.length
+
+        let nextSessions = preservedSessions
+        let nextActiveSessionId = currentActiveSessionId
+        let nextMessages = messagesRef.current
+        const preservedActiveSession = preservedSessions.find(session => session?.id === currentActiveSessionId)
+
+        if (preservedActiveSession) {
+          nextMessages = preservedActiveSession.messages || nextMessages
+        } else if (preservedSessions.length > 0) {
+          const nextSession = sortSessionsByUpdatedAt(preservedSessions)[0]
+          nextActiveSessionId = nextSession.id
+          nextMessages = nextSession.messages || []
+        } else {
+          const nextSessionId = Date.now().toString()
+          const welcomeMessages = [{
+            id: createUniqueMessageId(msgIdCounter),
+            role: 'model',
+            content: t('chat.welcome'),
+          }]
+          const nextSession = createSession({
+            id: nextSessionId,
+            title: t('chat.new_chat'),
+            messages: welcomeMessages,
+          })
+          nextSessions = [nextSession]
+          nextActiveSessionId = nextSessionId
+          nextMessages = welcomeMessages
+        }
+
+        await setChromeStorage({
+          sessions: nextSessions,
+          activeSessionId: nextActiveSessionId,
+        })
+        nextSessions.forEach(session => {
+          if (session?.id) persistedSessionIdsRef.current.add(session.id)
+        })
+        return {
+          deletedCount,
+          nextActiveSessionId,
+          nextMessages,
+          nextSessions,
+          preservedActiveSession,
+        }
+      }
+
+      const queuedWrite = storageWriteQueueRef.current
+        .catch(() => undefined)
+        .then(write)
+      storageWriteQueueRef.current = queuedWrite.catch(error => {
+        console.error('Chrome bulk session deletion failed', error)
+      })
+      const result = await trackStructuralStorageWrite(queuedWrite)
+
+      const remainingSessionIds = new Set(result.nextSessions.map(session => session?.id))
+      pendingSessionMetadataRef.current.forEach((_pendingMetadata, pendingSessionId) => {
+        if (!remainingSessionIds.has(pendingSessionId)) {
+          pendingSessionMetadataRef.current.delete(pendingSessionId)
+        }
+      })
+      sessionsRef.current = result.nextSessions
+      activeSessionIdRef.current = result.nextActiveSessionId
+      messagesRef.current = result.nextMessages
+      setSessions(result.nextSessions)
+      setActiveSessionId(result.nextActiveSessionId)
+      setMessages(result.nextMessages)
+      if (!result.preservedActiveSession) stickToBottomOnNextRender()
+
+      if (typeof chrome !== 'undefined' && chrome.storage?.local?.remove) {
+        void chrome.storage.local.remove(['chatHistory']).catch(error => {
+          console.error('Legacy chat history cleanup failed', error)
+        })
+      }
+
+      setShowBulkDeleteConfirm(false)
+      toast.success(t('chat.bulk_delete.success', {
+        count: result.deletedCount,
+        defaultValue: `${result.deletedCount} unstarred chats deleted.`,
+      }))
+    } catch (error) {
+      console.error('Bulk chat deletion failed', error)
+      toast.error(t('chat.bulk_delete.error', {
+        defaultValue: 'Chats could not be deleted.',
+      }))
+    } finally {
+      setIsBulkDeleting(false)
     }
-    startNewSession()
-    toast.success(t('chat.history_cleared'))
-  }, [cancelActiveGeneration, startNewSession, t])
+  }, [cancelActiveGeneration, isBulkDeleting, stickToBottomOnNextRender, t, trackStructuralStorageWrite])
 
   const handleExport = useCallback(() => {
     if (sessions.length === 0) {
@@ -1937,16 +2546,38 @@ function App() {
         return
       }
       const importedSessions = await importSessions(file)
-      sessionsRef.current = importedSessions
-      setSessions(importedSessions)
-      if (importedSessions.length > 0) {
-        activeSessionIdRef.current = importedSessions[0].id
-        messagesRef.current = importedSessions[0].messages || []
-        setActiveSessionId(importedSessions[0].id)
-        setMessages(messagesRef.current)
-        stickToBottomOnNextRender()
-        void enqueueStorageWrite({ sessions: importedSessions, activeSessionId: importedSessions[0].id })
-      }
+      const repairedImportedSessions = repairStoredSessions(
+        importedSessions,
+        msgIdCounter,
+        null,
+        t('chat.new_chat'),
+      ).sessions
+      const nextSessions = repairedImportedSessions.length > 0
+        ? repairedImportedSessions.map(normalizeSessionMetadata)
+        : [createSession({
+            id: Date.now().toString(),
+            title: t('chat.new_chat'),
+            messages: [{
+              id: createUniqueMessageId(msgIdCounter),
+              role: 'model',
+              content: t('chat.welcome'),
+            }],
+          })]
+      const nextActiveSession = nextSessions[0]
+      const saved = await enqueueStorageWrite({
+        sessions: nextSessions,
+        activeSessionId: nextActiveSession.id,
+      })
+      if (!saved) throw new Error(t('chat.import_error'))
+
+      pendingSessionMetadataRef.current.clear()
+      sessionsRef.current = nextSessions
+      activeSessionIdRef.current = nextActiveSession.id
+      messagesRef.current = nextActiveSession.messages || []
+      setSessions(nextSessions)
+      setActiveSessionId(nextActiveSession.id)
+      setMessages(messagesRef.current)
+      stickToBottomOnNextRender()
       toast.success(t('chat.imported'))
     } catch (err) {
       toast.error(err.message || t('chat.import_error'))
@@ -1997,6 +2628,7 @@ function App() {
       : createUserMessage({
           id: userMessageId,
           content: userText,
+          displayContent: actionOptions?.displayContent,
           attachments: messageAttachments,
           mode,
         })
@@ -2017,7 +2649,8 @@ function App() {
     const requestMessages = [...baseMessages, userMsg]
     const requestSessionId = activeSessionIdRef.current
     const optimisticMessages = [...baseMessages, userMsg, assistantMsg]
-    const sessionTitle = generateTitle(optimisticMessages)
+    const requestSession = sessionsRef.current.find(session => session?.id === requestSessionId)
+    const sessionTitle = resolveSessionTitle(requestSession, optimisticMessages)
     const generation = {
       jobId,
       requestId,
@@ -2201,7 +2834,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, generateTitle, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+  }, [input, attachments, appConfig, enableResearch, selectedModel, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   handleSendRef.current = handleSend
 
@@ -2240,10 +2873,51 @@ function App() {
   }, [t, setGenerating])
 
   const handleScreenshot = useCallback(async () => {
+    const activeCrop = cropTargetRef.current
+    if (activeCrop) {
+      activeCrop.cancelRequested = true
+      setIsCropActive(false)
+      setActiveMode(previous => (previous === 'crop' ? null : previous))
+
+      if (activeCrop.phase !== 'active') return
+      activeCrop.phase = 'cancelling'
+
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: activeCrop.tabId },
+          func: cancelCropOverlay,
+          args: [activeCrop.requestId],
+        })
+      } catch (error) {
+        console.warn('Crop cancellation could not reach the original tab', error)
+      } finally {
+        if (cropTargetRef.current === activeCrop) {
+          clearCropSelectionState(activeCrop.requestId)
+        }
+      }
+      return
+    }
+
+    if (cropTogglePendingRef.current) return
+    cropTogglePendingRef.current = true
+
+    const cropOperation = {
+      tabId: null,
+      requestId: `crop-${createUniqueMessageId(msgIdCounter)}`,
+      phase: 'resolving',
+      cancelRequested: false,
+    }
+    cropTargetRef.current = cropOperation
+    setIsCropActive(true)
+
     try {
-      updateStats('screenshot')
-      
       const windows = await chrome.windows.getAll()
+      if (
+        cropOperation.cancelRequested
+        || !mountedRef.current
+        || cropTargetRef.current !== cropOperation
+      ) return
+
       const targetWindow = windows.find(w => w.type === 'normal')
       
       if (!targetWindow) {
@@ -2252,6 +2926,11 @@ function App() {
       }
 
       const [tab] = await chrome.tabs.query({ active: true, windowId: targetWindow.id });
+      if (
+        cropOperation.cancelRequested
+        || !mountedRef.current
+        || cropTargetRef.current !== cropOperation
+      ) return
 
       if (!tab || !tab.id) {
         toast.error(t('chat.screenshot_no_tab'));
@@ -2266,7 +2945,9 @@ function App() {
         return;
       }
 
-      await chrome.scripting.executeScript({
+      cropOperation.tabId = tab.id
+      cropOperation.phase = 'starting'
+      const injectionResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: injectCropOverlay,
         args: [
@@ -2274,13 +2955,45 @@ function App() {
             confirm: t('chat.tooltips.crop_confirm'),
             cancel: t('chat.tooltips.crop_cancel')
           },
-          appConfig?.customPrimaryColor || '#7c5cff'
+          appConfig?.customPrimaryColor || '#7c5cff',
+          cropOperation.requestId,
         ]
       });
 
+      const injectionState = injectionResults?.[0]?.result
+      cropOperation.requestId = injectionState?.requestId || cropOperation.requestId
+      if (injectionState?.active === false) {
+        return
+      }
+
+      if (
+        cropOperation.cancelRequested
+        || !mountedRef.current
+        || cropTargetRef.current !== cropOperation
+      ) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: cropOperation.tabId },
+            func: cancelCropOverlay,
+            args: [cropOperation.requestId],
+          })
+        } catch (_error) {
+          // The page may have closed or already removed the overlay.
+        }
+        return
+      }
+
+      cropOperation.phase = 'active'
+      setIsCropActive(true)
+      void updateStats('screenshot')
       toast(t('chat.tooltips.screenshot_hint'));
-      setActiveMode('crop')
     } catch (e) {
+      if (
+        cropOperation.cancelRequested
+        || !mountedRef.current
+        || cropTargetRef.current !== cropOperation
+      ) return
+
       console.error('Initiate screenshot error', e);
       const msg = e?.message || '';
       if (msg.includes('Cannot access') || msg.includes('chrome://')) {
@@ -2288,8 +3001,13 @@ function App() {
       } else {
         toast.error(t('chat.file_error'));
       }
+    } finally {
+      cropTogglePendingRef.current = false
+      if (cropTargetRef.current === cropOperation && cropOperation.phase !== 'active') {
+        clearCropSelectionState(cropOperation.requestId)
+      }
     }
-  }, [t, appConfig])
+  }, [appConfig, clearCropSelectionState, t])
 
   const removeAttachment = useCallback((index) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
@@ -2461,7 +3179,25 @@ function App() {
   }
 
   if (showHistory) {
-    return <HistoryOverlay sessions={sessions} activeSessionId={activeSessionId} onSelect={loadSession} onDelete={deleteSession} onClose={() => setShowHistory(false)} />
+    return (
+      <HistoryOverlay
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelect={loadSession}
+        onDelete={deleteSession}
+        onRename={renameSession}
+        onToggleStar={toggleStarSession}
+        onRequestBulkDelete={requestBulkDelete}
+        bulkDeleteOpen={showBulkDeleteConfirm}
+        onCancelBulkDelete={() => setShowBulkDeleteConfirm(false)}
+        onConfirmBulkDelete={deleteUnstarredSessions}
+        isBulkDeleting={isBulkDeleting}
+        onClose={() => {
+          setShowBulkDeleteConfirm(false)
+          setShowHistory(false)
+        }}
+      />
+    )
   }
 
   if (showStats) {
@@ -2478,6 +3214,8 @@ function App() {
     !messages[0]?.status &&
     !messages[0]?.attachments?.length
   )
+  const activeSessionTitle = sessions.find(session => session?.id === activeSessionId)?.title
+    || t('chat.new_chat')
 
   const getQuickActionClass = (isActive = false) => (
     `hera-icon-button h-8 w-8 border border-transparent active:scale-95 disabled:pointer-events-none disabled:opacity-35 ${
@@ -2495,9 +3233,11 @@ function App() {
   return (
     <div className="hera-panel flex h-screen min-h-0 min-w-0 flex-col overflow-hidden text-foreground">
       <AppHeader
+        activeSessionTitle={activeSessionTitle}
+        onRenameSession={(nextTitle) => renameSession(activeSessionId, nextTitle)}
         onNewChat={startNewSession}
         onHistory={() => setShowHistory(true)}
-        onClear={clearHistory}
+        onClear={requestBulkDelete}
         onExport={handleExport}
         onImport={handleImport}
         onSettings={() => setShowSettings(true)}
@@ -2542,6 +3282,7 @@ function App() {
         {isWelcomeOnly ? (
           <WelcomeScreen
             onCrop={handleScreenshot}
+            isCropActive={isCropActive}
             onResearch={() => {
               setEnableResearch(true)
               setActiveMode('web')
@@ -2628,12 +3369,16 @@ function App() {
               </button>
               <button
                 type="button"
-                title={t('chat.quick_actions.crop_tooltip')}
-                aria-label={t('chat.quick_actions.crop_tooltip')}
-                aria-pressed={activeMode === 'crop'}
+                title={isCropActive
+                  ? t('chat.quick_actions.crop_cancel_tooltip')
+                  : t('chat.quick_actions.crop_tooltip')}
+                aria-label={isCropActive
+                  ? t('chat.quick_actions.crop_cancel_tooltip')
+                  : t('chat.quick_actions.crop_tooltip')}
+                aria-pressed={isCropActive}
                 onClick={handleScreenshot}
-                disabled={isGenerating}
-                className={getQuickActionClass(activeMode === 'crop')}
+                disabled={isGenerating && !isCropActive}
+                className={getQuickActionClass(isCropActive)}
               >
                 <Scissors className="h-4 w-4" />
               </button>
@@ -2660,7 +3405,10 @@ function App() {
                 onClick={() => {
                   setActiveMode('ocr')
                   setInput('')
-                  handleSend(t('chat.prompts.ocr'), { modeOverride: 'vision' })
+                  handleSend(t('chat.prompts.ocr'), {
+                    modeOverride: 'vision',
+                    displayContent: '',
+                  })
                 }}
                 disabled={isGenerating || !hasImageAttachment}
                 className={getQuickActionClass(activeMode === 'ocr')}

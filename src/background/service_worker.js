@@ -1,4 +1,9 @@
 import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
+import {
+  getAutoMessageTitle,
+  getMessageDisplayContent,
+  isHiddenPromptAutoTitle,
+} from '../lib/messageDisplay.js';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const OFFSCREEN_REASON = 'WORKERS';
@@ -378,17 +383,33 @@ function getStartUserMessage(message, requestMessages) {
 }
 
 function deriveSessionTitle(message, existingSession, requestMessages) {
-  if (typeof message.sessionTitle === 'string' && message.sessionTitle.trim()) {
+  if (
+    existingSession?.isTitleCustom === true
+    && typeof existingSession.title === 'string'
+    && existingSession.title.trim()
+  ) {
+    return existingSession.title;
+  }
+  if (
+    typeof message.sessionTitle === 'string'
+    && message.sessionTitle.trim()
+    && !isHiddenPromptAutoTitle(message.sessionTitle, requestMessages)
+  ) {
     return message.sessionTitle;
   }
-  if (typeof existingSession?.title === 'string' && existingSession.title) {
+  if (
+    typeof existingSession?.title === 'string'
+    && existingSession.title
+    && !isHiddenPromptAutoTitle(existingSession.title, requestMessages)
+  ) {
     return existingSession.title;
   }
 
-  const firstUserContent = requestMessages.find(item => item.role === 'user')?.content;
-  if (typeof firstUserContent !== 'string' || !firstUserContent.trim()) return 'New Chat';
-  const trimmed = firstUserContent.trim();
-  return trimmed.length > 30 ? `${trimmed.slice(0, 30)}...` : trimmed;
+  const firstUserMessage = requestMessages.find(item => (
+    item.role === 'user' && getMessageDisplayContent(item).trim()
+  ));
+  const firstUserContent = getMessageDisplayContent(firstUserMessage).trim();
+  return getAutoMessageTitle(firstUserContent) || 'New Chat';
 }
 
 function createThinkingPlaceholder(message, queuedGeneration) {
@@ -590,6 +611,8 @@ async function handleGenerationStart(message) {
     ...(existingSession || {}),
     id: message.sessionId,
     title: deriveSessionTitle(message, existingSession, requestMessages),
+    isTitleCustom: existingSession?.isTitleCustom === true,
+    isStarred: existingSession?.isStarred === true,
     updatedAt: queuedGeneration.updatedAt,
     messages: optimisticMessages,
   };
@@ -1147,7 +1170,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === 'HERAAI_CROP_DONE') {
+  if (message?.type === 'HERAAI_CROP_DONE' || message?.type === 'HERAAI_CROP_CANCELLED') {
     void broadcastRuntimeMessage(message);
     return false;
   }

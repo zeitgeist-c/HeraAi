@@ -40,6 +40,9 @@ global.chrome = {
     query: vi.fn(),
     captureVisibleTab: vi.fn()
   },
+  windows: {
+    getAll: vi.fn()
+  },
   scripting: {
     executeScript: vi.fn()
   },

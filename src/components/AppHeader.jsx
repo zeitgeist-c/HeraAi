@@ -6,6 +6,7 @@ import {
   Keyboard,
   Menu,
   MessageSquarePlus,
+  Pencil,
   Settings,
   Sparkles,
   Trash2,
@@ -13,7 +14,11 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+const MAX_SESSION_TITLE_LENGTH = 80
+
 function AppHeader({
+  activeSessionTitle,
+  onRenameSession,
   onNewChat,
   onHistory,
   onClear,
@@ -25,8 +30,29 @@ function AppHeader({
 }) {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [titleError, setTitleError] = useState(false)
   const menuRef = useRef(null)
   const importInputRef = useRef(null)
+  const titleInputRef = useRef(null)
+  const renameTriggerRef = useRef(null)
+  const restoreTitleFocusRef = useRef(false)
+
+  const displayedTitle = activeSessionTitle?.trim() || t('chat.new_chat')
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+      return
+    }
+
+    if (restoreTitleFocusRef.current) {
+      restoreTitleFocusRef.current = false
+      renameTriggerRef.current?.focus()
+    }
+  }, [isEditingTitle])
 
   useEffect(() => {
     if (!menuOpen) return undefined
@@ -46,6 +72,37 @@ function AppHeader({
     }
   }, [menuOpen])
 
+  const startEditingTitle = () => {
+    setTitleDraft(displayedTitle)
+    setTitleError(false)
+    setIsEditingTitle(true)
+  }
+
+  const cancelEditingTitle = ({ restoreFocus = false } = {}) => {
+    restoreTitleFocusRef.current = restoreFocus
+    setTitleDraft(displayedTitle)
+    setTitleError(false)
+    setIsEditingTitle(false)
+  }
+
+  const saveTitle = ({ keepOpenOnInvalid = false, restoreFocus = false } = {}) => {
+    const nextTitle = titleDraft.trim()
+    if (!nextTitle) {
+      if (keepOpenOnInvalid) {
+        setTitleError(true)
+        titleInputRef.current?.focus()
+      } else {
+        cancelEditingTitle({ restoreFocus })
+      }
+      return
+    }
+
+    restoreTitleFocusRef.current = restoreFocus
+    setTitleError(false)
+    setIsEditingTitle(false)
+    if (nextTitle !== displayedTitle) onRenameSession?.(nextTitle)
+  }
+
   const runAndClose = (callback) => {
     setMenuOpen(false)
     callback()
@@ -61,13 +118,65 @@ function AppHeader({
 
   return (
     <header className="relative z-30 flex h-12 shrink-0 items-center justify-between border-b border-border/70 bg-background/80 px-3 backdrop-blur-xl">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-sm shadow-primary/25">
           <Sparkles className="h-4 w-4" />
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold leading-none tracking-tight">HeraAi</p>
-          <p className="mt-1 text-[11px] leading-none text-muted-foreground">{t('chat.assistant_label')}</p>
+        <div className="min-w-0 flex-1">
+          {isEditingTitle ? (
+            <div className="min-w-0">
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={titleDraft}
+                maxLength={MAX_SESSION_TITLE_LENGTH}
+                aria-label={t('chat.session_title.input_label')}
+                aria-invalid={titleError}
+                aria-describedby={titleError ? 'header-session-title-error' : undefined}
+                onChange={(event) => {
+                  setTitleDraft(event.target.value)
+                  if (titleError) setTitleError(false)
+                }}
+                onBlur={() => saveTitle()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    saveTitle({ keepOpenOnInvalid: true, restoreFocus: true })
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault()
+                    cancelEditingTitle({ restoreFocus: true })
+                  }
+                }}
+                className={`h-6 w-full rounded-md border bg-background px-1.5 text-sm font-semibold leading-none tracking-tight outline-none transition-colors focus:ring-2 focus:ring-ring/40 ${
+                  titleError ? 'border-destructive' : 'border-primary/40'
+                }`}
+              />
+              {titleError && (
+                <span id="header-session-title-error" className="sr-only">
+                  {t('chat.session_title.empty_error')}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex min-w-0 items-center gap-1">
+              <p className="truncate text-sm font-semibold leading-none tracking-tight" title={displayedTitle}>
+                {displayedTitle}
+              </p>
+              <button
+                ref={renameTriggerRef}
+                type="button"
+                onClick={startEditingTitle}
+                title={t('chat.tooltips.rename_session')}
+                aria-label={t('chat.tooltips.rename_session')}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          <p className="mt-1 truncate text-[11px] leading-none text-muted-foreground">
+            HeraAi · {t('chat.assistant_label')}
+          </p>
         </div>
       </div>
 
