@@ -4,7 +4,6 @@ export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const MODELS = [
   'gemini-3.1-flash-lite',
   'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
   'gemini-3.6-flash',
 ]
 const GEMINI_API_VERSION = 'v1'
@@ -33,7 +32,7 @@ function createTimeoutError() {
 }
 
 function getGeminiRequestTimeoutMs(modelId) {
-  return modelId === 'gemini-3.5-flash' || modelId === 'gemini-3.6-flash'
+  return modelId === 'gemini-3.6-flash'
     ? GEMINI_REASONING_REQUEST_TIMEOUT_MS
     : GEMINI_DEFAULT_REQUEST_TIMEOUT_MS
 }

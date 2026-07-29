@@ -48,7 +48,6 @@ const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
-  'gemini-3.5-flash': 'Gemini 3.5 Flash',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
 }
@@ -1753,11 +1752,17 @@ function App() {
       const translate = i18n.getFixedT(config.language)
       setAppConfig(config)
       applyTheme(config.theme, config.customPrimaryColor)
-      setSelectedModel(
-        result.selectedModel && MODELS.includes(result.selectedModel)
-          ? result.selectedModel
-          : DEFAULT_MODEL
-      )
+      const resolvedSelectedModel = result.selectedModel && MODELS.includes(result.selectedModel)
+        ? result.selectedModel
+        : DEFAULT_MODEL
+      setSelectedModel(resolvedSelectedModel)
+      if (result.selectedModel && result.selectedModel !== resolvedSelectedModel) {
+        try {
+          await chrome.storage.local.set({ selectedModel: resolvedSelectedModel })
+        } catch (error) {
+          console.error('Invalid stored model cleanup failed', error)
+        }
+      }
 
       const welcomeMessages = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: translate('chat.welcome') }]
       // Do not repair transient assistant states until GET_STATE has supplied the

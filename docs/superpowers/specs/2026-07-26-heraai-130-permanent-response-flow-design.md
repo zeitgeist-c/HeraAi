@@ -121,7 +121,7 @@ Panel ↔ SW ↔ Offscreen: `HERA_GENERATION_START | CANCEL | GET_STATE | STATE 
   "completedAt": null,
   "streamCompletedAt": null,
   "mode": "chat|vision|web",
-  "model": "gemini-3.5-flash",
+  "model": "gemini-3.6-flash",
   "language": "tr",
   "status": "queued|running|completed|cancelled|error|interrupted",
   "revision": 7,

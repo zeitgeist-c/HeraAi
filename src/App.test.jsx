@@ -27,7 +27,6 @@ vi.mock('./lib/api', () => ({
   MODELS: [
     'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
     'gemini-3.6-flash',
   ],
   DEFAULT_MODEL: 'gemini-3.1-flash-lite',
@@ -2173,7 +2172,7 @@ describe('HeraAi App', () => {
 
   it('calls testKey once per saved Gemini key when clicking Test All', async () => {
     api.testKey.mockResolvedValue({ success: true, provider: 'gemini' });
-    currentStorage.selectedModel = 'gemini-3.5-flash';
+    currentStorage.selectedModel = 'gemini-3.6-flash';
 
     currentStorage.geminiApiKeys = [
       { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
@@ -2200,13 +2199,13 @@ describe('HeraAi App', () => {
       1,
       'gemini',
       'AIza-aaaaaaaaaaaaa-key1',
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     );
     expect(api.testKey).toHaveBeenNthCalledWith(
       2,
       'gemini',
       'AIza-bbbbbbbbbbbbbb-key2',
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     );
   });
 
@@ -2262,7 +2261,7 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders the model selector below the composer with the 4 supported model ids', async () => {
+  it('renders the model selector below the composer with the 3 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2275,7 +2274,6 @@ describe('HeraAi App', () => {
     expect(optionValues).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
     ]);
   });
@@ -2296,18 +2294,18 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const modelSelect = document.querySelector('select[data-testid="model-selector"]');
-    fireEvent.change(modelSelect, { target: { value: 'gemini-3.5-flash' } });
+    fireEvent.change(modelSelect, { target: { value: 'gemini-3.6-flash' } });
 
-    expect(modelSelect.value).toBe('gemini-3.5-flash');
+    expect(modelSelect.value).toBe('gemini-3.6-flash');
 
     const input = document.querySelector('textarea') || screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'hello with custom model' } });
     fireEvent.click(getSendButton());
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
-    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.5-flash');
+    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.6-flash');
 
-    expect(currentStorage.selectedModel).toBe('gemini-3.5-flash');
+    expect(currentStorage.selectedModel).toBe('gemini-3.6-flash');
   });
 
   it('retries the same question with a one-off model without changing the composer model', async () => {
@@ -2334,7 +2332,6 @@ describe('HeraAi App', () => {
     expect(Array.from(retryDialog.querySelectorAll('[data-retry-model]')).map(button => button.dataset.retryModel)).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));

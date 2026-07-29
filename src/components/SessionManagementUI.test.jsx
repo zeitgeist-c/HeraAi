@@ -98,6 +98,18 @@ describe('session management UI', () => {
     expect(screen.getByRole('button', { name: 'Rename chat' })).not.toHaveFocus()
   })
 
+  it('shows Import Chat immediately above Export Chat in the header menu', () => {
+    render(<AppHeader {...headerProps} activeSessionTitle="Current chat" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }))
+    const menuItems = screen.getAllByRole('menuitem').map(item => item.textContent)
+    const importIndex = menuItems.indexOf('Import Chat')
+    const exportIndex = menuItems.indexOf('Export Chat')
+
+    expect(importIndex).toBeGreaterThanOrEqual(0)
+    expect(exportIndex).toBe(importIndex + 1)
+  })
+
   it('groups sessions, orders them by recency, and exposes sibling row actions', async () => {
     const onRename = vi.fn()
     const onToggleStar = vi.fn()

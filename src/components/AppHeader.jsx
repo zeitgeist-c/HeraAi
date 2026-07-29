@@ -109,7 +109,6 @@ function AppHeader({
   }
 
   const menuItems = [
-    { label: t('chat.tooltips.history'), icon: History, action: onHistory },
     { label: t('chat.tooltips.export'), icon: Download, action: onExport },
     { label: t('chat.tooltips.statistics'), icon: BarChart3, action: onStats },
     { label: t('chat.tooltips.shortcuts'), icon: Keyboard, action: onShortcuts },
@@ -210,6 +209,26 @@ function AppHeader({
               aria-label={t('chat.tooltips.more')}
               className="hera-menu absolute right-0 top-10 w-56 overflow-hidden rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/10"
             >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runAndClose(onHistory)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors hover:bg-secondary"
+              >
+                <History className="h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 truncate">{t('chat.tooltips.history')}</span>
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => importInputRef.current?.click()}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors hover:bg-secondary"
+              >
+                <Upload className="h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 truncate">{t('chat.tooltips.import')}</span>
+              </button>
+
               {menuItems.map(({ label, icon: Icon, action }) => (
                 <button
                   key={label}
@@ -223,15 +242,6 @@ function AppHeader({
                 </button>
               ))}
 
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => importInputRef.current?.click()}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors hover:bg-secondary"
-              >
-                <Upload className="h-4 w-4 text-muted-foreground" />
-                <span className="flex-1 truncate">{t('chat.tooltips.import')}</span>
-              </button>
               <input
                 ref={importInputRef}
                 type="file"
