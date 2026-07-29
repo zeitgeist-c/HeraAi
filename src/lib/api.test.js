@@ -259,17 +259,17 @@ describe('testKey (Gemini)', () => {
   it('tests the selected Gemini model instead of silently testing the default model', async () => {
     mocks.generateContentMock.mockResolvedValue({})
 
-    await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+    await testKey('gemini', 'AIza-model-key', 'gemini-3.6-flash')
 
-    expect(mocks.generateContentMock.mock.calls[0][0].model).toBe('gemini-3.5-flash')
+    expect(mocks.generateContentMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
   })
 
   it('reports selected-model access failures without calling the key invalid', async () => {
     mocks.generateContentMock.mockRejectedValue(
-      Object.assign(new Error('models/gemini-3.5-flash is not found for API version v1'), { status: 404 })
+      Object.assign(new Error('models/gemini-3.6-flash is not found for API version v1'), { status: 404 })
     )
 
-    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.6-flash')
 
     expect(result).toEqual({
       success: false,
@@ -283,7 +283,7 @@ describe('testKey (Gemini)', () => {
       Object.assign(new Error('PERMISSION_DENIED for selected model'), { status: 403 })
     )
 
-    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.5-flash')
+    const result = await testKey('gemini', 'AIza-model-key', 'gemini-3.6-flash')
 
     expect(result.errorType).toBe('permission_denied')
   })
@@ -293,7 +293,7 @@ describe('testKey (Gemini)', () => {
       Object.assign(new Error('FAILED_PRECONDITION: billing must be enabled'), { status: 403 })
     )
 
-    const result = await testKey('gemini', 'AIza-billing-key', 'gemini-3.5-flash')
+    const result = await testKey('gemini', 'AIza-billing-key', 'gemini-3.6-flash')
 
     expect(result.errorType).toBe('billing_required')
   })
@@ -439,7 +439,7 @@ describe('streamChat fallback', () => {
 
   it('does not mark the key invalid for a model-scoped 403 permission error', async () => {
     mocks.generateContentStreamMock.mockRejectedValueOnce(
-      Object.assign(new Error('PERMISSION_DENIED for gemini-3.5-flash'), { status: 403 })
+      Object.assign(new Error('PERMISSION_DENIED for gemini-3.6-flash'), { status: 403 })
     )
 
     const events = await collectEvents(streamChat(
@@ -447,7 +447,7 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-permission-key' }],
       undefined,
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     ))
 
     expect(events.some(event => event.event === 'key_status')).toBe(false)
@@ -459,7 +459,7 @@ describe('streamChat fallback', () => {
 
   it('reports a 404 as model_unavailable and does not retry it as a network failure', async () => {
     mocks.generateContentStreamMock.mockRejectedValueOnce(
-      Object.assign(new Error('NOT_FOUND: models/gemini-3.5-flash is not found'), { status: 404 })
+      Object.assign(new Error('NOT_FOUND: models/gemini-3.6-flash is not found'), { status: 404 })
     )
 
     const events = await collectEvents(streamChat(
@@ -467,7 +467,7 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-model-key-aaaaaaaa' }],
       undefined,
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     ))
 
     expect(events).toContainEqual(expect.objectContaining({
@@ -488,7 +488,7 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-service-key-aaaaaa' }],
       undefined,
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     ))
 
     expect(events).toContainEqual(expect.objectContaining({
@@ -498,7 +498,7 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
-  it('reports the 3.5 Flash 120-second startup deadline as timeout without a second request', async () => {
+  it('reports the 3.6 Flash 120-second startup deadline as timeout without a second request', async () => {
     vi.useFakeTimers()
     try {
       let requestSignal
@@ -512,7 +512,7 @@ describe('streamChat fallback', () => {
         {},
         [{ id: 'g1', key: 'AIza-slow-key-aaaaaaaaa' }],
         undefined,
-        'gemini-3.5-flash',
+        'gemini-3.6-flash',
       ))
 
       await vi.advanceTimersByTimeAsync(120000)
@@ -538,7 +538,7 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-sdk-timeout-key' }],
       undefined,
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     ))
 
     expect(events).toContainEqual(expect.objectContaining({
@@ -572,12 +572,11 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 4 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 3 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
     ])
   })
@@ -588,10 +587,10 @@ describe('model selection', () => {
       {},
       [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
       undefined,
-      'gemini-3.5-flash',
+      'gemini-3.6-flash',
     ))
 
-    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.5-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
     expect(mocks.clientOptionsMock).toHaveBeenCalledWith({
       apiKey: 'AIza-key-aaaaaaaaaaaa',
       httpOptions: {
@@ -628,9 +627,9 @@ describe('model selection', () => {
     mocks.generateContentMock.mockResolvedValue({})
 
     await testKey('gemini', 'AIza-valid-key-12345abcde')
-    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.5-flash')
+    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.6-flash')
 
     expect(mocks.generateContentMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
-    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.5-flash')
+    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.6-flash')
   })
 })
