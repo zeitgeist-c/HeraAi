@@ -56,6 +56,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
 
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
   const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
+  const [showSources, setShowSources] = useState(currentConfig?.showSources === true)
 
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
@@ -195,6 +196,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       systemInstruction,
       customPrimaryColor,
       language: selectedLanguage,
+      showSources,
     }
 
     chrome.storage.local.set({ ...newConfig, apiProvider: 'google' }, () => {
@@ -437,6 +439,29 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                     <option key={lang.code} value={lang.code}>{lang.flag} {lang.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
+                <div className="min-w-0">
+                  <span className="block text-xs font-semibold text-foreground">
+                    {t('setup.general.sources_title')}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
+                    {t('setup.general.sources_description')}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showSources}
+                  aria-label={t('setup.general.sources_title')}
+                  onClick={() => setShowSources(value => !value)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${showSources ? 'bg-primary' : 'bg-muted'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${showSources ? 'translate-x-5' : 'translate-x-0.5'}`}
+                  />
+                </button>
               </div>
 
               <div className="flex flex-col gap-3">
