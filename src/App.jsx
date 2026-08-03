@@ -1725,6 +1725,7 @@ function App() {
           'activeGeneration',
           'customPrimaryColor',
           'language',
+          'showSources',
           'selectedText',
           'selectedModel',
         ])
@@ -1739,6 +1740,7 @@ function App() {
         systemInstruction: result.systemInstruction || '',
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
         language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
+        showSources: result.showSources === true,
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
       if (currentLanguage !== config.language) {
@@ -3308,6 +3310,7 @@ function App() {
                   modelLabels={MODEL_LABELS}
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
+                  showSources={appConfig.showSources}
                 />
               )
             })}

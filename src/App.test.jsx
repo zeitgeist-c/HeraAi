@@ -1673,6 +1673,7 @@ describe('HeraAi App', () => {
   });
 
   it('should render web research sources as clickable source cards', async () => {
+    currentStorage.showSources = true;
     api.streamResearch.mockImplementationOnce(() => mockStream([
       { event: 'chunk', data: { text: 'Answer with sources' } },
       {
@@ -1699,6 +1700,42 @@ describe('HeraAi App', () => {
     expect(await screen.findByText('Answer with sources')).toBeInTheDocument();
     const sourceLink = await screen.findByText('Source One');
     expect(sourceLink.closest('a')).toHaveAttribute('href', 'https://example.com/source-one');
+  });
+
+  it('keeps source data hidden by default and shows existing source cards after saving the setting', async () => {
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Answer with citation [1]' } },
+      {
+        event: 'sources',
+        data: {
+          sources: [
+            { index: 1, title: 'Hidden Source', url: 'https://example.com/hidden-source' },
+          ],
+        },
+      },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
+    fireEvent.click(webButton);
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'research privately' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Answer with citation [1]')).toBeInTheDocument();
+    expect(screen.queryByText('Hidden Source')).not.toBeInTheDocument();
+
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /Show Sources|Kaynakları Göster/i }));
+    fireEvent.click(Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-save')));
+
+    const sourceLink = await screen.findByText('Hidden Source');
+    expect(sourceLink.closest('a')).toHaveAttribute('href', 'https://example.com/hidden-source');
+    expect(currentStorage.showSources).toBe(true);
+    expect(screen.getByText('Answer with citation [1]')).toBeInTheDocument();
+    expect(api.streamResearch).toHaveBeenCalledTimes(1);
   });
 
   it('should pass previous conversation context into web research requests', async () => {

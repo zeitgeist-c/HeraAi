@@ -72,7 +72,9 @@
             "startup_new": "Start New Chat Every Time",
             "language_title": "Language",
             "accent_color": "Accent Color",
-            "custom_accent_color": "Custom accent color"
+            "custom_accent_color": "Custom accent color",
+            "sources_title": "Show Sources",
+            "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged."
         },
         "ai": {
             "temp_title": "Creativity Level (Temperature)",

@@ -72,7 +72,9 @@
             "startup_new": "Her Seferinde Yeni Sohbet Başlat",
             "language_title": "Dil",
             "accent_color": "Vurgu Rengi",
-            "custom_accent_color": "Özel vurgu rengi"
+            "custom_accent_color": "Özel vurgu rengi",
+            "sources_title": "Kaynakları Göster",
+            "sources_description": "Araştırma yanıtlarının altında tıklanabilir kaynak kartlarını gösterir. Yanıttaki atıf işaretleri değişmez."
         },
         "ai": {
             "temp_title": "Yaratıcılık Seviyesi (Temperature)",

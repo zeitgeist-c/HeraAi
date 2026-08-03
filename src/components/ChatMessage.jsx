@@ -79,6 +79,7 @@ const ChatMessage = ({
   modelLabels = {},
   currentModel,
   retryDisabled = false,
+  showSources = false,
 }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
@@ -368,7 +369,7 @@ const ChatMessage = ({
         <span className="mt-1 block text-[11px] text-amber-500">{t('chat.status.interrupted')}</span>
       )}
 
-      {sources.length > 0 && (
+      {showSources && sources.length > 0 && (
         <div className="mt-3">
           <span className="mb-1.5 block text-[11px] font-semibold text-muted-foreground">{t('chat.sources_label')}</span>
           <div className="flex flex-wrap gap-1.5">
@@ -425,6 +426,7 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.attachments === nextMessage.attachments &&
     prevProps.currentModel === nextProps.currentModel &&
     prevProps.retryDisabled === nextProps.retryDisabled &&
+    prevProps.showSources === nextProps.showSources &&
     prevProps.retryModels === nextProps.retryModels &&
     prevProps.modelLabels === nextProps.modelLabels &&
     prevProps.onEdit === nextProps.onEdit &&
