@@ -2384,7 +2384,55 @@ describe('HeraAi App', () => {
     expect(startMessages.at(-1).model).toBe('gemini-3.5-flash-lite');
     expect(document.querySelector('select[data-testid="model-selector"]').value).toBe('gemini-3.1-flash-lite');
     expect(currentStorage.selectedModel).toBe('gemini-3.1-flash-lite');
-    expect(screen.queryByText('Answer from 3.1')).not.toBeInTheDocument();
+    expect(screen.getByText('Answer from 3.1')).toBeInTheDocument();
+    expect(screen.getAllByTestId('user-message').filter(element => (
+      element.textContent.includes('Compare this question')
+    ))).toHaveLength(2);
+  });
+
+  it('keeps the full visible conversation when retrying an older answer', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'preserved-retry-session',
+      sessions: [{
+        id: 'preserved-retry-session',
+        title: 'Preserved retry',
+        updatedAt: Date.now(),
+        messages: [
+          { id: 'first-user', role: 'user', content: 'First question', mode: 'chat' },
+          { id: 'first-answer', userMessageId: 'first-user', role: 'model', content: 'First old answer', status: 'done', sources: [] },
+          { id: 'later-user', role: 'user', content: 'Later question', mode: 'chat' },
+          { id: 'later-answer', userMessageId: 'later-user', role: 'model', content: 'Later answer', status: 'done', sources: [] },
+        ],
+      }],
+    };
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'First retried answer' } },
+    ]));
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('First old answer');
+    const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
+    fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+
+    expect(await screen.findByText('First retried answer')).toBeInTheDocument();
+    expect(screen.getByText('First old answer')).toBeInTheDocument();
+    expect(screen.getByText('Later question')).toBeInTheDocument();
+    expect(screen.getByText('Later answer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('user-message').filter(element => (
+      element.textContent.includes('First question')
+    ))).toHaveLength(2);
+    expect(api.streamChat.mock.calls[0][0].map(message => message.content)).toEqual(['First question']);
+    expect(currentStorage.sessions[0].messages.map(message => message.content)).toEqual([
+      'First question',
+      'First old answer',
+      'Later question',
+      'Later answer',
+      'First question',
+      'First retried answer',
+    ]);
   });
 
   it('preserves the original web mode when retrying an older research answer', async () => {
@@ -2471,12 +2519,13 @@ describe('HeraAi App', () => {
     expect(api.streamChat).not.toHaveBeenCalled();
     expect(api.streamVision.mock.calls[0][0]).toEqual([
       expect.objectContaining({
-        id: 'vision-user',
+        id: expect.any(String),
         role: 'user',
         content: 'Hidden OCR retry instruction',
         displayContent: '',
         mode: 'vision',
         attachments: [attachment],
+        retryOfMessageId: 'vision-user',
       }),
     ]);
     expect(screen.queryByText('Hidden OCR retry instruction')).not.toBeInTheDocument();
@@ -2528,10 +2577,11 @@ describe('HeraAi App', () => {
     expect(api.streamVision).not.toHaveBeenCalled();
     expect(api.streamChat.mock.calls[0][0]).toEqual([
       expect.objectContaining({
-        id: 'legacy-user',
+        id: expect.any(String),
         content: 'Older text question',
         attachments: [],
         mode: 'chat',
+        retryOfMessageId: 'legacy-user',
       }),
     ]);
     expect(composer).toHaveValue('Unsent draft');

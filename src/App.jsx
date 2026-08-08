@@ -2625,13 +2625,20 @@ function App() {
     }))
 
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')
-    const userMessageId = retryUserMessage?.id || createUniqueMessageId(msgIdCounter)
+    const userMessageId = createUniqueMessageId(msgIdCounter)
     const assistantMessageId = createUniqueMessageId(msgIdCounter)
     const requestId = `${Date.now()}-${assistantMessageId}`
     const jobId = requestId
     const startedAt = Date.now()
     const userMsg = retryUserMessage
-      ? { ...retryUserMessage, content: userText, attachments: messageAttachments, mode }
+      ? {
+          ...retryUserMessage,
+          id: userMessageId,
+          content: userText,
+          attachments: messageAttachments,
+          mode,
+          retryOfMessageId: retryUserMessage.id,
+        }
       : createUserMessage({
           id: userMessageId,
           content: userText,
@@ -2655,7 +2662,9 @@ function App() {
     )
     const requestMessages = [...baseMessages, userMsg]
     const requestSessionId = activeSessionIdRef.current
-    const optimisticMessages = [...baseMessages, userMsg, assistantMsg]
+    const optimisticMessages = retryUserMessage
+      ? [...messagesRef.current, userMsg, assistantMsg]
+      : [...baseMessages, userMsg, assistantMsg]
     const requestSession = sessionsRef.current.find(session => session?.id === requestSessionId)
     const sessionTitle = resolveSessionTitle(requestSession, optimisticMessages)
     const generation = {
