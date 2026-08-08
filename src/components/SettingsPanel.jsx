@@ -456,10 +456,16 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                   aria-checked={showSources}
                   aria-label={t('setup.general.sources_title')}
                   onClick={() => setShowSources(value => !value)}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${showSources ? 'bg-primary' : 'bg-muted'}`}
+                  className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                    showSources
+                      ? 'border-primary bg-primary'
+                      : 'border-border bg-muted/80'
+                  }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${showSources ? 'translate-x-5' : 'translate-x-0.5'}`}
+                    className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ${
+                      showSources ? 'translate-x-5' : 'translate-x-0'
+                    }`}
                   />
                 </button>
               </div>
