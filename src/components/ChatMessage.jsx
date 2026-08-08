@@ -265,7 +265,7 @@ const ChatMessage = ({
 
   if (!isBot) {
     return (
-      <article className="group flex w-full justify-end">
+      <article data-testid="user-message" className="group flex w-full justify-end">
         <div className="max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm">
           {visibleContent && (
             <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
