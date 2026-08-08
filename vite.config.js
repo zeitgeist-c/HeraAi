@@ -19,6 +19,10 @@ export default defineConfig({
     format: 'es',
   },
   build: {
+    // Chrome extension pages do not need Vite's modulepreload polyfill. The
+    // generated preload link is treated as a cross-world resource mismatch in
+    // offscreen documents and is reported as an extension error by Chrome.
+    modulePreload: false,
     rollupOptions: {
       input: {
         app: resolve(projectRoot, 'index.html'),
