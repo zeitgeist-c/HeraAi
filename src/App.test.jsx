@@ -4148,7 +4148,6 @@ describe('HeraAi App', () => {
   });
 
   it('records dictation, appends the transcript, and never sends it automatically', async () => {
-    currentStorage.dictationEnabled = true;
     currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
     const tracks = [{ stop: vi.fn() }];
     Object.defineProperty(navigator, 'permissions', {
@@ -4189,7 +4188,6 @@ describe('HeraAi App', () => {
   });
 
   it('cancels a pending microphone request when the permission window closes', async () => {
-    currentStorage.dictationEnabled = true;
     currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
     let removedListener;
     Object.defineProperty(navigator, 'permissions', {
@@ -4217,7 +4215,6 @@ describe('HeraAi App', () => {
   });
 
   it('reads a completed assistant message with one Web Audio source', async () => {
-    currentStorage.readAloudEnabled = true;
     currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
     currentStorage.sessions = [{
       id: 'speech-session',
@@ -4250,19 +4247,15 @@ describe('HeraAi App', () => {
     expect(voiceApi.generateSpeech.mock.calls[0][0].text).toBe('Read this answer');
   });
 
-  it('persists the two voice feature settings independently', async () => {
+  it('keeps voice tools available without settings switches', async () => {
     await i18n.changeLanguage('en');
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Voice Input' })).toBeInTheDocument();
     openSettingsPanel();
     fireEvent.click(screen.getByRole('button', { name: /General Settings/i }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Gemini Dictation' }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Gemini Read Aloud (Preview)' }));
-    fireEvent.click(Array.from(document.querySelectorAll('button')).find(button => button.querySelector('svg.lucide-save')));
-
-    await waitFor(() => {
-      expect(currentStorage.dictationEnabled).toBe(true);
-      expect(currentStorage.readAloudEnabled).toBe(true);
-    });
+    expect(screen.queryByRole('switch', { name: 'Gemini Dictation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Gemini Read Aloud (Preview)' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Voice features use your Gemini API key/i)).toBeInTheDocument();
   });
 });

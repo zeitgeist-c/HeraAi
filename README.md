@@ -43,7 +43,7 @@ To create a single distributable file for sharing:
 npm run package
 ```
 
-This creates `release/HeraAi-extension.zip`. Share that zip with the target machine, then unzip it and load the unpacked `dist/` folder in Chrome.
+This creates `release/HeraAi-<version>.zip` using the version from `manifest.json`. Share that zip with the target machine, then unzip it and load the unpacked extension folder in Chrome.
 
 ## API Keys
 
