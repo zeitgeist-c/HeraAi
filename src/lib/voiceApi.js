@@ -4,6 +4,7 @@ import { base64ToBytes } from './audioUtils'
 
 export const DICTATION_MODEL = 'gemini-3.1-flash-lite'
 export const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
+export const TTS_FALLBACK_MODEL = 'gemini-2.5-flash-preview-tts'
 export const TTS_VOICE = 'Kore'
 const REQUEST_TIMEOUT_MS = 60000
 
@@ -124,32 +125,65 @@ export async function transcribeAudio({ wavBase64, keys, signal, onKeyStatus }) 
   return String(response?.text || '').trim()
 }
 
-export async function generateSpeech({ text, keys, signal, onKeyStatus }) {
+export async function generateSpeech({ text, keys, signal, onKeyStatus, preferredModel = TTS_MODEL }) {
   if (!String(text || '').trim()) throw new VoiceApiError('empty_text')
-  const response = await runAcrossKeys({
-    keys,
-    apiVersion: 'v1beta',
-    signal,
-    onKeyStatus,
-    retryServerError: true,
-    request: (client, requestSignal) => client.models.generateContent({
-      model: TTS_MODEL,
-      contents: [{ parts: [{ text: `Synthesize speech for the transcript below. Read the transcript naturally and do not read these instructions aloud.\n\nTRANSCRIPT:\n${text}` }] }],
-      config: {
-        abortSignal: requestSignal,
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: TTS_VOICE },
-          },
-        },
-      },
-    }),
-  })
+  const entries = usableKeys(keys)
+  if (!entries.length) throw new VoiceApiError('api_key_missing')
+  const models = preferredModel === TTS_FALLBACK_MODEL
+    ? [TTS_FALLBACK_MODEL]
+    : [TTS_MODEL, TTS_FALLBACK_MODEL]
+  let lastError = null
+  let response = null
+  let usedModel = null
+
+  keyLoop: for (const entry of entries) {
+    const client = new GoogleGenAI({ apiKey: entry.key.trim(), httpOptions: { apiVersion: 'v1beta' } })
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          response = await runWithTimeout(requestSignal => client.models.generateContent({
+            model,
+            contents: [{ parts: [{ text: `Synthesize speech for the transcript below. Read the transcript naturally and do not read these instructions aloud.\n\nTRANSCRIPT:\n${text}` }] }],
+            config: {
+              abortSignal: requestSignal,
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: TTS_VOICE },
+                },
+              },
+            },
+          }), signal)
+          usedModel = model
+          onKeyStatus?.({ keyId: entry.id, status: 'success' })
+          break keyLoop
+        } catch (error) {
+          if (error?.name === 'AbortError') throw error
+          const code = classifyError(error)
+          lastError = new VoiceApiError(code, error)
+          if (code === 'service_unavailable' && attempt === 0) continue
+
+          const canUseFallbackModel = (
+            model === TTS_MODEL &&
+            ['rate_limited', 'quota_exceeded'].includes(code)
+          )
+          if (canUseFallbackModel) break
+
+          const keyStatus = keyStatusFor(code)
+          if (keyStatus) onKeyStatus?.({ keyId: entry.id, status: keyStatus })
+          const mayTryNextKey = ['rate_limited', 'quota_exceeded', 'api_key_invalid', 'permission_denied', 'network_error'].includes(code)
+          if (mayTryNextKey) continue keyLoop
+          throw lastError
+        }
+      }
+    }
+  }
+  if (!response || !usedModel) throw lastError || new VoiceApiError('generation_failed')
   const part = response?.candidates?.[0]?.content?.parts?.find(candidate => candidate?.inlineData?.data)
   if (!part?.inlineData?.data) throw new VoiceApiError('empty_audio_response')
   return {
     pcm: base64ToBytes(part.inlineData.data),
     sampleRate: 24000,
+    model: usedModel,
   }
 }

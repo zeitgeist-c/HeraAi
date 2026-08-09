@@ -2712,6 +2712,7 @@ function App() {
     setSpeechStatus({ messageId: message.id, phase: 'loading' })
     try {
       const chunks = splitSpeechText(speechText)
+      let preferredModel
       for (const chunk of chunks) {
         if (controller.signal.aborted || epoch !== speechEpochRef.current) return
         const result = await generateSpeech({
@@ -2719,7 +2720,9 @@ function App() {
           keys: resolution.keys,
           signal: controller.signal,
           onKeyStatus: reportVoiceKeyStatus,
+          preferredModel,
         })
+        preferredModel = result.model || preferredModel
         if (controller.signal.aborted || epoch !== speechEpochRef.current) return
         setSpeechStatus({ messageId: message.id, phase: 'playing' })
         await playPcm(result.pcm, result.sampleRate, epoch)
