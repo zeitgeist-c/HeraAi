@@ -74,7 +74,12 @@
             "accent_color": "Accent Color",
             "custom_accent_color": "Custom accent color",
             "sources_title": "Show Sources",
-            "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged."
+            "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged.",
+            "dictation_title": "Gemini Dictation",
+            "dictation_description": "Record up to 60 seconds and append the Gemini transcript to the message draft.",
+            "read_aloud_title": "Gemini Read Aloud (Preview)",
+            "read_aloud_description": "Add read and stop controls to completed AI responses using the Kore voice.",
+            "voice_api_notice": "Voice features use your Gemini API key and may incur API usage. Audio is processed in memory and is not saved."
         },
         "ai": {
             "temp_title": "Creativity Level (Temperature)",
@@ -174,7 +179,13 @@
             "retry": "Regenerate response",
             "retry_short": "Try again",
             "stop": "Stop",
-            "model_selector": "AI Model"
+            "model_selector": "AI Model",
+            "transcribing": "Transcribing...",
+            "requesting_microphone": "Waiting for microphone permission...",
+            "cancel_transcription": "Cancel transcription",
+            "read_aloud": "Read aloud",
+            "preparing_speech": "Preparing audio...",
+            "stop_speech": "Stop reading"
         },
         "retry_model": {
             "title": "Try again with a model",
@@ -198,6 +209,12 @@
         "import_error": "Failed to import",
         "voice_started": "Voice input started...",
         "voice_error": "Voice input is not supported in this browser",
+        "voice_empty": "No intelligible speech was detected.",
+        "voice_permission_denied": "Microphone permission was not granted.",
+        "voice_failed": "The recording could not be transcribed.",
+        "speech_failed": "This response could not be read aloud.",
+        "speech_too_long": "This response is too long to read aloud safely.",
+        "code_block_skipped": "Code block skipped.",
         "new_messages": "New messages",
         "all_keys_cooldown": "All API keys are waiting after rate limits. Earliest retry: {{time}}",
         "sources_label": "Sources",
@@ -269,6 +286,15 @@
         "mic": "Mic",
         "web": "Web",
         "coming_soon": "More shortcuts coming soon!"
+    },
+    "mic_permission": {
+        "title": "Allow microphone access",
+        "description": "HeraAi needs microphone access only when you start dictation. Recordings are not stored.",
+        "allow": "Allow microphone",
+        "requesting": "Waiting for Chrome...",
+        "granted": "Microphone access granted. You can return to HeraAi.",
+        "denied": "Access was denied. Allow the microphone for HeraAi in Chrome site settings, then try again.",
+        "unavailable": "No usable microphone was found. Check your device and Chrome settings."
     },
     "common": {
         "back": "Back"

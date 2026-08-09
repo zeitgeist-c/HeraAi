@@ -176,6 +176,41 @@ describe('ChatMessage copy actions', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('const answer = 42'))
   })
 
+  it('shows read aloud only for eligible assistant messages and forwards the message', () => {
+    const message = { id: 12, role: 'model', content: 'Read this answer', status: 'done' }
+    const onToggleSpeech = vi.fn()
+    const { rerender } = render(
+      <ChatMessage
+        message={message}
+        speechEnabled
+        speechStatus="idle"
+        onToggleSpeech={onToggleSpeech}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Read aloud|Sesli oku/i }))
+    expect(onToggleSpeech).toHaveBeenCalledWith(message)
+
+    rerender(
+      <ChatMessage
+        message={{ id: 13, role: 'user', content: 'User text' }}
+        speechEnabled
+        onToggleSpeech={onToggleSpeech}
+      />
+    )
+    expect(screen.queryByRole('button', { name: /Read aloud|Sesli oku/i })).not.toBeInTheDocument()
+  })
+
+  it('updates the memoized speech action to loading and playing states', () => {
+    const message = { id: 14, role: 'model', content: 'Audio state', status: 'done' }
+    const { rerender } = render(
+      <ChatMessage message={message} speechEnabled speechStatus="loading" />
+    )
+    expect(screen.getByRole('button', { name: /Preparing audio|Ses hazırlanıyor/i })).toHaveAttribute('aria-pressed', 'true')
+
+    rerender(<ChatMessage message={message} speechEnabled speechStatus="playing" />)
+    expect(screen.getByRole('button', { name: /Stop reading|Okumayı durdur/i })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('reports clipboard failures without showing a false success state', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const toastError = vi.spyOn(toast, 'error')

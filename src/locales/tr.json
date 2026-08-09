@@ -74,7 +74,12 @@
             "accent_color": "Vurgu Rengi",
             "custom_accent_color": "Özel vurgu rengi",
             "sources_title": "Kaynakları Göster",
-            "sources_description": "Araştırma yanıtlarının altında tıklanabilir kaynak kartlarını gösterir. Yanıttaki atıf işaretleri değişmez."
+            "sources_description": "Araştırma yanıtlarının altında tıklanabilir kaynak kartlarını gösterir. Yanıttaki atıf işaretleri değişmez.",
+            "dictation_title": "Gemini Dikte",
+            "dictation_description": "En fazla 60 saniye kaydedip Gemini transkriptini mesaj taslağının sonuna ekler.",
+            "read_aloud_title": "Gemini Sesli Okuma (Önizleme)",
+            "read_aloud_description": "Tamamlanmış AI yanıtlarına Kore sesiyle oku ve durdur kontrolleri ekler.",
+            "voice_api_notice": "Ses özellikleri Gemini API anahtarınızı kullanır ve API kullanımı oluşturabilir. Ses yalnız bellekte işlenir ve kaydedilmez."
         },
         "ai": {
             "temp_title": "Yaratıcılık Seviyesi (Temperature)",
@@ -174,7 +179,13 @@
             "retry": "Yeniden yanıt oluştur",
             "retry_short": "Yeniden dene",
             "stop": "Durdur",
-            "model_selector": "AI Modeli"
+            "model_selector": "AI Modeli",
+            "transcribing": "Metne dönüştürülüyor...",
+            "requesting_microphone": "Mikrofon izni bekleniyor...",
+            "cancel_transcription": "Dönüştürmeyi iptal et",
+            "read_aloud": "Sesli oku",
+            "preparing_speech": "Ses hazırlanıyor...",
+            "stop_speech": "Okumayı durdur"
         },
         "retry_model": {
             "title": "Model ile yeniden dene",
@@ -198,6 +209,12 @@
         "import_error": "İçe aktarma başarısız oldu",
         "voice_started": "Sesli giriş başladı...",
         "voice_error": "Sesli giriş bu tarayıcıda desteklenmiyor",
+        "voice_empty": "Anlaşılır bir konuşma algılanmadı.",
+        "voice_permission_denied": "Mikrofon izni verilmedi.",
+        "voice_failed": "Kayıt metne dönüştürülemedi.",
+        "speech_failed": "Bu yanıt sesli okunamadı.",
+        "speech_too_long": "Bu yanıt güvenli biçimde sesli okumak için çok uzun.",
+        "code_block_skipped": "Kod bloğu atlandı.",
         "new_messages": "Yeni mesajlar",
         "all_keys_cooldown": "Tüm API anahtarları rate limit sonrası beklemede. En erken deneme: {{time}}",
         "sources_label": "Kaynaklar",
@@ -269,6 +286,15 @@
         "mic": "Mikrofon",
         "web": "Web",
         "coming_soon": "Yakında daha fazla kısayol!"
+    },
+    "mic_permission": {
+        "title": "Mikrofon erişimine izin verin",
+        "description": "HeraAi mikrofona yalnız dikteyi başlattığınızda erişir. Kayıtlar saklanmaz.",
+        "allow": "Mikrofona izin ver",
+        "requesting": "Chrome bekleniyor...",
+        "granted": "Mikrofon erişimi verildi. HeraAi'a dönebilirsiniz.",
+        "denied": "Erişim reddedildi. Chrome site ayarlarından HeraAi mikrofonuna izin verip yeniden deneyin.",
+        "unavailable": "Kullanılabilir mikrofon bulunamadı. Cihazınızı ve Chrome ayarlarını kontrol edin."
     },
     "common": {
         "back": "Geri"

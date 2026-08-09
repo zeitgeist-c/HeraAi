@@ -12,6 +12,7 @@ if (-not (Test-Path $distDir)) {
 $requiredFiles = @(
   (Join-Path $distDir 'manifest.json'),
   (Join-Path $distDir 'index.html'),
+  (Join-Path $distDir 'mic-permission.html'),
   (Join-Path $distDir 'offscreen.html'),
   (Join-Path $distDir 'service-worker-loader.js')
 )
