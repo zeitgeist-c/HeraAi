@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import App from './App';
 import * as api from './lib/api';
+import * as audioUtils from './lib/audioUtils';
+import * as voiceApi from './lib/voiceApi';
 import i18n from './i18n';
 
 Object.defineProperty(window, 'matchMedia', {
@@ -30,6 +32,19 @@ vi.mock('./lib/api', () => ({
     'gemini-3.6-flash',
   ],
   DEFAULT_MODEL: 'gemini-3.1-flash-lite',
+}));
+
+vi.mock('./lib/audioUtils', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    recordedBlobToWav: vi.fn().mockResolvedValue(new Uint8Array([82, 73, 70, 70])),
+  };
+});
+
+vi.mock('./lib/voiceApi', () => ({
+  generateSpeech: vi.fn(),
+  transcribeAudio: vi.fn(),
 }));
 
 async function* mockStream(events) {
@@ -390,6 +405,9 @@ describe('HeraAi App', () => {
     api.streamChat.mockImplementation(() => {
       return mockStream([{ event: 'chunk', data: { text: 'Hello from AI' } }]);
     });
+    audioUtils.recordedBlobToWav.mockResolvedValue(new Uint8Array([82, 73, 70, 70]));
+    voiceApi.transcribeAudio.mockResolvedValue('Voice transcript');
+    voiceApi.generateSpeech.mockResolvedValue({ pcm: new Uint8Array([0, 0]), sampleRate: 24000 });
   });
 
   afterEach(() => {
@@ -4127,5 +4145,124 @@ describe('HeraAi App', () => {
     expect(screen.getByText('New Chat')).toBeInTheDocument();
     expect(screen.queryByText('Old chat before empty import')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Bulk delete' })).toBeEnabled();
+  });
+
+  it('records dictation, appends the transcript, and never sends it automatically', async () => {
+    currentStorage.dictationEnabled = true;
+    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    class FakeMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['voice'], { type: this.mimeType }) });
+        this.onstop?.();
+      }
+    }
+    global.MediaRecorder = FakeMediaRecorder;
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const textarea = document.querySelector('textarea');
+    fireEvent.change(textarea, { target: { value: 'Existing draft' } });
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft\nVoice transcript'));
+    expect(voiceApi.transcribeAudio).toHaveBeenCalledTimes(1);
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => message?.type === 'HERA_GENERATION_START')).toBe(false);
+    expect(tracks[0].stop).toHaveBeenCalled();
+  });
+
+  it('cancels a pending microphone request when the permission window closes', async () => {
+    currentStorage.dictationEnabled = true;
+    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    let removedListener;
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'prompt' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    });
+    global.MediaRecorder = class PendingMediaRecorder {};
+    global.chrome.windows.create.mockResolvedValue({ id: 77 });
+    global.chrome.windows.onRemoved.addListener.mockImplementation(listener => { removedListener = listener; });
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(global.chrome.windows.create).toHaveBeenCalledTimes(1));
+    expect(global.chrome.windows.create.mock.calls[0][0].url).toMatch(/mic-permission\.html\?requestId=/);
+    act(() => removedListener(77));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(global.chrome.runtime.onMessage.removeListener).toHaveBeenCalled();
+  });
+
+  it('reads a completed assistant message with one Web Audio source', async () => {
+    currentStorage.readAloudEnabled = true;
+    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    currentStorage.sessions = [{
+      id: 'speech-session',
+      title: 'Speech',
+      messages: [{ id: 'speech-message', role: 'model', content: 'Read this answer', status: 'done' }],
+    }];
+    currentStorage.activeSessionId = 'speech-session';
+    const source = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      start: vi.fn(function start() { queueMicrotask(() => this.onended?.()); }),
+      stop: vi.fn(),
+      onended: null,
+    };
+    global.AudioContext = class FakeAudioContext {
+      constructor() { this.state = 'running'; this.destination = {}; }
+      resume = vi.fn().mockResolvedValue(undefined);
+      close = vi.fn().mockResolvedValue(undefined);
+      createBuffer = (_channels, length, sampleRate) => ({
+        sampleRate,
+        getChannelData: () => new Float32Array(length),
+      });
+      createBufferSource = () => source;
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Read aloud|Sesli oku/i }));
+    await waitFor(() => expect(voiceApi.generateSpeech).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(source.start).toHaveBeenCalledTimes(1));
+    expect(voiceApi.generateSpeech.mock.calls[0][0].text).toBe('Read this answer');
+  });
+
+  it('persists the two voice feature settings independently', async () => {
+    await i18n.changeLanguage('en');
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings/i }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Gemini Dictation' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Gemini Read Aloud (Preview)' }));
+    fireEvent.click(Array.from(document.querySelectorAll('button')).find(button => button.querySelector('svg.lucide-save')));
+
+    await waitFor(() => {
+      expect(currentStorage.dictationEnabled).toBe(true);
+      expect(currentStorage.readAloudEnabled).toBe(true);
+    });
   });
 });

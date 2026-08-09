@@ -26,6 +26,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         app: resolve(projectRoot, 'index.html'),
+        micPermission: resolve(projectRoot, 'mic-permission.html'),
         offscreen: resolve(projectRoot, 'offscreen.html'),
       },
     },

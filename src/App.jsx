@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,14 @@ import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
 import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
 import { MODELS, DEFAULT_MODEL } from './lib/api'
+import {
+  bytesToBase64,
+  createAudioBufferFromPcm16,
+  normalizeMarkdownForSpeech,
+  recordedBlobToWav,
+  splitSpeechText,
+  TTS_MAX_CHARS,
+} from './lib/audioUtils'
 import { fileToBase64 } from './lib/fileParsers'
 import { exportSessions, importSessions } from './lib/importExport'
 import {
@@ -25,6 +33,8 @@ import {
 } from './lib/messageDisplay'
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
+import { resolveKeysForRequest } from './lib/keyManager'
+import { generateSpeech, transcribeAudio } from './lib/voiceApi'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -46,6 +56,7 @@ const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
 const SESSION_TITLE_MAX_LENGTH = 80
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
+const DICTATION_MAX_DURATION_MS = 60000
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
@@ -398,6 +409,25 @@ function App() {
   const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
+  const [dictationPhase, setDictationPhase] = useState('idle')
+  const [dictationSeconds, setDictationSeconds] = useState(0)
+  const dictationPhaseRef = useRef('idle')
+  const dictationStreamRef = useRef(null)
+  const dictationRecorderRef = useRef(null)
+  const dictationChunksRef = useRef([])
+  const dictationKeysRef = useRef([])
+  const dictationShouldTranscribeRef = useRef(false)
+  const dictationTimerRef = useRef(null)
+  const dictationLimitRef = useRef(null)
+  const dictationAbortRef = useRef(null)
+  const dictationStartEpochRef = useRef(0)
+  const micPermissionCancelRef = useRef(null)
+  const [speechState, setSpeechState] = useState({ messageId: null, phase: 'idle' })
+  const speechStateRef = useRef({ messageId: null, phase: 'idle' })
+  const speechAbortRef = useRef(null)
+  const speechSourceRef = useRef(null)
+  const speechContextRef = useRef(null)
+  const speechEpochRef = useRef(0)
   const hasImageAttachment = attachments.some(att => (
     att?.mimeType?.startsWith('image/') && att?.data
   ))
@@ -1728,6 +1758,8 @@ function App() {
           'showSources',
           'selectedText',
           'selectedModel',
+          'dictationEnabled',
+          'readAloudEnabled',
         ])
       } catch (error) {
         console.error('Chrome storage initialization failed', error)
@@ -1741,6 +1773,8 @@ function App() {
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
         language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
         showSources: result.showSources === true,
+        dictationEnabled: result.dictationEnabled === true,
+        readAloudEnabled: result.readAloudEnabled === true,
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
       if (currentLanguage !== config.language) {
@@ -2592,7 +2626,350 @@ function App() {
     e.target.value = ''
   }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
 
+  const setSpeechStatus = useCallback((nextState) => {
+    speechStateRef.current = nextState
+    setSpeechState(nextState)
+  }, [])
+
+  const stopSpeech = useCallback(() => {
+    speechEpochRef.current += 1
+    speechAbortRef.current?.abort()
+    speechAbortRef.current = null
+    if (speechSourceRef.current) {
+      const source = speechSourceRef.current
+      speechSourceRef.current = null
+      try { source.stop() } catch (_error) { /* already stopped */ }
+    }
+    setSpeechStatus({ messageId: null, phase: 'idle' })
+  }, [setSpeechStatus])
+
+  const reportVoiceKeyStatus = useCallback(({ keyId, status }) => {
+    if (!keyId || !status || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return
+    try {
+      const request = chrome.runtime.sendMessage({ type: 'KEY_STATUS', provider: 'gemini', keyId, status })
+      request?.catch?.(() => undefined)
+    } catch (_error) {
+      // Key metadata is helpful but must never make a voice operation fail.
+    }
+  }, [])
+
+  const playPcm = useCallback((pcm, sampleRate, epoch) => new Promise((resolve, reject) => {
+    const context = speechContextRef.current
+    if (!context || epoch !== speechEpochRef.current) {
+      resolve()
+      return
+    }
+    try {
+      const source = context.createBufferSource()
+      source.buffer = createAudioBufferFromPcm16(context, pcm, sampleRate)
+      source.connect(context.destination)
+      speechSourceRef.current = source
+      source.onended = () => {
+        if (speechSourceRef.current === source) speechSourceRef.current = null
+        source.disconnect?.()
+        resolve()
+      }
+      source.start(0)
+    } catch (error) {
+      reject(error)
+    }
+  }), [])
+
+  const handleToggleSpeech = useCallback(async (message) => {
+    if (!message?.id || isGenerating || dictationPhaseRef.current !== 'idle') return
+    if (speechStateRef.current.messageId === message.id && speechStateRef.current.phase !== 'idle') {
+      stopSpeech()
+      return
+    }
+
+    stopSpeech()
+    const speechText = normalizeMarkdownForSpeech(message.content, t('chat.code_block_skipped'))
+    if (!speechText) return
+    if (speechText.length > TTS_MAX_CHARS) {
+      toast.error(t('chat.speech_too_long'))
+      return
+    }
+
+    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext
+    if (!AudioContextClass) {
+      toast.error(t('chat.speech_failed'))
+      return
+    }
+    if (!speechContextRef.current || speechContextRef.current.state === 'closed') {
+      speechContextRef.current = new AudioContextClass()
+    }
+    void speechContextRef.current.resume?.()
+
+    const resolution = await resolveKeysForRequest('gemini')
+    if (!resolution.keys.length) {
+      toast.error(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
+      return
+    }
+
+    const epoch = speechEpochRef.current
+    const controller = new AbortController()
+    speechAbortRef.current = controller
+    setSpeechStatus({ messageId: message.id, phase: 'loading' })
+    try {
+      const chunks = splitSpeechText(speechText)
+      for (const chunk of chunks) {
+        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
+        const result = await generateSpeech({
+          text: chunk,
+          keys: resolution.keys,
+          signal: controller.signal,
+          onKeyStatus: reportVoiceKeyStatus,
+        })
+        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
+        setSpeechStatus({ messageId: message.id, phase: 'playing' })
+        await playPcm(result.pcm, result.sampleRate, epoch)
+        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
+        setSpeechStatus({ messageId: message.id, phase: 'loading' })
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        console.error('Gemini speech generation failed', error)
+        toast.error(t('chat.speech_failed'))
+      }
+    } finally {
+      if (epoch === speechEpochRef.current) {
+        speechAbortRef.current = null
+        setSpeechStatus({ messageId: null, phase: 'idle' })
+      }
+    }
+  }, [isGenerating, playPcm, reportVoiceKeyStatus, setSpeechStatus, stopSpeech, t])
+
+  const clearDictationTimers = useCallback(() => {
+    if (dictationTimerRef.current != null) window.clearInterval(dictationTimerRef.current)
+    if (dictationLimitRef.current != null) window.clearTimeout(dictationLimitRef.current)
+    dictationTimerRef.current = null
+    dictationLimitRef.current = null
+  }, [])
+
+  const releaseDictationStream = useCallback(() => {
+    dictationStreamRef.current?.getTracks?.().forEach(track => track.stop())
+    dictationStreamRef.current = null
+  }, [])
+
+  const resetDictation = useCallback(() => {
+    clearDictationTimers()
+    releaseDictationStream()
+    dictationRecorderRef.current = null
+    dictationChunksRef.current = []
+    dictationShouldTranscribeRef.current = false
+    dictationPhaseRef.current = 'idle'
+    setDictationPhase('idle')
+    setDictationSeconds(0)
+  }, [clearDictationTimers, releaseDictationStream])
+
+  const processDictation = useCallback(async (blob) => {
+    dictationPhaseRef.current = 'transcribing'
+    setDictationPhase('transcribing')
+    const controller = new AbortController()
+    dictationAbortRef.current = controller
+    try {
+      const wav = await recordedBlobToWav(blob)
+      const transcript = await transcribeAudio({
+        wavBase64: bytesToBase64(wav),
+        keys: dictationKeysRef.current,
+        signal: controller.signal,
+        onKeyStatus: reportVoiceKeyStatus,
+      })
+      if (controller.signal.aborted) return
+      if (!transcript) {
+        toast.error(t('chat.voice_empty'))
+        return
+      }
+      setInput(current => appendToInputValue(current, transcript))
+      await updateStats('voice')
+      window.requestAnimationFrame(() => document.querySelector('textarea')?.focus())
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        console.error('Gemini dictation failed', error)
+        toast.error(t('chat.voice_failed'))
+      }
+    } finally {
+      if (dictationAbortRef.current === controller) dictationAbortRef.current = null
+      resetDictation()
+    }
+  }, [reportVoiceKeyStatus, resetDictation, t])
+
+  const stopDictationRecording = useCallback((shouldTranscribe = true) => {
+    const recorder = dictationRecorderRef.current
+    if (!recorder || recorder.state === 'inactive') return
+    dictationShouldTranscribeRef.current = shouldTranscribe
+    clearDictationTimers()
+    recorder.stop()
+    releaseDictationStream()
+  }, [clearDictationTimers, releaseDictationStream])
+
+  const cancelDictation = useCallback(() => {
+    dictationStartEpochRef.current += 1
+    micPermissionCancelRef.current?.()
+    micPermissionCancelRef.current = null
+    if (dictationPhaseRef.current === 'recording') {
+      stopDictationRecording(false)
+      return
+    }
+    dictationAbortRef.current?.abort()
+    resetDictation()
+  }, [resetDictation, stopDictationRecording])
+
+  const requestMicrophonePermission = useCallback(async () => {
+    try {
+      const permission = await navigator.permissions?.query?.({ name: 'microphone' })
+      if (permission?.state === 'granted') return true
+    } catch (_error) {
+      // Open the permission page when the Permissions API cannot report state.
+    }
+    if (!chrome?.windows?.create || !chrome.runtime?.onMessage) return false
+
+    const requestId = globalThis.crypto?.randomUUID?.() || `mic-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    return new Promise((resolve) => {
+      let permissionWindowId = null
+      let settled = false
+      const cleanup = () => {
+        chrome.runtime.onMessage.removeListener(handleMessage)
+        chrome.windows.onRemoved?.removeListener?.(handleWindowRemoved)
+        if (micPermissionCancelRef.current === cancelPermission) micPermissionCancelRef.current = null
+      }
+      const finish = (granted) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(granted)
+      }
+      const handleMessage = (message) => {
+        if (message?.type !== 'HERAAI_MIC_PERMISSION_RESULT' || message.requestId !== requestId) return false
+        finish(message.granted === true)
+        return false
+      }
+      const handleWindowRemoved = (windowId) => {
+        if (windowId === permissionWindowId) finish(false)
+      }
+      const cancelPermission = () => finish(false)
+      micPermissionCancelRef.current = cancelPermission
+      chrome.runtime.onMessage.addListener(handleMessage)
+      chrome.windows.onRemoved?.addListener?.(handleWindowRemoved)
+      Promise.resolve(chrome.windows.create({
+        url: chrome.runtime.getURL(`mic-permission.html?requestId=${encodeURIComponent(requestId)}`),
+        type: 'popup',
+        width: 420,
+        height: 360,
+      })).then(windowInfo => {
+        permissionWindowId = windowInfo?.id ?? null
+      }).catch(() => finish(false))
+    })
+  }, [])
+
+  const startDictation = useCallback(async () => {
+    if (isGenerating || dictationPhaseRef.current !== 'idle') return
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast.error(t('chat.voice_error'))
+      return
+    }
+    const resolution = await resolveKeysForRequest('gemini')
+    if (!resolution.keys.length) {
+      toast.error(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
+      return
+    }
+    stopSpeech()
+    const startEpoch = ++dictationStartEpochRef.current
+    dictationPhaseRef.current = 'requesting'
+    setDictationPhase('requesting')
+    if (!await requestMicrophonePermission()) {
+      if (startEpoch !== dictationStartEpochRef.current) return
+      resetDictation()
+      toast.error(t('chat.voice_permission_denied'))
+      return
+    }
+    if (startEpoch !== dictationStartEpochRef.current) return
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        video: false,
+      })
+      if (startEpoch !== dictationStartEpochRef.current) {
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
+      const preferredMime = MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : undefined
+      const recorder = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream)
+      dictationStreamRef.current = stream
+      dictationRecorderRef.current = recorder
+      dictationChunksRef.current = []
+      dictationKeysRef.current = resolution.keys
+      dictationShouldTranscribeRef.current = true
+      recorder.ondataavailable = event => {
+        if (event.data?.size) dictationChunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const shouldTranscribe = dictationShouldTranscribeRef.current
+        const blob = new Blob(dictationChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        if (shouldTranscribe && blob.size > 0) void processDictation(blob)
+        else resetDictation()
+      }
+      recorder.onerror = () => {
+        toast.error(t('chat.voice_failed'))
+        resetDictation()
+      }
+      recorder.start()
+      dictationPhaseRef.current = 'recording'
+      setDictationPhase('recording')
+      setDictationSeconds(0)
+      const startedAt = Date.now()
+      dictationTimerRef.current = window.setInterval(() => {
+        setDictationSeconds(Math.min(60, Math.floor((Date.now() - startedAt) / 1000)))
+      }, 250)
+      dictationLimitRef.current = window.setTimeout(() => stopDictationRecording(true), DICTATION_MAX_DURATION_MS)
+    } catch (error) {
+      console.error('Microphone recording failed', error)
+      releaseDictationStream()
+      resetDictation()
+      toast.error(error?.name === 'NotAllowedError' ? t('chat.voice_permission_denied') : t('chat.voice_error'))
+    }
+  }, [isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, stopSpeech, t])
+
+  const handleDictationToggle = useCallback(() => {
+    if (dictationPhaseRef.current === 'recording') stopDictationRecording(true)
+    else if (['requesting', 'transcribing'].includes(dictationPhaseRef.current)) cancelDictation()
+    else void startDictation()
+  }, [cancelDictation, startDictation, stopDictationRecording])
+
+  useEffect(() => {
+    if (isGenerating || !appConfig?.readAloudEnabled) stopSpeech()
+  }, [appConfig?.readAloudEnabled, isGenerating, stopSpeech])
+
+  useEffect(() => {
+    if (!appConfig?.dictationEnabled) cancelDictation()
+  }, [appConfig?.dictationEnabled, cancelDictation])
+
+  useEffect(() => {
+    const handleVoiceVisibility = () => {
+      if (document.visibilityState !== 'hidden') return
+      stopSpeech()
+      cancelDictation()
+    }
+    document.addEventListener('visibilitychange', handleVoiceVisibility)
+    window.addEventListener('pagehide', handleVoiceVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVoiceVisibility)
+      window.removeEventListener('pagehide', handleVoiceVisibility)
+      stopSpeech()
+      cancelDictation()
+      speechContextRef.current?.close?.()
+      speechContextRef.current = null
+    }
+  }, [cancelDictation, stopSpeech])
+
+  useEffect(() => {
+    stopSpeech()
+  }, [activeSessionId, stopSpeech])
+
   const handleSend = useCallback(async (directActionText = null, actionOptions = {}) => {
+    if (dictationPhaseRef.current !== 'idle') return
+    stopSpeech()
     const hasDirectActionText = typeof directActionText === 'string'
     const safeInput = typeof input === 'string' ? input : ''
     const userText = hasDirectActionText ? directActionText : safeInput.trim()
@@ -2850,7 +3227,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+  }, [input, attachments, appConfig, enableResearch, selectedModel, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -2858,6 +3235,7 @@ function App() {
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      if (dictationPhaseRef.current !== 'idle') return
       handleSend()
     }
   }, [handleSend])
@@ -3320,6 +3698,10 @@ function App() {
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
                   showSources={appConfig.showSources}
+                  speechEnabled={appConfig.readAloudEnabled}
+                  speechDisabled={isGenerating || dictationPhase !== 'idle'}
+                  speechStatus={speechState.messageId === msg.id ? speechState.phase : 'idle'}
+                  onToggleSpeech={handleToggleSpeech}
                 />
               )
             })}
@@ -3380,10 +3762,44 @@ function App() {
                 aria-label={t('chat.tooltips.attach_file')}
                 onClick={() => fileInputRef.current?.click()}
                 className={getQuickActionClass()}
-                disabled={isGenerating}
+                disabled={isGenerating || dictationPhase !== 'idle'}
               >
                 <Paperclip className="h-4 w-4" />
               </button>
+              {appConfig.dictationEnabled && (
+                <button
+                  type="button"
+                  title={dictationPhase === 'recording'
+                    ? t('chat.tooltips.stop_recording')
+                    : dictationPhase === 'requesting'
+                      ? t('chat.tooltips.requesting_microphone')
+                      : dictationPhase === 'transcribing'
+                      ? t('chat.tooltips.cancel_transcription')
+                      : t('chat.tooltips.voice_input')}
+                  aria-label={dictationPhase === 'recording'
+                    ? t('chat.tooltips.stop_recording')
+                    : dictationPhase === 'requesting'
+                      ? t('chat.tooltips.requesting_microphone')
+                      : dictationPhase === 'transcribing'
+                      ? t('chat.tooltips.cancel_transcription')
+                      : t('chat.tooltips.voice_input')}
+                  aria-pressed={dictationPhase !== 'idle'}
+                  onClick={handleDictationToggle}
+                  disabled={isGenerating}
+                  className={getQuickActionClass(dictationPhase !== 'idle')}
+                >
+                  {['requesting', 'transcribing'].includes(dictationPhase)
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : dictationPhase === 'recording'
+                      ? <Square className="h-3.5 w-3.5 fill-current" />
+                      : <Mic className="h-4 w-4" />}
+                </button>
+              )}
+              {dictationPhase === 'recording' && (
+                <span className="shrink-0 px-1 text-[10px] font-medium tabular-nums text-destructive">
+                  00:{String(dictationSeconds).padStart(2, '0')}
+                </span>
+              )}
               <button
                 type="button"
                 title={isCropActive
@@ -3394,7 +3810,7 @@ function App() {
                   : t('chat.quick_actions.crop_tooltip')}
                 aria-pressed={isCropActive}
                 onClick={handleScreenshot}
-                disabled={isGenerating && !isCropActive}
+                disabled={(isGenerating || dictationPhase !== 'idle') && !isCropActive}
                 className={getQuickActionClass(isCropActive)}
               >
                 <Scissors className="h-4 w-4" />
@@ -3409,7 +3825,7 @@ function App() {
                   setEnableResearch(next)
                   setActiveMode(next ? 'web' : null)
                 }}
-                disabled={isGenerating}
+                disabled={isGenerating || dictationPhase !== 'idle'}
                 className={getQuickActionClass(enableResearch)}
               >
                 <Globe className="h-4 w-4" />
@@ -3427,7 +3843,7 @@ function App() {
                     displayContent: '',
                   })
                 }}
-                disabled={isGenerating || !hasImageAttachment}
+                disabled={isGenerating || dictationPhase !== 'idle' || !hasImageAttachment}
                 className={getQuickActionClass(activeMode === 'ocr')}
               >
                 <ScanText className="h-4 w-4" />
@@ -3443,7 +3859,7 @@ function App() {
                   setInput('')
                   handleSend(prompt)
                 }}
-                disabled={isGenerating}
+                disabled={isGenerating || dictationPhase !== 'idle'}
                 className={getQuickActionClass(activeMode === 'translate')}
               >
                 <Languages className="h-4 w-4" />
@@ -3459,7 +3875,7 @@ function App() {
                   setInput('')
                   handleSend(prompt)
                 }}
-                disabled={isGenerating}
+                disabled={isGenerating || dictationPhase !== 'idle'}
                 className={getQuickActionClass(activeMode === 'summarize')}
               >
                 <FileText className="h-4 w-4" />
@@ -3475,7 +3891,7 @@ function App() {
                   setInput('')
                   handleSend(prompt)
                 }}
-                disabled={isGenerating}
+                disabled={isGenerating || dictationPhase !== 'idle'}
                 className={getQuickActionClass(activeMode === 'explain')}
               >
                 <Lightbulb className="h-4 w-4" />
@@ -3485,7 +3901,7 @@ function App() {
             <button
               type="button"
               onClick={() => isGenerating ? cancelStream() : handleSend()}
-              disabled={!isGenerating && (!input.trim() && attachments.length === 0)}
+              disabled={dictationPhase !== 'idle' || (!isGenerating && (!input.trim() && attachments.length === 0))}
               title={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
               aria-label={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-35 ${

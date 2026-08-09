@@ -41,7 +41,12 @@ global.chrome = {
     captureVisibleTab: vi.fn()
   },
   windows: {
-    getAll: vi.fn()
+    getAll: vi.fn(),
+    create: vi.fn(),
+    onRemoved: {
+      addListener: vi.fn(),
+      removeListener: vi.fn()
+    }
   },
   scripting: {
     executeScript: vi.fn()

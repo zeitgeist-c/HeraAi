@@ -57,6 +57,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
   const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
   const [showSources, setShowSources] = useState(currentConfig?.showSources === true)
+  const [dictationEnabled, setDictationEnabled] = useState(currentConfig?.dictationEnabled === true)
+  const [readAloudEnabled, setReadAloudEnabled] = useState(currentConfig?.readAloudEnabled === true)
 
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
@@ -197,6 +199,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       customPrimaryColor,
       language: selectedLanguage,
       showSources,
+      dictationEnabled,
+      readAloudEnabled,
     }
 
     chrome.storage.local.set({ ...newConfig, apiProvider: 'google' }, () => {
@@ -469,6 +473,44 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                   />
                 </button>
               </div>
+
+              {[
+                {
+                  id: 'dictation',
+                  checked: dictationEnabled,
+                  setChecked: setDictationEnabled,
+                  title: t('setup.general.dictation_title'),
+                  description: t('setup.general.dictation_description'),
+                },
+                {
+                  id: 'read-aloud',
+                  checked: readAloudEnabled,
+                  setChecked: setReadAloudEnabled,
+                  title: t('setup.general.read_aloud_title'),
+                  description: t('setup.general.read_aloud_description'),
+                },
+              ].map(option => (
+                <div key={option.id} className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
+                  <div className="min-w-0">
+                    <span className="block text-xs font-semibold text-foreground">{option.title}</span>
+                    <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">{option.description}</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={option.checked}
+                    aria-label={option.title}
+                    onClick={() => option.setChecked(value => !value)}
+                    className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${option.checked ? 'border-primary bg-primary' : 'border-border bg-muted/80'}`}
+                  >
+                    <span className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${option.checked ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              ))}
+
+              <p className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-[11px] leading-relaxed text-muted-foreground">
+                {t('setup.general.voice_api_notice')}
+              </p>
 
               <div className="flex flex-col gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">

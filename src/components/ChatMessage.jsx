@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, FileText, Image as ImageIcon, Pencil, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, Copy, FileText, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -80,6 +80,10 @@ const ChatMessage = ({
   currentModel,
   retryDisabled = false,
   showSources = false,
+  speechEnabled = false,
+  speechDisabled = false,
+  speechStatus = 'idle',
+  onToggleSpeech,
 }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
@@ -92,6 +96,10 @@ const ChatMessage = ({
   const retryTriggerRef = useRef(null)
   const sources = Array.isArray(message.sources) ? message.sources : []
   const isPending = message.status === 'thinking' || message.status === 'streaming'
+  const speechEligible = speechEnabled
+    && Boolean(visibleContent)
+    && !isPending
+    && !['error', 'cancelled', 'cancelled_empty', 'interrupted'].includes(message.status)
   const availableRetryModels = Array.isArray(retryModels) ? retryModels : []
   const hasRetryModelChoices = availableRetryModels.length > 0
   const errorMessage = message.errorCode
@@ -403,6 +411,31 @@ const ChatMessage = ({
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
               <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
             </button>
+            {speechEligible && (
+              <button
+                type="button"
+                onClick={() => onToggleSpeech?.(message)}
+                disabled={speechDisabled}
+                aria-label={speechStatus === 'playing'
+                  ? t('chat.tooltips.stop_speech')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}
+                aria-pressed={speechStatus !== 'idle'}
+                className="hera-action-button"
+              >
+                {speechStatus === 'loading'
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : speechStatus === 'playing'
+                    ? <Square className="h-3.5 w-3.5 fill-current" />
+                    : <Volume2 className="h-3.5 w-3.5" />}
+                <span>{speechStatus === 'playing'
+                  ? t('chat.tooltips.stop')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}</span>
+              </button>
+            )}
             {renderRetryButton()}
           </div>
           {renderRetryMenu('left')}
@@ -427,10 +460,14 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.currentModel === nextProps.currentModel &&
     prevProps.retryDisabled === nextProps.retryDisabled &&
     prevProps.showSources === nextProps.showSources &&
+    prevProps.speechEnabled === nextProps.speechEnabled &&
+    prevProps.speechDisabled === nextProps.speechDisabled &&
+    prevProps.speechStatus === nextProps.speechStatus &&
     prevProps.retryModels === nextProps.retryModels &&
     prevProps.modelLabels === nextProps.modelLabels &&
     prevProps.onEdit === nextProps.onEdit &&
-    prevProps.onRetry === nextProps.onRetry
+    prevProps.onRetry === nextProps.onRetry &&
+    prevProps.onToggleSpeech === nextProps.onToggleSpeech
   )
 }
 
