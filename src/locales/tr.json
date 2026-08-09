@@ -78,7 +78,7 @@
             "dictation_title": "Gemini Dikte",
             "dictation_description": "En fazla 60 saniye kaydedip Gemini transkriptini mesaj taslağının sonuna ekler.",
             "read_aloud_title": "Gemini Sesli Okuma (Önizleme)",
-            "read_aloud_description": "Tamamlanmış AI yanıtlarını Kore sesiyle okur. Önce Gemini 3.1 Flash TTS'yi, model kotası tükenirse 2.5 Flash TTS'yi kullanır.",
+            "read_aloud_description": "Tamamlanmış AI yanıtlarına Kore sesiyle oku ve durdur kontrolleri ekler.",
             "voice_api_notice": "Ses özellikleri Gemini API anahtarınızı kullanır ve API kullanımı oluşturabilir. Ses yalnız bellekte işlenir ve kaydedilmez."
         },
         "ai": {
