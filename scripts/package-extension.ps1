@@ -3,7 +3,19 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $repoRoot 'dist'
 $releaseDir = Join-Path $repoRoot 'release'
-$zipPath = Join-Path $releaseDir 'HeraAi-extension.zip'
+$manifestPath = Join-Path $distDir 'manifest.json'
+
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+  throw "Build manifest not found at $manifestPath. Run npm run build first."
+}
+
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$version = [string]$manifest.version
+if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
+  throw "Invalid extension version in ${manifestPath}: $version"
+}
+
+$zipPath = Join-Path $releaseDir "HeraAi-$version.zip"
 
 if (-not (Test-Path $distDir)) {
   throw "Build output not found at $distDir. Run npm run build first."
@@ -35,8 +47,12 @@ if (-not (Test-Path $releaseDir)) {
   New-Item -ItemType Directory -Path $releaseDir | Out-Null
 }
 
-if (Test-Path $zipPath) {
-  Remove-Item -LiteralPath $zipPath -Force
+Get-ChildItem -LiteralPath $releaseDir -Filter 'HeraAi-*.zip' -File -ErrorAction SilentlyContinue |
+  Remove-Item -Force
+
+$legacyZipPath = Join-Path $releaseDir 'HeraAi-extension.zip'
+if (Test-Path -LiteralPath $legacyZipPath) {
+  Remove-Item -LiteralPath $legacyZipPath -Force
 }
 
 Compress-Archive -Path (Join-Path $distDir '*') -DestinationPath $zipPath -Force

@@ -5,7 +5,7 @@ import { base64ToBytes } from './audioUtils'
 export const DICTATION_MODEL = 'gemini-3.1-flash-lite'
 export const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
 export const TTS_VOICE = 'Kore'
-const REQUEST_TIMEOUT_MS = 60000
+const REQUEST_TIMEOUT_MS = 200000
 
 export class VoiceApiError extends Error {
   constructor(code, cause) {

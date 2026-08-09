@@ -56,7 +56,7 @@ const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
 const SESSION_TITLE_MAX_LENGTH = 80
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
-const DICTATION_MAX_DURATION_MS = 60000
+const DICTATION_MAX_DURATION_MS = 200000
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
@@ -1758,8 +1758,6 @@ function App() {
           'showSources',
           'selectedText',
           'selectedModel',
-          'dictationEnabled',
-          'readAloudEnabled',
         ])
       } catch (error) {
         console.error('Chrome storage initialization failed', error)
@@ -1773,8 +1771,6 @@ function App() {
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
         language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
         showSources: result.showSources === true,
-        dictationEnabled: result.dictationEnabled === true,
-        readAloudEnabled: result.readAloudEnabled === true,
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
       if (currentLanguage !== config.language) {
@@ -2938,12 +2934,8 @@ function App() {
   }, [cancelDictation, startDictation, stopDictationRecording])
 
   useEffect(() => {
-    if (isGenerating || !appConfig?.readAloudEnabled) stopSpeech()
-  }, [appConfig?.readAloudEnabled, isGenerating, stopSpeech])
-
-  useEffect(() => {
-    if (!appConfig?.dictationEnabled) cancelDictation()
-  }, [appConfig?.dictationEnabled, cancelDictation])
+    if (isGenerating) stopSpeech()
+  }, [isGenerating, stopSpeech])
 
   useEffect(() => {
     const handleVoiceVisibility = () => {
@@ -3698,7 +3690,7 @@ function App() {
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
                   showSources={appConfig.showSources}
-                  speechEnabled={appConfig.readAloudEnabled}
+                  speechEnabled
                   speechDisabled={isGenerating || dictationPhase !== 'idle'}
                   speechStatus={speechState.messageId === msg.id ? speechState.phase : 'idle'}
                   onToggleSpeech={handleToggleSpeech}
@@ -3766,8 +3758,7 @@ function App() {
               >
                 <Paperclip className="h-4 w-4" />
               </button>
-              {appConfig.dictationEnabled && (
-                <button
+              <button
                   type="button"
                   title={dictationPhase === 'recording'
                     ? t('chat.tooltips.stop_recording')
@@ -3793,11 +3784,10 @@ function App() {
                     : dictationPhase === 'recording'
                       ? <Square className="h-3.5 w-3.5 fill-current" />
                       : <Mic className="h-4 w-4" />}
-                </button>
-              )}
+              </button>
               {dictationPhase === 'recording' && (
                 <span className="shrink-0 px-1 text-[10px] font-medium tabular-nums text-destructive">
-                  00:{String(dictationSeconds).padStart(2, '0')}
+                  {String(Math.floor(dictationSeconds / 60)).padStart(2, '0')}:{String(dictationSeconds % 60).padStart(2, '0')}
                 </span>
               )}
               <button

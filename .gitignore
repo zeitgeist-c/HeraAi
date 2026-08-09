@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 setup/.build/
+setup/HeraAi-Extension-*/
 setup/*.exe
 release/
 
