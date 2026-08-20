@@ -53,6 +53,7 @@ describe('generation worker runtime', () => {
       expect(args[2]).toBe(tavilyKeys)
       expect(args[3]).toBeInstanceOf(AbortSignal)
       expect(args[4]).toBe('gemini-test')
+      expect(args[5]).toEqual({ systemInstruction: 'system', language: 'en' })
     } else if (mode === 'vision') {
       expect(args[1]).toBeNull()
       expect(args[2]).toEqual({ systemInstruction: 'system', language: 'en' })

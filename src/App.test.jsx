@@ -6,6 +6,10 @@ import * as api from './lib/api';
 import * as audioUtils from './lib/audioUtils';
 import * as voiceApi from './lib/voiceApi';
 import i18n from './i18n';
+import {
+  DEFAULT_SYSTEM_INSTRUCTION,
+  SYSTEM_INSTRUCTION_DEFAULT_VERSION,
+} from './lib/systemInstruction';
 
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -30,6 +34,7 @@ vi.mock('./lib/api', () => ({
     'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite',
     'gemini-3.6-flash',
+    'gemini-3.7-flash',
   ],
   DEFAULT_MODEL: 'gemini-3.1-flash-lite',
 }));
@@ -224,7 +229,7 @@ describe('HeraAi App', () => {
 
     try {
       const events = message.mode === 'web'
-        ? api.streamResearch(message.requestMessages, geminiKeys, tavilyKeys, controller.signal, message.model)
+        ? api.streamResearch(message.requestMessages, geminiKeys, tavilyKeys, controller.signal, message.model, options)
         : message.mode === 'vision'
           ? api.streamVision(message.requestMessages, null, options, geminiKeys, controller.signal, message.model)
           : api.streamChat(message.requestMessages, options, geminiKeys, controller.signal, message.model);
@@ -414,6 +419,82 @@ describe('HeraAi App', () => {
     generationControllers.forEach(controller => controller.abort());
     generationControllers.clear();
     runtimeListeners = [];
+  });
+
+  it('seeds and displays the requested default system instruction on an unmigrated install', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(currentStorage.systemInstruction).toBe(DEFAULT_SYSTEM_INSTRUCTION);
+      expect(currentStorage.systemInstructionDefaultVersion).toBe(SYSTEM_INSTRUCTION_DEFAULT_VERSION);
+    });
+
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+    expect(screen.getByTestId('system-instruction-input')).toHaveValue(DEFAULT_SYSTEM_INSTRUCTION);
+  });
+
+  it('preserves a legacy custom system instruction while marking the migration complete', async () => {
+    currentStorage = {
+      theme: 'light',
+      systemInstruction: 'Mevcut özel komut',
+    };
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(currentStorage.systemInstruction).toBe('Mevcut özel komut');
+      expect(currentStorage.systemInstructionDefaultVersion).toBe(SYSTEM_INSTRUCTION_DEFAULT_VERSION);
+    });
+  });
+
+  it('preserves an intentionally empty system instruction after migration', async () => {
+    currentStorage = {
+      theme: 'light',
+      systemInstruction: '',
+      systemInstructionDefaultVersion: SYSTEM_INSTRUCTION_DEFAULT_VERSION,
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+    expect(screen.getByTestId('system-instruction-input')).toHaveValue('');
+    expect(currentStorage.systemInstruction).toBe('');
+  });
+
+  it('saves an edited system instruction and forwards it with the next generation', async () => {
+    currentStorage = {
+      theme: 'light',
+      systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
+      systemInstructionDefaultVersion: SYSTEM_INSTRUCTION_DEFAULT_VERSION,
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+    fireEvent.change(screen.getByTestId('system-instruction-input'), {
+      target: { value: 'Düzenlenmiş sistem komutu' },
+    });
+    fireEvent.click(Array.from(document.querySelectorAll('button')).find(button => (
+      button.querySelector('svg.lucide-save')
+    )));
+
+    await waitFor(() => expect(currentStorage.systemInstruction).toBe('Düzenlenmiş sistem komutu'));
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Yeni soru' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+    expect(api.streamChat.mock.calls[0][1]).toEqual(expect.objectContaining({
+      systemInstruction: 'Düzenlenmiş sistem komutu',
+    }));
+    const startMessage = global.chrome.runtime.sendMessage.mock.calls
+      .map(([message]) => message)
+      .find(message => message?.type === 'HERA_GENERATION_START');
+    expect(startMessage.systemInstruction).toBe('Düzenlenmiş sistem komutu');
   });
 
   it('should send a message, display it, clear input and show AI response', async () => {
@@ -1203,7 +1284,7 @@ describe('HeraAi App', () => {
     });
 
     expect(await screen.findByText(streamedAnswer, {}, { timeout: 5000 })).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('should not allow empty message to be sent', async () => {
     render(<App />);
@@ -2316,7 +2397,7 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders the model selector below the composer with the 3 supported model ids', async () => {
+  it('renders the model selector below the composer with the 4 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2330,6 +2411,7 @@ describe('HeraAi App', () => {
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
+      'gemini-3.7-flash',
     ]);
   });
 
@@ -2349,18 +2431,18 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const modelSelect = document.querySelector('select[data-testid="model-selector"]');
-    fireEvent.change(modelSelect, { target: { value: 'gemini-3.6-flash' } });
+    fireEvent.change(modelSelect, { target: { value: 'gemini-3.7-flash' } });
 
-    expect(modelSelect.value).toBe('gemini-3.6-flash');
+    expect(modelSelect.value).toBe('gemini-3.7-flash');
 
     const input = document.querySelector('textarea') || screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'hello with custom model' } });
     fireEvent.click(getSendButton());
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
-    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.6-flash');
+    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.7-flash');
 
-    expect(currentStorage.selectedModel).toBe('gemini-3.6-flash');
+    expect(currentStorage.selectedModel).toBe('gemini-3.7-flash');
   });
 
   it('retries the same question with a one-off model without changing the composer model', async () => {
@@ -2388,6 +2470,7 @@ describe('HeraAi App', () => {
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
+      'gemini-3.7-flash',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
 

@@ -58,5 +58,21 @@ if (Test-Path -LiteralPath $legacyZipPath) {
 Compress-Archive -Path (Join-Path $distDir '*') -DestinationPath $zipPath -Force
 
 Write-Host "Created $zipPath"
-$hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
-Write-Host "SHA-256 $($hash.Hash)"
+$getFileHash = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+if ($getFileHash) {
+  $hashValue = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+} else {
+  $stream = [System.IO.File]::OpenRead($zipPath)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $hashBytes = $sha256.ComputeHash($stream)
+      $hashValue = [System.BitConverter]::ToString($hashBytes).Replace('-', '')
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+Write-Host "SHA-256 $hashValue"

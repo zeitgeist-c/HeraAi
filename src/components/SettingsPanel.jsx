@@ -479,6 +479,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                   {t('setup.ai.system_prompt_title')}
                 </label>
                 <textarea
+                  data-testid="system-instruction-input"
                   value={systemInstruction}
                   onChange={(e) => setSystemInstruction(e.target.value)}
                   placeholder={t('setup.ai.system_prompt_placeholder')}

@@ -82,6 +82,23 @@ describe('streamResearch', () => {
     expect(finalPrompt).toContain('Dunya Gunes yorungesi')
   })
 
+  it('applies systemInstruction only to the final research answer', async () => {
+    await collectEvents(streamResearch(
+      [{ role: 'user', content: 'guncel bilgi' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [{ id: 't1', key: 'tavily-key' }],
+      undefined,
+      'gemini-3.7-flash',
+      { systemInstruction: '  Her zaman Turkce yanit ver.  ' },
+    ))
+
+    expect(mocks.generateContentMock.mock.calls[0][0].config).not.toHaveProperty('systemInstruction')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0]).toEqual(expect.objectContaining({
+      model: 'gemini-3.7-flash',
+      config: expect.objectContaining({ systemInstruction: 'Her zaman Turkce yanit ver.' }),
+    }))
+  })
+
   it('does not include empty UI-only assistant states in research history', async () => {
     await collectEvents(streamResearch([
       { role: 'model', content: 'Merhaba' },
@@ -498,7 +515,10 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
-  it('reports the 3.6 Flash 120-second startup deadline as timeout without a second request', async () => {
+  it.each([
+    'gemini-3.6-flash',
+    'gemini-3.7-flash',
+  ])('reports the %s 120-second startup deadline as timeout without a second request', async model => {
     vi.useFakeTimers()
     try {
       let requestSignal
@@ -512,7 +532,7 @@ describe('streamChat fallback', () => {
         {},
         [{ id: 'g1', key: 'AIza-slow-key-aaaaaaaaa' }],
         undefined,
-        'gemini-3.6-flash',
+        model,
       ))
 
       await vi.advanceTimersByTimeAsync(120000)
@@ -572,12 +592,13 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 3 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 4 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
+      'gemini-3.7-flash',
     ])
   })
 
@@ -587,10 +608,10 @@ describe('model selection', () => {
       {},
       [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
       undefined,
-      'gemini-3.6-flash',
+      'gemini-3.7-flash',
     ))
 
-    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.7-flash')
     expect(mocks.clientOptionsMock).toHaveBeenCalledWith({
       apiKey: 'AIza-key-aaaaaaaaaaaa',
       httpOptions: {
@@ -606,10 +627,10 @@ describe('model selection', () => {
       {},
       [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
       undefined,
-      'gemini-3.6-flash',
+      'gemini-3.7-flash',
     ))
 
-    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.7-flash')
   })
 
   it('falls back to DEFAULT_MODEL when no model argument is supplied for streamChat', async () => {
@@ -627,9 +648,9 @@ describe('model selection', () => {
     mocks.generateContentMock.mockResolvedValue({})
 
     await testKey('gemini', 'AIza-valid-key-12345abcde')
-    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.6-flash')
+    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.7-flash')
 
     expect(mocks.generateContentMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
-    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.6-flash')
+    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.7-flash')
   })
 })
