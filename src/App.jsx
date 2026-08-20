@@ -35,6 +35,7 @@ import i18n from './i18n'
 import { updateStats } from './lib/stats'
 import { resolveKeysForRequest } from './lib/keyManager'
 import { generateSpeech, transcribeAudio } from './lib/voiceApi'
+import { resolveSystemInstructionConfig } from './lib/systemInstruction'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -61,6 +62,7 @@ const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+  'gemini-3.7-flash': 'Gemini 3.7 Flash',
 }
 
 function normalizeConversationMessages(messages) {
@@ -1749,6 +1751,7 @@ function App() {
           'theme',
           'startupBehavior',
           'systemInstruction',
+          'systemInstructionDefaultVersion',
           'chatHistory',
           'sessions',
           'activeSessionId',
@@ -1764,13 +1767,25 @@ function App() {
       }
       if (disposed) return
 
+      const systemInstructionConfig = resolveSystemInstructionConfig(result)
       const config = {
         theme: result.theme || 'system',
         startupBehavior: result.startupBehavior || 'resume',
-        systemInstruction: result.systemInstruction || '',
+        systemInstruction: systemInstructionConfig.systemInstruction,
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
         language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
         showSources: result.showSources === true,
+      }
+      if (systemInstructionConfig.shouldPersist) {
+        try {
+          await chrome.storage.local.set({
+            systemInstruction: systemInstructionConfig.systemInstruction,
+            systemInstructionDefaultVersion: systemInstructionConfig.systemInstructionDefaultVersion,
+          })
+        } catch (error) {
+          console.error('System instruction default migration failed', error)
+        }
+        if (disposed) return
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
       if (currentLanguage !== config.language) {

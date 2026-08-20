@@ -35,7 +35,7 @@ function selectStream(payload, signal, engines) {
   }
 
   if (payload.mode === 'web') {
-    return engines.streamResearch(requestMessages, geminiKeys, tavilyKeys, signal, payload.model)
+    return engines.streamResearch(requestMessages, geminiKeys, tavilyKeys, signal, payload.model, requestOptions)
   }
   if (payload.mode === 'vision') {
     return engines.streamVision(requestMessages, null, requestOptions, geminiKeys, signal, payload.model)

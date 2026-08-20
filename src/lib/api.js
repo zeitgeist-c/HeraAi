@@ -5,11 +5,16 @@ export const MODELS = [
   'gemini-3.1-flash-lite',
   'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
+  'gemini-3.7-flash',
 ]
 const GEMINI_API_VERSION = 'v1'
 const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 60000
 const GEMINI_REASONING_REQUEST_TIMEOUT_MS = 120000
 const GEMINI_STREAM_IDLE_TIMEOUT_MS = 120000
+const GEMINI_REASONING_MODELS = new Set([
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+])
 const TAVILY_TIMEOUT_MS = 15000
 const RESEARCH_CONTEXT_TURNS = 6
 const RESEARCH_CONTEXT_MAX_CHARS = 2200
@@ -32,7 +37,7 @@ function createTimeoutError() {
 }
 
 function getGeminiRequestTimeoutMs(modelId) {
-  return modelId === 'gemini-3.6-flash'
+  return GEMINI_REASONING_MODELS.has(modelId)
     ? GEMINI_REASONING_REQUEST_TIMEOUT_MS
     : GEMINI_DEFAULT_REQUEST_TIMEOUT_MS
 }
@@ -670,7 +675,7 @@ Web arama sonuclari:
 ${context}`
 }
 
-export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], signal, model) {
+export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], signal, model, options = {}) {
   const conversationMessages = Array.isArray(input)
     ? normalizeTextMessages(input)
     : normalizeTextMessages([{ role: 'user', content: input }])
@@ -730,7 +735,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
         },
       ]
     : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }]
-  for await (const evt of streamChat(messages, {}, geminiKeys, signal, model)) {
+  for await (const evt of streamChat(messages, options, geminiKeys, signal, model)) {
     yield evt
     if (evt.event === 'error') return
   }
