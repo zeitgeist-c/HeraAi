@@ -23,8 +23,22 @@ import {
   splitSpeechText,
   TTS_MAX_CHARS,
 } from './lib/audioUtils'
-import { fileToBase64 } from './lib/fileParsers'
+import { processAttachmentFile, validateAttachmentGroup } from './lib/fileParsers'
+import {
+  attachmentIdsFromSessions,
+  cleanupOrphanAttachments,
+  deleteAttachment,
+  migrateLegacySessionAttachments,
+  putAttachment,
+} from './lib/attachmentStore'
 import { exportSessions, importSessions } from './lib/importExport'
+import {
+  extractPublicUrls,
+  isUrlOnlyText,
+  listPublicUrls,
+  MAX_PUBLIC_URLS,
+  removePublicUrlFromText,
+} from './lib/urlContext'
 import {
   getAutoMessageTitle,
   getMessageDisplayContent,
@@ -63,6 +77,20 @@ const MODEL_LABELS = {
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
   'gemini-3.7-flash': 'Gemini 3.7 Flash',
+}
+
+function mergeUniqueStrings(existing = [], additions = []) {
+  return Array.from(new Set([...(existing || []), ...(additions || [])].filter(Boolean)))
+}
+
+function mergeAttachmentRefs(existing = [], additions = []) {
+  const refs = new Map()
+  for (const attachment of [...(existing || []), ...(additions || [])]) {
+    if (!attachment) continue
+    const key = attachment.id || `${attachment.name || ''}:${attachment.mimeType || ''}:${attachment.size || 0}`
+    if (!refs.has(key)) refs.set(key, attachment)
+  }
+  return Array.from(refs.values())
 }
 
 function normalizeConversationMessages(messages) {
@@ -278,14 +306,26 @@ function setChromeStorage(values) {
   }
 }
 
-function createUserMessage({ id, content, displayContent, attachments, mode }) {
+function createUserMessage({
+  id,
+  content,
+  displayContent,
+  attachments,
+  displayAttachmentIds,
+  displayWebUrls,
+  mode,
+  webUrls,
+}) {
   return {
     id,
     role: 'user',
     content,
     ...(typeof displayContent === 'string' ? { displayContent } : {}),
     attachments,
-    mode
+    displayAttachmentIds,
+    displayWebUrls,
+    mode,
+    webUrls,
   }
 }
 
@@ -302,7 +342,7 @@ function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
   }
 }
 
-function createSession({ id, title, messages, updatedAt = Date.now() }) {
+function createSession({ id, title, messages, updatedAt = Date.now(), activeAttachmentIds = [], activeWebUrls = [] }) {
   return {
     id,
     title,
@@ -310,7 +350,21 @@ function createSession({ id, title, messages, updatedAt = Date.now() }) {
     isStarred: false,
     updatedAt,
     messages,
+    activeAttachmentIds,
+    activeWebUrls,
   }
+}
+
+function activeAttachmentRefs(session) {
+  const activeIds = new Set(session?.activeAttachmentIds || [])
+  if (activeIds.size === 0) return []
+  const refs = new Map()
+  for (const message of session?.messages || []) {
+    for (const attachment of message?.attachments || []) {
+      if (attachment?.id && activeIds.has(attachment.id)) refs.set(attachment.id, attachment)
+    }
+  }
+  return Array.from(activeIds).map(id => refs.get(id)).filter(Boolean)
 }
 
 function normalizeSessionMetadata(session) {
@@ -324,6 +378,8 @@ function normalizeSessionMetadata(session) {
     ...(shouldResetHiddenPromptTitle ? { title: i18n.t('chat.new_chat') } : {}),
     isTitleCustom: session.isTitleCustom === true,
     isStarred: session.isStarred === true,
+    activeAttachmentIds: Array.isArray(session.activeAttachmentIds) ? session.activeAttachmentIds : [],
+    activeWebUrls: Array.isArray(session.activeWebUrls) ? session.activeWebUrls : [],
   }
 }
 
@@ -411,6 +467,9 @@ function App() {
   const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
+  const [isFileDragActive, setIsFileDragActive] = useState(false)
+  const fileDragDepthRef = useRef(0)
+  const attachmentProcessingRef = useRef(false)
   const [dictationPhase, setDictationPhase] = useState('idle')
   const [dictationSeconds, setDictationSeconds] = useState(0)
   const dictationPhaseRef = useRef('idle')
@@ -431,8 +490,9 @@ function App() {
   const speechContextRef = useRef(null)
   const speechEpochRef = useRef(0)
   const hasImageAttachment = attachments.some(att => (
-    att?.mimeType?.startsWith('image/') && att?.data
+    att?.mimeType?.startsWith('image/')
   ))
+  const draftWebUrls = enableResearch ? listPublicUrls(input) : []
   const [isGenerating, setIsGeneratingState] = useState(false)
   const isGeneratingRef = useRef(false)
   const setGenerating = useCallback((val) => {
@@ -1581,14 +1641,23 @@ function App() {
     const ctx = canvas.getContext('2d');
 
     ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-    const croppedDataUrl = canvas.toDataURL('image/png');
-    const base64Data = croppedDataUrl.split(',')[1];
-
-    return {
-      name: `screenshot-${Date.now()}.png`,
-      mimeType: 'image/png',
-      data: base64Data
-    };
+    const blob = typeof canvas.toBlob === 'function'
+      ? await new Promise((resolve, reject) => {
+          canvas.toBlob(result => (result ? resolve(result) : reject(new Error('Screenshot encoding failed'))), 'image/png')
+        })
+      : (() => {
+          const base64 = canvas.toDataURL('image/png').split(',')[1] || ''
+          let bytes
+          try {
+            const binary = globalThis.atob(base64)
+            bytes = new Uint8Array(binary.length)
+            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+          } catch {
+            bytes = new TextEncoder().encode(base64)
+          }
+          return new Blob([bytes], { type: 'image/png' })
+        })()
+    return new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' })
   }, [])
 
   const clearCropSelectionState = useCallback((requestId = null) => {
@@ -1612,9 +1681,33 @@ function App() {
         void (async () => {
           try {
             setGenerating(true);
-            const attachment = await captureScreenshot(msg.coords);
-            if (attachment) {
-              setAttachments(prev => [...prev, attachment]);
+            const file = await captureScreenshot(msg.coords)
+            if (file) {
+              const ref = await putAttachment({
+                blob: file,
+                name: file.name,
+                mimeType: 'image/png',
+                size: file.size,
+                kind: 'image',
+              })
+              setAttachments(previous => {
+                const currentSession = sessionsRef.current.find(session => (
+                  session?.id === activeSessionIdRef.current
+                ))
+                try {
+                  validateAttachmentGroup([ref], [
+                    ...activeAttachmentRefs(currentSession),
+                    ...previous,
+                  ])
+                  return [...previous, ref]
+                } catch (error) {
+                  toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`))
+                  void deleteAttachment(ref.id).catch(cleanupError => {
+                    console.error('Rejected screenshot cleanup failed', cleanupError)
+                  })
+                  return previous
+                }
+              })
             }
           } catch (err) {
             console.error("Screenshot error", err);
@@ -1815,14 +1908,22 @@ function App() {
       // Do not repair transient assistant states until GET_STATE has supplied the
       // authoritative generation. A stale storage snapshot can otherwise preserve
       // an orphaned "thinking" message, or remove the placeholder for a newer job.
-      const storedSessions = Array.isArray(result.sessions) ? result.sessions : []
+      let storedSessions = Array.isArray(result.sessions) ? result.sessions : []
+      let legacyAttachmentsMigrated = false
+      try {
+        const migration = await migrateLegacySessionAttachments(storedSessions)
+        storedSessions = migration.sessions
+        legacyAttachmentsMigrated = migration.changed
+      } catch (error) {
+        console.error('Legacy attachment migration failed', error)
+      }
       storedSessions.forEach(session => {
         if (session?.id) persistedSessionIdsRef.current.add(session.id)
       })
       let nextSessions = storedSessions.map(normalizeSessionMetadata)
       let nextActiveSessionId = null
       let nextMessages = welcomeMessages
-      let shouldPersistSessions = false
+      let shouldPersistSessions = legacyAttachmentsMigrated
 
       if (nextSessions.length > 0) {
         if (config.startupBehavior === 'resume') {
@@ -1946,10 +2047,14 @@ function App() {
       setActiveSessionId(nextActiveSessionId)
       setSessions(nextSessions)
       setMessages(nextMessages)
+      setAttachments([])
 
       if (shouldPersistSessions) {
         void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
       }
+      void cleanupOrphanAttachments(nextSessions).catch(error => {
+        console.error('Attachment cleanup failed', error)
+      })
 
       activeGenerationRef.current = null
       lastGenerationRevisionRef.current = 0
@@ -2306,6 +2411,7 @@ function App() {
     setActiveSessionId(id)
     setSessions(nextSessions)
     setMessages(welcomeMsg)
+    setAttachments([])
     void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: id })
     setShowBulkDeleteConfirm(false)
     setShowHistory(false)
@@ -2328,6 +2434,7 @@ function App() {
       messagesRef.current = session.messages || []
       setActiveSessionId(id)
       setMessages(messagesRef.current)
+      setAttachments([])
       stickToBottomOnNextRender()
       void enqueueStorageWrite({ activeSessionId: id })
       if (
@@ -2417,8 +2524,10 @@ function App() {
       if (result.wasActiveSession) {
         messagesRef.current = result.nextMessages
         setMessages(result.nextMessages)
+        setAttachments([])
         stickToBottomOnNextRender()
       }
+      void cleanupOrphanAttachments(result.nextSessions).catch(error => console.error('Attachment cleanup failed', error))
     } catch (error) {
       console.error('Chat deletion failed', error)
       toast.error(t('chat.bulk_delete.error', {
@@ -2554,6 +2663,7 @@ function App() {
       setSessions(result.nextSessions)
       setActiveSessionId(result.nextActiveSessionId)
       setMessages(result.nextMessages)
+      setAttachments([])
       if (!result.preservedActiveSession) stickToBottomOnNextRender()
 
       if (typeof chrome !== 'undefined' && chrome.storage?.local?.remove) {
@@ -2597,7 +2707,9 @@ function App() {
         e.target.value = ''
         return
       }
-      const importedSessions = await importSessions(file)
+      const importedRawSessions = await importSessions(file)
+      const importedMigration = await migrateLegacySessionAttachments(importedRawSessions)
+      const importedSessions = importedMigration.sessions
       const repairedImportedSessions = repairStoredSessions(
         importedSessions,
         msgIdCounter,
@@ -2629,6 +2741,7 @@ function App() {
       setSessions(nextSessions)
       setActiveSessionId(nextActiveSession.id)
       setMessages(messagesRef.current)
+      setAttachments([])
       stickToBottomOnNextRender()
       toast.success(t('chat.imported'))
     } catch (err) {
@@ -2981,9 +3094,13 @@ function App() {
     const safeInput = typeof input === 'string' ? input : ''
     const userText = hasDirectActionText ? directActionText : safeInput.trim()
     const retryUserMessage = actionOptions?.retryUserMessage
+    const requestSessionId = activeSessionIdRef.current
+    const requestSession = sessionsRef.current.find(session => session?.id === requestSessionId)
+    const activeContextAttachments = activeAttachmentRefs(requestSession)
+    const draftAttachmentIds = attachments.map(attachment => attachment?.id).filter(Boolean)
     const sourceAttachments = retryUserMessage
       ? (Array.isArray(retryUserMessage.attachments) ? retryUserMessage.attachments : [])
-      : attachments
+      : mergeAttachmentRefs(activeContextAttachments, attachments)
     if (!userText && sourceAttachments.length === 0) return
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
       toast.error(t('chat.generation_errors.already_running', {
@@ -2992,6 +3109,15 @@ function App() {
       return
     }
     if (isGeneratingRef.current) return
+
+    try {
+      validateAttachmentGroup([], sourceAttachments)
+    } catch (error) {
+      toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
+        defaultValue: error?.message || t('chat.file_error'),
+      }))
+      return
+    }
 
     const supportedModes = new Set(['chat', 'vision', 'web'])
     const automaticMode = enableResearch ? 'web' : (sourceAttachments.length > 0 ? 'vision' : 'chat')
@@ -3002,11 +3128,70 @@ function App() {
       ? actionOptions.modelOverride
       : selectedModel
 
+    let explicitUrls = []
+    try {
+      explicitUrls = mode === 'web' ? extractPublicUrls(userText) : []
+    } catch (error) {
+      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+        defaultValue: error?.message || t('chat.connection_error'),
+      }))
+      return
+    }
+    const existingContextUrls = Array.isArray(requestSession?.activeWebUrls)
+      ? requestSession.activeWebUrls
+      : []
+    const mergedContextUrls = mergeUniqueStrings(existingContextUrls, explicitUrls)
+    if (!retryUserMessage && mergedContextUrls.length > MAX_PUBLIC_URLS) {
+      toast.error(t('chat.generation_errors.url_limit_exceeded'))
+      return
+    }
+    const requestUrls = mode === 'web'
+      ? (retryUserMessage && Array.isArray(retryUserMessage.webUrls)
+          ? retryUserMessage.webUrls
+          : mergedContextUrls)
+      : []
+    const webContext = {
+      kind: mode === 'web' ? (requestUrls.length > 0 ? 'url' : 'search') : 'none',
+      urls: requestUrls,
+    }
+    let requestText = userText
+    let displayContent = actionOptions?.displayContent
+    if (requestUrls.length > 0 && isUrlOnlyText(userText, requestUrls)) {
+      requestText = t('chat.prompts.summarize_urls')
+      displayContent = userText
+    } else if (!requestText && sourceAttachments.length > 0) {
+      requestText = requestUrls.length > 0
+        ? t('chat.prompts.summarize_context')
+        : t('chat.prompts.summarize_files')
+      displayContent = ''
+    }
+
     const messageAttachments = sourceAttachments.map(att => ({
-      data: att.data,
+      ...(att.id ? { id: att.id } : {}),
+      ...(att.data ? { data: att.data } : {}),
       mimeType: att.mimeType,
-      name: att.name
+      name: att.name,
+      size: Number(att.size || 0),
+      kind: att.kind || (att.mimeType?.startsWith('image/') ? 'image' : 'binary'),
+      availability: att.availability || 'ready',
     }))
+    const attachmentIds = messageAttachments.map(attachment => attachment.id).filter(Boolean)
+    const nextActiveAttachmentIds = retryUserMessage
+      ? (requestSession?.activeAttachmentIds || [])
+      : attachmentIds
+    const nextActiveWebUrls = retryUserMessage
+      ? existingContextUrls
+      : mergedContextUrls
+    const displayAttachmentIds = retryUserMessage
+      ? (Array.isArray(retryUserMessage.displayAttachmentIds)
+          ? retryUserMessage.displayAttachmentIds
+          : attachmentIds)
+      : draftAttachmentIds
+    const displayWebUrls = retryUserMessage
+      ? (Array.isArray(retryUserMessage.displayWebUrls)
+          ? retryUserMessage.displayWebUrls
+          : requestUrls)
+      : explicitUrls
 
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')
     const userMessageId = createUniqueMessageId(msgIdCounter)
@@ -3018,17 +3203,23 @@ function App() {
       ? {
           ...retryUserMessage,
           id: userMessageId,
-          content: userText,
+          content: requestText,
           attachments: messageAttachments,
+          displayAttachmentIds,
+          displayWebUrls,
           mode,
+          webUrls: requestUrls,
           retryOfMessageId: retryUserMessage.id,
         }
       : createUserMessage({
           id: userMessageId,
-          content: userText,
-          displayContent: actionOptions?.displayContent,
+          content: requestText,
+          displayContent,
           attachments: messageAttachments,
+          displayAttachmentIds,
+          displayWebUrls,
           mode,
+          webUrls: requestUrls,
         })
     const assistantMsg = createAssistantMessage({
       id: assistantMessageId,
@@ -3045,11 +3236,17 @@ function App() {
         : messagesRef.current
     )
     const requestMessages = [...baseMessages, userMsg]
-    const requestSessionId = activeSessionIdRef.current
     const optimisticMessages = retryUserMessage
       ? [...messagesRef.current, userMsg, assistantMsg]
       : [...baseMessages, userMsg, assistantMsg]
-    const requestSession = sessionsRef.current.find(session => session?.id === requestSessionId)
+    sessionsRef.current = sessionsRef.current.map(session => session?.id === requestSessionId
+      ? {
+          ...session,
+          activeAttachmentIds: nextActiveAttachmentIds,
+          activeWebUrls: nextActiveWebUrls,
+        }
+      : session)
+    if (mountedRef.current) setSessions(sessionsRef.current)
     const sessionTitle = resolveSessionTitle(requestSession, optimisticMessages)
     const generation = {
       jobId,
@@ -3192,6 +3389,10 @@ function App() {
         sessionTitle,
         systemInstruction: appConfig?.systemInstruction || '',
         requestMessages,
+        attachmentIds,
+        activeAttachmentIds: nextActiveAttachmentIds,
+        activeWebUrls: nextActiveWebUrls,
+        webContext,
       })
       if (response?.activeGeneration) {
         await applyAuthoritativeStartState(
@@ -3247,31 +3448,75 @@ function App() {
     }
   }, [handleSend])
 
-  const handleFileChange = useCallback(async (e) => {
-    const files = Array.from(e.target.files)
-    if (!files.length) return
+  const processAttachmentFiles = useCallback(async (files, { append = false } = {}) => {
+    const candidates = Array.from(files || [])
+    if (
+      candidates.length === 0
+      || attachmentProcessingRef.current
+      || activeGenerationRef.current?.jobId
+    ) return
 
+    attachmentProcessingRef.current = true
     setGenerating(true)
+    const previousDrafts = attachments
+    const baseDrafts = append ? previousDrafts : []
+    const currentSession = sessionsRef.current.find(session => session?.id === activeSessionIdRef.current)
+    const contextAttachments = activeAttachmentRefs(currentSession)
+    const accepted = []
+    let totalTextChars = 0
 
-    const newAttachments = []
-    for (const file of files) {
-      try {
-        const base64 = await fileToBase64(file)
-        newAttachments.push({
-          name: file.name,
-          mimeType: file.type,
-          data: base64
-        })
-      } catch (err) {
-        console.error("File processing error", err)
-        toast.error(t('chat.file_error'))
+    try {
+      for (const file of candidates) {
+        try {
+          validateAttachmentGroup([file], [...contextAttachments, ...baseDrafts, ...accepted])
+          const prepared = await processAttachmentFile(file)
+          const nextTextChars = totalTextChars + Number(prepared.modelText?.length || 0)
+          if (nextTextChars > 1_000_000) {
+            const error = new Error('Extracted attachment text exceeds 1,000,000 characters.')
+            error.code = 'attachment_text_too_large'
+            throw error
+          }
+          accepted.push(await putAttachment(prepared))
+          totalTextChars = nextTextChars
+        } catch (error) {
+          console.error('File processing error', error)
+          toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
+            defaultValue: error?.message || t('chat.file_error'),
+          }))
+        }
       }
-    }
 
-    setAttachments(prev => [...prev, ...newAttachments])
-    setGenerating(Boolean(activeGenerationRef.current?.jobId))
+      if (accepted.length > 0) {
+        setAttachments(previous => (append
+          ? mergeAttachmentRefs(previous, accepted)
+          : accepted))
+
+        if (!append) {
+          const keptIds = new Set(accepted.map(attachment => attachment.id).filter(Boolean))
+          const referencedIds = attachmentIdsFromSessions(sessionsRef.current)
+          for (const attachment of previousDrafts) {
+            if (
+              attachment?.id
+              && !keptIds.has(attachment.id)
+              && !referencedIds.has(attachment.id)
+            ) {
+              void deleteAttachment(attachment.id).catch(error => {
+                console.error('Draft attachment cleanup failed', error)
+              })
+            }
+          }
+        }
+      }
+    } finally {
+      attachmentProcessingRef.current = false
+      setGenerating(Boolean(activeGenerationRef.current?.jobId))
+    }
+  }, [attachments, setGenerating, t])
+
+  const handleFileChange = useCallback(async (event) => {
+    await processAttachmentFiles(event.target.files, { append: false })
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [t, setGenerating])
+  }, [processAttachmentFiles])
 
   const handleScreenshot = useCallback(async () => {
     const activeCrop = cropTargetRef.current
@@ -3411,35 +3656,87 @@ function App() {
   }, [appConfig, clearCropSelectionState, t])
 
   const removeAttachment = useCallback((index) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index))
+    setAttachments(previous => {
+      const removed = previous[index]
+      const next = previous.filter((_, itemIndex) => itemIndex !== index)
+      const referencedIds = attachmentIdsFromSessions(sessionsRef.current)
+      if (removed?.id && !referencedIds.has(removed.id)) {
+        void deleteAttachment(removed.id).catch(error => {
+          console.error('Draft attachment cleanup failed', error)
+        })
+      }
+      return next
+    })
   }, [])
 
-  const handlePaste = useCallback(async (e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+  const removeDraftWebUrl = useCallback((url) => {
+    setInput(previous => removePublicUrlFromText(previous, url))
+  }, [])
 
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          setGenerating(true);
-          try {
-            const base64 = await fileToBase64(file);
-            setAttachments(prev => [...prev, {
-              name: `pasted-image-${Date.now()}`,
-              mimeType: file.type,
-              data: base64
-            }]);
-          } catch (err) {
-            console.error("Paste error", err);
-            toast.error(t('chat.file_error'));
-          } finally {
-            setGenerating(Boolean(activeGenerationRef.current?.jobId));
-          }
-        }
-      }
-    }
-  }, [t, setGenerating])
+  const handlePaste = useCallback(async (event) => {
+    const items = Array.from(event.clipboardData?.items || [])
+    const pastedImages = items
+      .filter(item => item.type.startsWith('image/'))
+      .map((item, index) => {
+        const file = item.getAsFile()
+        if (!file) return null
+        const extension = file.type === 'image/jpeg' ? 'jpg' : (file.type === 'image/webp' ? 'webp' : 'png')
+        return new File(
+          [file],
+          `pasted-image-${Date.now()}-${index + 1}.${extension}`,
+          { type: file.type || 'image/png' },
+        )
+      })
+      .filter(Boolean)
+    if (pastedImages.length === 0) return
+    event.preventDefault()
+    await processAttachmentFiles(pastedImages, { append: true })
+  }, [processAttachmentFiles])
+
+  const hasDraggedFiles = useCallback(dataTransfer => (
+    Array.from(dataTransfer?.types || []).includes('Files')
+  ), [])
+
+  const resetFileDrag = useCallback(() => {
+    fileDragDepthRef.current = 0
+    setIsFileDragActive(false)
+  }, [])
+
+  const handleFileDragEnter = useCallback((event) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (isGenerating || dictationPhase !== 'idle' || showSettings) return
+    fileDragDepthRef.current += 1
+    setIsFileDragActive(true)
+  }, [dictationPhase, hasDraggedFiles, isGenerating, showSettings])
+
+  const handleFileDragOver = useCallback((event) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = (
+      isGenerating || dictationPhase !== 'idle' || showSettings
+    ) ? 'none' : 'copy'
+  }, [dictationPhase, hasDraggedFiles, isGenerating, showSettings])
+
+  const handleFileDragLeave = useCallback((event) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
+    if (fileDragDepthRef.current === 0) setIsFileDragActive(false)
+  }, [hasDraggedFiles])
+
+  const handleFileDrop = useCallback(async (event) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const files = Array.from(event.dataTransfer?.files || [])
+    resetFileDrag()
+    if (isGenerating || dictationPhase !== 'idle' || showSettings) return
+    await processAttachmentFiles(files, { append: true })
+  }, [dictationPhase, hasDraggedFiles, isGenerating, processAttachmentFiles, resetFileDrag, showSettings])
 
   const cancelStream = useCallback(() => {
     if (activeGenerationRef.current?.jobId) {
@@ -3632,7 +3929,24 @@ function App() {
   }
 
   return (
-    <div className="hera-panel flex h-screen min-h-0 min-w-0 flex-col overflow-hidden text-foreground">
+    <div
+      className="hera-panel relative flex h-screen min-h-0 min-w-0 flex-col overflow-hidden text-foreground"
+      onDragEnter={handleFileDragEnter}
+      onDragOver={handleFileDragOver}
+      onDragLeave={handleFileDragLeave}
+      onDrop={handleFileDrop}
+      onDragEnd={resetFileDrag}
+    >
+      {isFileDragActive && (
+        <div
+          data-testid="file-drop-overlay"
+          className="pointer-events-none absolute inset-2 z-[60] flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 p-6 backdrop-blur-sm"
+        >
+          <div className="rounded-xl bg-primary/10 px-5 py-3 text-center text-sm font-semibold text-primary shadow-sm">
+            {t('chat.drop_files')}
+          </div>
+        </div>
+      )}
       <AppHeader
         activeSessionTitle={activeSessionTitle}
         onRenameSession={(nextTitle) => renameSession(activeSessionId, nextTitle)}
@@ -3718,11 +4032,29 @@ function App() {
 
       <div className="p-4 bg-background shrink-0 border-t border-border/60" onWheel={handleComposerWheel}>
         <div className="hera-surface mx-auto w-full max-w-3xl overflow-hidden rounded-2xl transition-shadow focus-within:border-primary/35 focus-within:shadow-lg focus-within:shadow-primary/5">
+          {draftWebUrls.length > 0 && enableResearch && (
+            <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
+              {draftWebUrls.map(url => (
+                <div key={url} className="group relative flex max-w-[240px] shrink-0 items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 py-1 pl-2 pr-7 text-[11px]">
+                  <Globe className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="truncate">{url}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeDraftWebUrl(url)}
+                    aria-label={t('chat.tooltips.remove_link')}
+                    className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
               {attachments.map((att, idx) => (
                 <div key={`${att.name}-${idx}`} className="group relative flex max-w-[170px] shrink-0 items-center gap-2 rounded-lg border border-border/70 bg-secondary/65 py-1 pl-1 pr-7">
-                  {att.mimeType.startsWith('image/') ? (
+                  {att.mimeType.startsWith('image/') && att.data ? (
                     <img src={`data:${att.mimeType};base64,${att.data}`} alt="" className="h-7 w-7 rounded-md object-cover" />
                   ) : (
                     <span className="flex h-7 w-7 items-center justify-center rounded-md bg-background/70">
@@ -3730,6 +4062,9 @@ function App() {
                     </span>
                   )}
                   <span className="truncate text-[11px]">{att.name}</span>
+                  {att.availability && att.availability !== 'ready' && (
+                    <span className="text-[10px] text-destructive">{t('chat.attachment_unavailable')}</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeAttachment(idx)}
@@ -3760,7 +4095,7 @@ function App() {
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 className="hidden"
-                accept="image/*,.pdf,.doc,.docx,.txt,.csv,.json,.xml,.html,.md"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.csv,.json,.xml,.html,.htm,.md"
                 multiple
               />
               <button

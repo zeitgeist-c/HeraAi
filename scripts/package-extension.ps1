@@ -47,14 +47,6 @@ if (-not (Test-Path $releaseDir)) {
   New-Item -ItemType Directory -Path $releaseDir | Out-Null
 }
 
-Get-ChildItem -LiteralPath $releaseDir -Filter 'HeraAi-*.zip' -File -ErrorAction SilentlyContinue |
-  Remove-Item -Force
-
-$legacyZipPath = Join-Path $releaseDir 'HeraAi-extension.zip'
-if (Test-Path -LiteralPath $legacyZipPath) {
-  Remove-Item -LiteralPath $legacyZipPath -Force
-}
-
 Compress-Archive -Path (Join-Path $distDir '*') -DestinationPath $zipPath -Force
 
 Write-Host "Created $zipPath"

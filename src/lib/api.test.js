@@ -66,6 +66,8 @@ describe('streamResearch', () => {
     const fetchBody = JSON.parse(global.fetch.mock.calls[0][1].body)
     expect(fetchBody.query).toBe('Dunya su an Gunes yorungesinde hangi tarihte ve konumda')
     expect(fetchBody.query).not.toBe('hangi tarihten bahsediyorsun')
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer tavily-key')
+    expect(fetchBody).not.toHaveProperty('api_key')
   })
 
   it('passes original question, generated query, conversation context and sources into the final answer prompt', async () => {
@@ -165,6 +167,82 @@ describe('streamResearch', () => {
     )
     expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
   })
+
+  it('routes exact public URLs through Gemini URL Context without Tavily Search', async () => {
+    mocks.generateContentMock.mockResolvedValueOnce({
+      text: 'Verified page summary',
+      candidates: [{
+        urlContextMetadata: {
+          urlMetadata: [{
+            retrievedUrl: 'https://example.com/article',
+            urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
+          }],
+        },
+      }],
+    })
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'Summarize this page' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [],
+      undefined,
+      DEFAULT_MODEL,
+      { language: 'en', webContext: { kind: 'url', urls: ['https://example.com/article'] } },
+    ))
+
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'chunk', data: { text: 'Verified page summary' } },
+      expect.objectContaining({ event: 'sources' }),
+    ]))
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(mocks.clientOptionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      httpOptions: { apiVersion: 'v1beta' },
+    }))
+    expect(mocks.generateContentMock.mock.calls[0][0].config.tools).toEqual([{ urlContext: {} }])
+  })
+
+  it('falls back to Tavily Extract when URL Context metadata is incomplete', async () => {
+    mocks.generateContentMock.mockResolvedValueOnce({ text: 'Unverified answer', candidates: [] })
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [{ url: 'https://example.com/article', raw_content: '# Article\nReliable content' }],
+        failed_results: [],
+      }),
+    })
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'Summarize this page' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [{ id: 't1', key: 'tavily-key' }],
+      undefined,
+      DEFAULT_MODEL,
+      { language: 'en', webContext: { kind: 'url', urls: ['https://example.com/article'] } },
+    ))
+
+    expect(global.fetch).toHaveBeenCalledWith('https://api.tavily.com/extract', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer tavily-key' }),
+    }))
+    const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts.at(-1).text
+    expect(finalPrompt).toContain('BEGIN UNTRUSTED WEB PAGE')
+    expect(finalPrompt).toContain('Reliable content')
+    expect(finalPrompt).not.toContain('Unverified answer')
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+  })
+
+  it('does not return an unverified answer when both URL providers fail', async () => {
+    mocks.generateContentMock.mockResolvedValueOnce({ text: 'Unverified answer', candidates: [] })
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'Summarize this page' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [],
+      undefined,
+      DEFAULT_MODEL,
+      { webContext: { kind: 'url', urls: ['https://example.com/article'] } },
+    ))
+    expect(events.find(event => event.event === 'chunk')).toBeUndefined()
+    expect(events.find(event => event.event === 'error')?.data.code).toBe('tavily_key_missing')
+  })
 })
 
 describe('streamVision', () => {
@@ -188,9 +266,11 @@ describe('streamVision', () => {
 
     const parts = mocks.generateContentStreamMock.mock.calls[0][0].contents[0].parts
     expect(parts).toEqual([
-      { text: 'Cevir' },
+      { text: 'Attached file: first.png' },
       { inlineData: { data: 'first-image', mimeType: 'image/png' } },
+      { text: 'Attached file: second.png' },
       { inlineData: { data: 'second-image', mimeType: 'image/png' } },
+      { text: 'Cevir' },
     ])
   })
 
@@ -205,8 +285,9 @@ describe('streamVision', () => {
 
     const parts = mocks.generateContentStreamMock.mock.calls[0][0].contents[0].parts
     expect(parts).toEqual([
-      { text: 'Cevir' },
+      { text: 'Attached file: image.png' },
       { inlineData: { data: 'fallback-image', mimeType: 'image/png' } },
+      { text: 'Cevir' },
     ])
   })
 })

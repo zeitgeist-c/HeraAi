@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using dual APIs (Google Gemini Direct & OpenRouter) with support for multiple languages (i18next).
+Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using Google Gemini and Tavily with support for multiple languages (i18next).
 
 The extension runs in two primary contexts:
 - **Side Panel (UI)**: The main React application (`src/App.jsx`).
@@ -10,9 +10,11 @@ The extension runs in two primary contexts:
 
 ## API Providers
 
-Hera abstracts two different API backends:
-1. **Google Gemini (Direct)**: Uses `@google/genai` to stream responses directly from Google. Handles multi-modal inputs natively (PDF, Images, Text).
-2. **OpenRouter (REST)**: Acts as a gateway to multiple LLMs (OpenAI, Anthropic, DeepSeek, Meta, etc.) via Server-Sent Events (SSE). It handles capabilities strictly based on model metadata (e.g., some MiniMax models support images, whereas DeepSeek is text-only).
+Hera uses two provider APIs:
+1. **Google Gemini (Direct)**: Streams chat and multimodal responses, accepts image/PDF inline data, and reads public URLs through URL Context.
+2. **Tavily**: Provides general web search and exact-page extraction fallback when Gemini URL Context cannot retrieve a public URL.
+
+OpenRouter and Ollama are not present in the current application.
 
 ## Core Features & Data Flow
 
@@ -20,8 +22,6 @@ Hera abstracts two different API backends:
 The application relies heavily on local Chrome storage for state persistence. Key variables include:
 - `apiKeys` (Array): Saved API keys.
 - `activeKeyIndex` (Int): Currently selected API key index.
-- `apiProvider` (String): Chosen provider (`google` or `openrouter`).
-- `openRouterKey` (String): Dedicated key for OpenRouter routing.
 - `sessions` (Array): Chat history structured locally.
 - `theme` (String): UI theme (`light`, `dark`, or `system`).
 
@@ -30,7 +30,7 @@ Hera allows users to crop sections of the active website.
 1. User clicks the crop icon in React UI.
 2. `chrome.tabs.captureVisibleTab` takes a screenshot of the active window.
 3. The image is loaded into a `<canvas>` overlay where the user drags a selection box.
-4. The cropped `base64` image is appended directly to the `attachments` array and processed by `fileParsers.js`.
+4. The cropped image is stored in the extension's `heraai-attachments` IndexedDB database and messages retain metadata-only attachment references.
 
 **Limitation Warning:** Chrome security policies prevent screenshots on internal URLs like `chrome://`, `chrome-extension://`, and empty fallback pages.
 

@@ -64,9 +64,10 @@ If every key for a required provider is in cooldown at the same time, the reques
 Use the globe button in the chat input area.
 
 - Off: Gemini answers from the chat context.
-- On: Tavily searches the web, then Gemini writes an answer using the search results and sources.
+- On, with no URL: Tavily searches the web, then Gemini writes an answer using the search results and sources.
+- On, with one to five public URLs: Gemini URL Context reads only those pages. If retrieval fails and a Tavily key is configured, Tavily Extract is used as the exact-page fallback.
 
-Tavily is only contacted when Web Research is on. Translate, Summarize, Explain, Vision and OCR all use Gemini only. If no Tavily key is configured, normal chat still works; only Web Research is unavailable.
+Tavily is only contacted when Web Research is on. Exact public URL reading first uses Gemini and can work without Tavily; general web search and URL extraction fallback require a Tavily key. Translate, Summarize, Explain, Vision and OCR use Gemini.
 
 ## Personal Use Notice
 

@@ -14,7 +14,7 @@ describe('session import and export', () => {
     vi.restoreAllMocks()
   })
 
-  it('exports version 1.1 with custom-title and starred metadata', async () => {
+  it('exports version 2.0 metadata without attachment payloads', async () => {
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hera-export')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
@@ -25,22 +25,37 @@ describe('session import and export', () => {
       isTitleCustom: true,
       isStarred: true,
       updatedAt: 100,
-      messages: [{ role: 'user', content: 'Internal prompt', displayContent: '' }],
+      activeAttachmentIds: ['file-1'],
+      activeWebUrls: ['https://example.com/'],
+      messages: [{
+        role: 'user',
+        content: 'Internal prompt',
+        displayContent: '',
+        attachments: [{ id: 'file-1', name: 'notes.txt', mimeType: 'text/plain', data: 'secret' }],
+      }],
     }])
 
     const blob = createObjectURL.mock.calls[0][0]
     const exported = JSON.parse(await readBlob(blob))
     expect(exported).toMatchObject({
-      version: '1.1',
+      version: '2.0',
       sessions: [{
         id: 'session-1',
         title: 'Saved title',
         isTitleCustom: true,
         isStarred: true,
+        activeAttachmentIds: ['file-1'],
+        activeWebUrls: ['https://example.com/'],
         messages: [{
           role: 'user',
           content: 'Internal prompt',
           displayContent: '',
+          attachments: [{
+            id: 'file-1',
+            name: 'notes.txt',
+            mimeType: 'text/plain',
+            availability: 'omitted',
+          }],
         }],
       }],
     })
@@ -57,7 +72,7 @@ describe('session import and export', () => {
       }],
     })], 'legacy.json', { type: 'application/json' })
 
-    await expect(importSessions(file)).resolves.toEqual([{
+    await expect(importSessions(file)).resolves.toMatchObject([{
       id: 'legacy-session',
       title: 'Legacy title',
       isTitleCustom: false,
@@ -80,7 +95,7 @@ describe('session import and export', () => {
       }],
     })], 'current.json', { type: 'application/json' })
 
-    await expect(importSessions(file)).resolves.toEqual([{
+    await expect(importSessions(file)).resolves.toMatchObject([{
       id: 'starred-session',
       title: 'Pinned title',
       isTitleCustom: true,
