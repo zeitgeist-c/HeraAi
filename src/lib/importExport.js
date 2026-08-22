@@ -1,6 +1,6 @@
 export const exportSessions = (sessions) => {
   const exportData = {
-    version: '1.1',
+    version: '2.0',
     exportedAt: new Date().toISOString(),
     sessions: sessions.map(s => ({
       id: s.id,
@@ -8,14 +8,23 @@ export const exportSessions = (sessions) => {
       isTitleCustom: s.isTitleCustom === true,
       isStarred: s.isStarred === true,
       updatedAt: s.updatedAt,
+      activeAttachmentIds: s.activeAttachmentIds || [],
+      activeWebUrls: s.activeWebUrls || [],
       messages: s.messages.map(m => ({
         role: m.role,
         content: m.content,
         ...(typeof m.displayContent === 'string' ? { displayContent: m.displayContent } : {}),
+        ...(typeof m.mode === 'string' ? { mode: m.mode } : {}),
+        ...(Array.isArray(m.webUrls) ? { webUrls: m.webUrls } : {}),
+        ...(Array.isArray(m.displayWebUrls) ? { displayWebUrls: m.displayWebUrls } : {}),
+        ...(Array.isArray(m.displayAttachmentIds) ? { displayAttachmentIds: m.displayAttachmentIds } : {}),
         attachments: m.attachments ? m.attachments.map(a => ({
+          id: a.id,
           name: a.name,
           mimeType: a.mimeType,
-          data: a.data
+          size: a.size || 0,
+          kind: a.kind,
+          availability: 'omitted'
         })) : []
       }))
     }))
@@ -50,7 +59,16 @@ export const importSessions = (file) => {
           isTitleCustom: s.isTitleCustom === true,
           isStarred: s.isStarred === true,
           updatedAt: s.updatedAt || Date.now(),
-          messages: s.messages || []
+          activeAttachmentIds: Array.isArray(s.activeAttachmentIds) ? s.activeAttachmentIds : [],
+          activeWebUrls: Array.isArray(s.activeWebUrls) ? s.activeWebUrls : [],
+          messages: (s.messages || []).map(message => ({
+            ...message,
+            attachments: (message.attachments || []).map(attachment => (
+              attachment?.data
+                ? attachment
+                : { ...attachment, availability: attachment.availability || 'missing' }
+            )),
+          })),
         }))
 
         resolve(sessions)

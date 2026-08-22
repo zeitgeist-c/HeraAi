@@ -5,6 +5,7 @@ import {
   SNAPSHOT_THROTTLE_MS,
   createGenerationWorkerRuntime,
 } from './generation-worker.js'
+import { cleanupOrphanAttachments, putAttachment } from '../lib/attachmentStore.js'
 
 function asyncEvents(events) {
   return (async function* generateEvents() {
@@ -21,6 +22,46 @@ function createEngines(events = []) {
 }
 
 describe('generation worker runtime', () => {
+  it('hydrates active attachment references and reports missing records explicitly', async () => {
+    const ref = await putAttachment({
+      blob: new Blob(['document'], { type: 'text/plain' }),
+      modelText: 'Document body',
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 8,
+      kind: 'text',
+    })
+    const engines = createEngines([])
+    const runtime = createGenerationWorkerRuntime({ emit: vi.fn(), engines })
+    await runtime.handleMessage({
+      kind: 'start',
+      jobId: 'hydrate-job',
+      mode: 'chat',
+      requestMessages: [{ role: 'user', content: 'Read it', attachments: [ref] }],
+      attachmentIds: [ref.id],
+    })
+    expect(engines.streamChat.mock.calls[0][0][0].attachments[0]).toMatchObject({
+      id: ref.id,
+      modelText: 'Document body',
+    })
+    await cleanupOrphanAttachments([])
+
+    const emit = vi.fn()
+    const missingRuntime = createGenerationWorkerRuntime({ emit, engines: createEngines([]) })
+    await missingRuntime.handleMessage({
+      kind: 'start',
+      jobId: 'missing-job',
+      mode: 'chat',
+      requestMessages: [{
+        role: 'user',
+        content: 'Read it',
+        attachments: [{ ...ref, id: 'missing-id' }],
+      }],
+      attachmentIds: ['missing-id'],
+    })
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', code: 'attachment_missing' }))
+  })
+
   it.each([
     ['chat', 'streamChat'],
     ['vision', 'streamVision'],

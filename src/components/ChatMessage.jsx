@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, FileText, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
+import { Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -95,6 +95,13 @@ const ChatMessage = ({
   const retryMenuRef = useRef(null)
   const retryTriggerRef = useRef(null)
   const sources = Array.isArray(message.sources) ? message.sources : []
+  const messageAttachments = Array.isArray(message.attachments) ? message.attachments : []
+  const displayedAttachments = Array.isArray(message.displayAttachmentIds)
+    ? messageAttachments.filter(attachment => message.displayAttachmentIds.includes(attachment?.id))
+    : messageAttachments
+  const displayedWebUrls = Array.isArray(message.displayWebUrls)
+    ? message.displayWebUrls
+    : (Array.isArray(message.webUrls) ? message.webUrls : [])
   const isPending = message.status === 'thinking' || message.status === 'streaming'
   const speechEligible = speechEnabled
     && Boolean(visibleContent)
@@ -281,23 +288,38 @@ const ChatMessage = ({
             </div>
           )}
 
-          {message.attachments?.length > 0 && (
+          {(displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (
             <div className={`${visibleContent ? 'mt-2 ' : ''}flex flex-wrap gap-1.5`}>
-              {message.attachments.map((attachment, index) => (
+              {displayedAttachments.map((attachment, index) => (
                 <div
                   key={`${attachment.name || 'attachment'}-${index}`}
                   className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground"
                 >
-                  {attachment.mimeType.startsWith('image/')
+                  {attachment.mimeType?.startsWith('image/')
                     ? <ImageIcon className="h-3 w-3 shrink-0" />
                     : <FileText className="h-3 w-3 shrink-0" />}
                   <span className="max-w-[150px] truncate">{attachment.name || t('chat.attachment')}</span>
+                  {attachment.availability && attachment.availability !== 'ready' && (
+                    <span className="text-destructive">{t('chat.attachment_unavailable')}</span>
+                  )}
                 </div>
+              ))}
+              {displayedWebUrls.map(url => (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center gap-1.5 rounded-lg border border-primary/20 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground no-underline hover:border-primary/35 hover:text-foreground"
+                >
+                  <Globe className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="max-w-[180px] truncate">{url}</span>
+                </a>
               ))}
             </div>
           )}
 
-          {(visibleContent || message.attachments?.length > 0) && (
+          {(visibleContent || displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (
             <div className="relative mt-1.5 flex flex-col items-end gap-1.5">
               <div className="flex justify-end gap-0.5">
                 {visibleContent && (
@@ -457,6 +479,9 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
     prevMessage.attachments === nextMessage.attachments &&
+    prevMessage.displayAttachmentIds === nextMessage.displayAttachmentIds &&
+    prevMessage.webUrls === nextMessage.webUrls &&
+    prevMessage.displayWebUrls === nextMessage.displayWebUrls &&
     prevProps.currentModel === nextProps.currentModel &&
     prevProps.retryDisabled === nextProps.retryDisabled &&
     prevProps.showSources === nextProps.showSources &&

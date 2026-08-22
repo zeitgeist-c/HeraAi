@@ -71,6 +71,31 @@ describe('ChatMessage copy actions', () => {
     expect(onEdit).not.toHaveBeenCalled()
   })
 
+  it('shows only newly introduced context chips without draft removal buttons', () => {
+    render(<ChatMessage message={{
+      id: 11,
+      role: 'user',
+      content: 'Follow up with one new source',
+      attachments: [
+        { id: 'old-file', name: 'old.pdf', mimeType: 'application/pdf' },
+        { id: 'new-file', name: 'new.pdf', mimeType: 'application/pdf' },
+      ],
+      displayAttachmentIds: ['new-file'],
+      webUrls: ['https://example.com/old', 'https://example.com/new'],
+      displayWebUrls: ['https://example.com/new'],
+    }} />)
+
+    expect(screen.queryByText('old.pdf')).not.toBeInTheDocument()
+    expect(screen.getByText('new.pdf')).toBeInTheDocument()
+    expect(screen.queryByText('https://example.com/old')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'https://example.com/new' })).toHaveAttribute(
+      'href',
+      'https://example.com/new',
+    )
+    expect(screen.queryByRole('button', { name: /Remove link|Bağlantıyı kaldır/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remove attachment|Eki kaldır/i })).not.toBeInTheDocument()
+  })
+
   it('retries a user question with the model selected from the retry menu', () => {
     const onRetry = vi.fn()
     const message = { id: 5, role: 'user', content: 'Compare this answer' }

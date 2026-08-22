@@ -109,6 +109,15 @@ function getStopButton() {
   return Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-square'));
 }
 
+function validImageBytes(type, label = '') {
+  const suffix = Array.from(new TextEncoder().encode(label));
+  if (type === 'image/jpeg') return new Uint8Array([0xff, 0xd8, 0xff, ...suffix]);
+  if (type === 'image/webp') {
+    return new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, ...suffix]);
+  }
+  return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...suffix]);
+}
+
 function getChatSurface() {
   const main = document.querySelector('main');
   if (!main) throw new Error('Chat surface is not rendered');
@@ -202,6 +211,7 @@ describe('HeraAi App', () => {
     const options = {
       systemInstruction: message.systemInstruction || '',
       language: message.language || 'tr',
+      ...(message.webContext ? { webContext: message.webContext } : {}),
     };
     let content = '';
     let sources = [];
@@ -1866,6 +1876,112 @@ describe('HeraAi App', () => {
     ]);
   });
 
+  it('routes public URLs through exact-page context and keeps them active for follow-ups', async () => {
+    api.streamResearch
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Page summary' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Page follow-up' } }]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea');
+    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
+    fireEvent.click(webButton);
+    fireEvent.change(input, { target: { value: 'https://example.com/article' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Page summary')).toBeInTheDocument();
+
+    expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
+      kind: 'url',
+      urls: ['https://example.com/article'],
+    });
+    expect(screen.getAllByText('https://example.com/article').length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.change(input, { target: { value: 'What is the main conclusion?' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Page follow-up')).toBeInTheDocument();
+    expect(api.streamResearch.mock.calls[1][5].webContext.urls).toEqual(['https://example.com/article']);
+  });
+
+  it('shows individual draft URL removal controls and preserves the remaining prompt', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea');
+    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
+    fireEvent.click(webButton);
+    fireEvent.change(input, {
+      target: {
+        value: 'Compare [first](https://example.com/a) with https://example.com/b and keep this text.',
+      },
+    });
+
+    const removeButtons = screen.getAllByRole('button', { name: /Remove link|Bağlantıyı kaldır/i });
+    expect(removeButtons).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /Clear pages|Sayfaları temizle/i })).not.toBeInTheDocument();
+
+    fireEvent.click(removeButtons[0]);
+    expect(input).toHaveValue('Compare with https://example.com/b and keep this text.');
+    expect(screen.getAllByRole('button', { name: /Remove link|Bağlantıyı kaldır/i })).toHaveLength(1);
+  });
+
+  it('clears draft file chips after send while retaining the file for a vision follow-up', async () => {
+    api.streamVision
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'First file answer' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'File follow-up answer' } }]));
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('input[type="file"][accept*="image"]')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    const composer = input.closest('.hera-surface');
+    const fileInput = document.querySelector('input[type="file"][accept*="image"]');
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File([validImageBytes('image/png', 'context')], 'context.png', { type: 'image/png' })],
+      },
+    });
+    await waitFor(() => expect(within(composer).getByText('context.png')).toBeInTheDocument());
+    fireEvent.change(input, { target: { value: 'Inspect this file' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('First file answer')).toBeInTheDocument();
+
+    expect(within(composer).queryByText('context.png')).not.toBeInTheDocument();
+    expect(screen.getAllByText('context.png')).toHaveLength(1);
+
+    fireEvent.change(input, { target: { value: 'What detail did I miss?' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('File follow-up answer')).toBeInTheDocument();
+    expect(api.streamVision).toHaveBeenCalledTimes(2);
+    const followUpMessage = api.streamVision.mock.calls[1][0].at(-1);
+    expect(followUpMessage.attachments).toEqual([
+      expect.objectContaining({ name: 'context.png', mimeType: 'image/png' }),
+    ]);
+    expect(followUpMessage.displayAttachmentIds).toEqual([]);
+    expect(screen.getAllByText('context.png')).toHaveLength(1);
+  });
+
+  it('accepts dropped files across the chat panel and appends them to the draft', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('input[type="file"][accept*="image"]')).toBeInTheDocument());
+    const fileInput = document.querySelector('input[type="file"][accept*="image"]');
+    const panel = document.querySelector('.hera-panel');
+    const firstFile = new File([validImageBytes('image/png', 'first')], 'first.png', { type: 'image/png' });
+    const secondFile = new File([validImageBytes('image/webp', 'second')], 'second.webp', { type: 'image/webp' });
+
+    fireEvent.change(fileInput, { target: { files: [firstFile] } });
+    await waitFor(() => expect(screen.getByText('first.png')).toBeInTheDocument());
+
+    const dataTransfer = { types: ['Files'], files: [secondFile], dropEffect: 'none' };
+    fireEvent.dragEnter(panel, { dataTransfer });
+    expect(screen.getByTestId('file-drop-overlay')).toBeInTheDocument();
+    fireEvent.drop(panel, { dataTransfer });
+
+    await waitFor(() => expect(screen.getByText('second.webp')).toBeInTheDocument());
+    expect(screen.getByText('first.png')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-drop-overlay')).not.toBeInTheDocument();
+
+    fireEvent.dragEnter(panel, { dataTransfer: { types: ['text/plain'], files: [] } });
+    expect(screen.queryByTestId('file-drop-overlay')).not.toBeInTheDocument();
+  });
+
   it('should keep all image attachments when a quick translate action sends a vision request', async () => {
     api.streamVision.mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Translated all crops' } }]));
     const originalCreateElement = document.createElement.bind(document);
@@ -1915,7 +2031,11 @@ describe('HeraAi App', () => {
     const requestMessages = api.streamVision.mock.calls[0][0];
     const userMessage = requestMessages.at(-1);
     expect(userMessage.attachments).toHaveLength(2);
-    expect(userMessage.attachments.map(att => att.data)).toEqual(['crop-1', 'crop-2']);
+    expect(userMessage.attachments.map(att => att.id)).toEqual([
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(userMessage.attachments.every(att => att.data == null)).toBe(true);
     expect(api.streamVision.mock.calls[0][1]).toBeNull();
     document.createElement = originalCreateElement;
     global.Image = OriginalImage;
@@ -2091,7 +2211,7 @@ describe('HeraAi App', () => {
     expect(getOcrButton()).toBeDisabled();
 
     for (const [name, type] of [['scan.png', 'image/png'], ['photo.jpg', 'image/jpeg'], ['page.webp', 'image/webp']]) {
-      fireEvent.change(fileInput, { target: { files: [new File(['image'], name, { type })] } });
+      fireEvent.change(fileInput, { target: { files: [new File([validImageBytes(type)], name, { type })] } });
       await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument());
       expect(getOcrButton()).toBeEnabled();
     }
@@ -2108,8 +2228,8 @@ describe('HeraAi App', () => {
     fireEvent.change(fileInput, {
       target: {
         files: [
-          new File(['image-1'], 'first.png', { type: 'image/png' }),
-          new File(['image-2'], 'second.webp', { type: 'image/webp' }),
+          new File([validImageBytes('image/png', 'image-1')], 'first.png', { type: 'image/png' }),
+          new File([validImageBytes('image/webp', 'image-2')], 'second.webp', { type: 'image/webp' }),
         ],
       },
     });
@@ -2576,7 +2696,11 @@ describe('HeraAi App', () => {
   });
 
   it('preserves image attachments when retrying an attachment-only vision question', async () => {
-    const attachment = { name: 'diagram.png', mimeType: 'image/png', data: 'base64-image' };
+    const attachment = {
+      name: 'diagram.png',
+      mimeType: 'image/png',
+      data: btoa(String.fromCharCode(...validImageBytes('image/png', 'image-data'))),
+    };
     currentStorage = {
       theme: 'light',
       startupBehavior: 'resume',
@@ -2625,7 +2749,12 @@ describe('HeraAi App', () => {
         content: 'Hidden OCR retry instruction',
         displayContent: '',
         mode: 'vision',
-        attachments: [attachment],
+        attachments: [expect.objectContaining({
+          id: expect.any(String),
+          name: 'diagram.png',
+          mimeType: 'image/png',
+          availability: 'ready',
+        })],
         retryOfMessageId: 'vision-user',
       }),
     ]);
@@ -2665,7 +2794,7 @@ describe('HeraAi App', () => {
     fireEvent.change(composer, { target: { value: 'Unsent draft' } });
     const fileInput = document.querySelector('input[type="file"][accept*="image"]');
     fireEvent.change(fileInput, {
-      target: { files: [new File(['draft-image'], 'draft.png', { type: 'image/png' })] },
+      target: { files: [new File([validImageBytes('image/png', 'draft-image')], 'draft.png', { type: 'image/png' })] },
     });
     await waitFor(() => expect(screen.getByText('draft.png')).toBeInTheDocument());
 

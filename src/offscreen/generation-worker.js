@@ -1,4 +1,5 @@
 import { streamChat, streamResearch, streamVision } from '../lib/api.js'
+import { blobToBase64, getAttachment } from '../lib/attachmentStore.js'
 
 export const SNAPSHOT_THROTTLE_MS = 150
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -25,8 +26,56 @@ function normalizeErrorCode(error) {
   return DEFAULT_ERROR_CODE
 }
 
-function selectStream(payload, signal, engines) {
-  const requestMessages = Array.isArray(payload.requestMessages) ? payload.requestMessages : []
+async function hydrateRequestMessages(payload) {
+  const original = Array.isArray(payload.requestMessages) ? payload.requestMessages : []
+  const lastUserIndex = original.findLastIndex(message => message?.role === 'user')
+  if (lastUserIndex < 0) return original
+  const latestAttachments = Array.isArray(original[lastUserIndex]?.attachments)
+    ? original[lastUserIndex].attachments
+    : []
+  const requestedIds = Array.isArray(payload.attachmentIds) && payload.attachmentIds.length > 0
+    ? payload.attachmentIds
+    : latestAttachments.map(attachment => attachment?.id).filter(Boolean)
+  if (requestedIds.length === 0) return original
+
+  const refsById = new Map(latestAttachments.filter(ref => ref?.id).map(ref => [ref.id, ref]))
+  const hydrated = []
+  let extractedChars = 0
+  for (const id of requestedIds) {
+    const ref = refsById.get(id)
+      || original.flatMap(message => message?.attachments || []).find(attachment => attachment?.id === id)
+    const record = await getAttachment(id)
+    if (!ref || !record?.blob) {
+      const error = new Error(`Attachment is missing: ${ref?.name || id}`)
+      error.code = 'attachment_missing'
+      throw error
+    }
+    const attachment = { ...ref, availability: 'ready' }
+    if (typeof record.modelText === 'string') {
+      extractedChars += record.modelText.length
+      if (extractedChars > 1_000_000) {
+        const error = new Error('Extracted attachment text exceeds the request limit.')
+        error.code = 'attachment_text_too_large'
+        throw error
+      }
+      attachment.modelText = record.modelText
+    } else {
+      attachment.data = await blobToBase64(record.blob)
+    }
+    hydrated.push(attachment)
+  }
+
+  return original.map((message, index) => {
+    const stripped = (message?.attachments || []).map(({ data: _data, modelText: _modelText, ...ref }) => ref)
+    return {
+      ...message,
+      attachments: index === lastUserIndex ? hydrated : stripped,
+    }
+  })
+}
+
+async function selectStream(payload, signal, engines) {
+  const requestMessages = await hydrateRequestMessages(payload)
   const geminiKeys = Array.isArray(payload.geminiKeys) ? payload.geminiKeys : []
   const tavilyKeys = Array.isArray(payload.tavilyKeys) ? payload.tavilyKeys : []
   const requestOptions = {
@@ -35,7 +84,10 @@ function selectStream(payload, signal, engines) {
   }
 
   if (payload.mode === 'web') {
-    return engines.streamResearch(requestMessages, geminiKeys, tavilyKeys, signal, payload.model, requestOptions)
+    const researchOptions = payload.webContext
+      ? { ...requestOptions, webContext: payload.webContext }
+      : requestOptions
+    return engines.streamResearch(requestMessages, geminiKeys, tavilyKeys, signal, payload.model, researchOptions)
   }
   if (payload.mode === 'vision') {
     return engines.streamVision(requestMessages, null, requestOptions, geminiKeys, signal, payload.model)
@@ -169,7 +221,7 @@ export function createGenerationWorkerRuntime({
     }, HEARTBEAT_INTERVAL_MS)
 
     try {
-      const stream = selectStream(job.payload, job.controller.signal, engines)
+      const stream = await selectStream(job.payload, job.controller.signal, engines)
       for await (const event of stream) {
         if (job.controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 

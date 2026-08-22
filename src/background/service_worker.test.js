@@ -480,7 +480,13 @@ describe('background generation coordinator', () => {
     });
     const listener = await loadWorker(mock);
 
-    const response = await dispatch(listener, startMessage({ mode: 'web' }));
+    const response = await dispatch(listener, startMessage({
+      mode: 'web',
+      attachmentIds: ['attachment-1'],
+      activeAttachmentIds: ['attachment-1', 'attachment-2'],
+      activeWebUrls: ['https://example.com/article', 'https://example.com/previous'],
+      webContext: { kind: 'url', urls: ['https://example.com/article'] },
+    }));
 
     expect(response.ok).toBe(true);
     expect(keyManagerMocks.resolveKeysForRequest.mock.calls).toEqual([
@@ -491,6 +497,14 @@ describe('background generation coordinator', () => {
     expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0].tavilyKeys).toEqual([
       { id: 't1', key: 'tavily-secret' },
     ]);
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0]).toMatchObject({
+      attachmentIds: ['attachment-1'],
+      webContext: { kind: 'url', urls: ['https://example.com/article'] },
+    });
+    expect(mock.storageSet.mock.calls[0][0].sessions[0]).toMatchObject({
+      activeAttachmentIds: ['attachment-1', 'attachment-2'],
+      activeWebUrls: ['https://example.com/article', 'https://example.com/previous'],
+    });
   });
 
   it('rejects a second job while a different generation is active', async () => {

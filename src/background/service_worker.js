@@ -615,6 +615,14 @@ async function handleGenerationStart(message) {
     isStarred: existingSession?.isStarred === true,
     updatedAt: queuedGeneration.updatedAt,
     messages: optimisticMessages,
+    activeAttachmentIds: Array.isArray(message.activeAttachmentIds)
+      ? message.activeAttachmentIds
+      : (Array.isArray(message.attachmentIds) ? message.attachmentIds : (existingSession?.activeAttachmentIds || [])),
+    activeWebUrls: Array.isArray(message.activeWebUrls)
+      ? message.activeWebUrls
+      : (message.webContext?.kind === 'none'
+          ? (existingSession?.activeWebUrls || [])
+          : (Array.isArray(message.webContext?.urls) ? message.webContext.urls : (existingSession?.activeWebUrls || []))),
   };
   const nextSessions = [
     ...storedSessions.filter(session => session?.id !== message.sessionId),
@@ -649,7 +657,7 @@ async function handleGenerationStart(message) {
     let tavilyResolution = { keys: [], allInCooldown: false };
     if (runningGeneration.mode === 'web') {
       tavilyResolution = await resolveKeysForRequest('tavily');
-      if (tavilyResolution.allInCooldown) {
+      if (tavilyResolution.allInCooldown && message.webContext?.kind !== 'url') {
         const failedGeneration = await writeTerminalError(
           runningGeneration,
           'all_keys_cooldown',
@@ -674,6 +682,8 @@ async function handleGenerationStart(message) {
       assistantMessageId: runningGeneration.assistantMessageId,
       startedAt: runningGeneration.startedAt,
       requestMessages,
+      attachmentIds: Array.isArray(message.attachmentIds) ? message.attachmentIds : [],
+      webContext: message.webContext || { kind: 'none', urls: [] },
       geminiKeys: geminiResolution.keys || [],
       tavilyKeys: tavilyResolution.keys || [],
       model: runningGeneration.model,
