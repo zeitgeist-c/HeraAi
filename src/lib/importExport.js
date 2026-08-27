@@ -1,6 +1,6 @@
 export const exportSessions = (sessions) => {
   const exportData = {
-    version: '2.0',
+    version: '2.1',
     exportedAt: new Date().toISOString(),
     sessions: sessions.map(s => ({
       id: s.id,
@@ -14,6 +14,7 @@ export const exportSessions = (sessions) => {
         role: m.role,
         content: m.content,
         ...(typeof m.displayContent === 'string' ? { displayContent: m.displayContent } : {}),
+        ...(typeof m.model === 'string' && m.model ? { model: m.model } : {}),
         ...(typeof m.mode === 'string' ? { mode: m.mode } : {}),
         ...(Array.isArray(m.webUrls) ? { webUrls: m.webUrls } : {}),
         ...(Array.isArray(m.displayWebUrls) ? { displayWebUrls: m.displayWebUrls } : {}),

@@ -365,6 +365,7 @@ describe('background generation coordinator', () => {
             role: 'model',
             content: '',
             status: 'thinking',
+            model: 'gemini-3.6-flash',
           }),
         ],
       }),

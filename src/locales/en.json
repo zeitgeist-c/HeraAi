@@ -189,7 +189,9 @@
             "cancel_transcription": "Cancel transcription",
             "read_aloud": "Read aloud",
             "preparing_speech": "Preparing audio...",
-            "stop_speech": "Stop reading"
+            "stop_speech": "Stop reading",
+            "scroll_to_start": "Go to the start of the chat",
+            "scroll_to_end": "Go to the end of the chat"
         },
         "retry_model": {
             "title": "Try again with a model",
@@ -222,8 +224,8 @@
         "speech_failed": "This response could not be read aloud.",
         "speech_too_long": "This response is too long to read aloud safely.",
         "code_block_skipped": "Code block skipped.",
-        "new_messages": "New messages",
         "all_keys_cooldown": "All API keys are waiting after rate limits. Earliest retry: {{time}}",
+        "model_used": "Model used",
         "sources_label": "Sources",
         "status": {
             "thinking": "Thinking...",
