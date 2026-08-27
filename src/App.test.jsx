@@ -358,6 +358,7 @@ describe('HeraAi App', () => {
           content: '',
           status: 'thinking',
           sources: [],
+          model: message.model,
         };
         const existingSession = (currentStorage.sessions || [])
           .find(session => session.id === message.sessionId);
@@ -538,6 +539,94 @@ describe('HeraAi App', () => {
     expect(api.streamChat.mock.calls[0][0].at(-1).content).toBe('Button click question');
   });
 
+  it('focuses the chat textarea from composer padding without stealing interactive control focus', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    const composer = input.closest('.hera-surface');
+    const modelSelect = document.querySelector('select[data-testid="model-selector"]');
+    modelSelect.focus();
+
+    fireEvent.pointerDown(composer, { button: 0 });
+    expect(input).toHaveFocus();
+
+    modelSelect.focus();
+    fireEvent.pointerDown(modelSelect, { button: 0 });
+    expect(modelSelect).toHaveFocus();
+  });
+
+  it('leaves a plain URL paste to the textarea native insertion path', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [{ type: 'text/plain', getAsFile: () => null }],
+        getData: () => 'https://example.com/article',
+      },
+    });
+
+    fireEvent(input, pasteEvent);
+    expect(pasteEvent.defaultPrevented).toBe(false);
+  });
+
+  it('inserts mixed clipboard text at the caret and appends its supported image once', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'before after' } });
+    input.setSelectionRange(7, 12);
+    const pastedImage = new File(
+      [validImageBytes('image/png', 'clipboard')],
+      'clipboard.png',
+      { type: 'image/png' },
+    );
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [
+          { type: 'text/plain', getAsFile: () => null },
+          { type: 'image/png', getAsFile: () => pastedImage },
+        ],
+        getData: type => type === 'text/plain' ? 'https://example.com' : '',
+      },
+    });
+
+    fireEvent(input, pasteEvent);
+
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    await waitFor(() => expect(input).toHaveValue('before https://example.com'));
+    await waitFor(() => expect(screen.getAllByText(/pasted-image-/)).toHaveLength(1));
+    expect(input.selectionStart).toBe('before https://example.com'.length);
+    expect(input.selectionEnd).toBe('before https://example.com'.length);
+  });
+
+  it('does not let an unsupported clipboard image suppress accompanying text', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [
+          { type: 'text/plain', getAsFile: () => null },
+          { type: 'image/gif', getAsFile: () => new File(['gif'], 'clip.gif', { type: 'image/gif' }) },
+        ],
+        getData: () => 'https://example.com/from-gif',
+      },
+    });
+
+    fireEvent(input, pasteEvent);
+
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByText(/pasted-image-/)).not.toBeInTheDocument();
+  });
+
   it('shows the user message and thinking state before API key resolution finishes', async () => {
     let releaseKeyLookup;
     global.chrome.storage.local.get.mockImplementation((keys, callback) => {
@@ -657,6 +746,7 @@ describe('HeraAi App', () => {
       revision: 0,
       content: '',
       sources: [],
+      model: 'gemini-3.6-flash',
       startedAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -710,17 +800,20 @@ describe('HeraAi App', () => {
     currentStorage.activeGeneration = terminalGeneration;
     emitRuntimeMessage({ type: 'DONE', activeGeneration: terminalGeneration });
 
-    expect(await screen.findByText(
+    const recoveredAnswer = await screen.findByText(
       'Answer persisted into the atomic session.',
       {},
       { timeout: 3000 },
-    )).toBeInTheDocument();
+    );
+    expect(recoveredAnswer).toBeInTheDocument();
+    expect(within(recoveredAnswer.closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.6 Flash');
     await waitFor(() => {
       const persistedSession = currentStorage.sessions.find(session => session.id === 'new-session');
       expect(persistedSession?.messages).toContainEqual(expect.objectContaining({
         id: 'new-assistant',
         content: 'Answer persisted into the atomic session.',
         status: 'done',
+        model: 'gemini-3.6-flash',
       }));
     });
     expect(currentStorage.sessions.some(session => session.id === 'old-session')).toBe(true);
@@ -1584,6 +1677,68 @@ describe('HeraAi App', () => {
     expect(scrollContainer.scrollTop).toBe(360);
   });
 
+  it('shows start and end controls only when the scroll geometry needs them', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const scrollContainer = document.querySelector('main');
+    const startName = /Sohbetin başına git|Go to the start of the chat/i;
+    const endName = /Sohbetin sonuna git|Go to the end of the chat/i;
+
+    setScrollMetrics(scrollContainer, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 });
+    fireEvent.scroll(scrollContainer);
+    expect(screen.queryByRole('button', { name: startName })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: endName })).toBeInTheDocument();
+
+    scrollContainer.scrollTop = 300;
+    fireEvent.scroll(scrollContainer);
+    expect(screen.getByRole('button', { name: startName })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: endName })).toBeInTheDocument();
+
+    scrollContainer.scrollTop = 600;
+    fireEvent.scroll(scrollContainer);
+    expect(screen.getByRole('button', { name: startName })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: endName })).not.toBeInTheDocument();
+
+    setScrollMetrics(scrollContainer, { scrollHeight: 400, clientHeight: 400, scrollTop: 0 });
+    fireEvent.scroll(scrollContainer);
+    expect(screen.queryByRole('button', { name: startName })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: endName })).not.toBeInTheDocument();
+  });
+
+  it('pauses streaming auto-follow at the start and resumes it from the end control', async () => {
+    const controlled = createControlledStream();
+    api.streamChat.mockImplementationOnce(() => controlled.stream);
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const scrollContainer = document.querySelector('main');
+    setScrollMetrics(scrollContainer, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 });
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Navigate while streaming' } });
+    fireEvent.click(getSendButton());
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+
+    scrollContainer.scrollTop = 300;
+    fireEvent.scroll(scrollContainer);
+    fireEvent.click(screen.getByRole('button', { name: /Sohbetin başına git|Go to the start of the chat/i }));
+    expect(scrollContainer.scrollTop).toBe(0);
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: 'First streamed part' } });
+    });
+    expect(await screen.findByText('First streamed part')).toBeInTheDocument();
+    expect(scrollContainer.scrollTop).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i }));
+    expect(scrollContainer.scrollTop).toBe(scrollContainer.scrollHeight);
+
+    await act(async () => {
+      controlled.push({ event: 'chunk', data: { text: ' and second part' } });
+    });
+    await waitFor(() => expect(scrollContainer.scrollTop).toBe(scrollContainer.scrollHeight));
+    await act(async () => controlled.finish());
+  });
+
   it('should stop auto-following as soon as the wheel moves upward near the bottom', async () => {
     const controlled = createControlledStream();
     api.streamChat.mockImplementationOnce(() => controlled.stream);
@@ -1611,7 +1766,7 @@ describe('HeraAi App', () => {
 
     expect(await screen.findByText('Do not pull me down')).toBeInTheDocument();
     expect(scrollContainer.scrollTop).toBe(568);
-    expect(screen.getByText(/Yeni mesajlar|New messages/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i })).toBeInTheDocument();
 
     await act(async () => {
       controlled.finish();
@@ -1751,7 +1906,7 @@ describe('HeraAi App', () => {
     scrollContainer.scrollTop = 120;
     fireEvent.scroll(scrollContainer);
 
-    await waitFor(() => expect(screen.getByText(/Yeni mesajlar|New messages/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i })).toBeInTheDocument());
 
     await act(async () => {
       controlled.push({ event: 'chunk', data: { text: 'Streaming while reading' } });
@@ -1759,12 +1914,12 @@ describe('HeraAi App', () => {
 
     expect(await screen.findByText('Streaming while reading')).toBeInTheDocument();
     expect(scrollContainer.scrollTop).toBe(120);
-    expect(screen.getByText(/Yeni mesajlar|New messages/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/Yeni mesajlar|New messages/i));
+    fireEvent.click(screen.getByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i }));
 
     expect(scrollContainer.scrollTop).toBe(scrollContainer.scrollHeight);
-    expect(screen.queryByText(/Yeni mesajlar|New messages/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sohbetin sonuna git|Go to the end of the chat/i })).not.toBeInTheDocument();
 
     await act(async () => {
       controlled.finish();
@@ -2561,6 +2716,11 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
     expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.7-flash');
+    const answer = await screen.findByText('ok');
+    expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.7 Flash');
+    await waitFor(() => expect(currentStorage.sessions.some(session => (
+      session.messages?.some(message => message.role === 'model' && message.model === 'gemini-3.7-flash')
+    ))).toBe(true));
 
     expect(currentStorage.selectedModel).toBe('gemini-3.7-flash');
   });
@@ -2606,6 +2766,8 @@ describe('HeraAi App', () => {
     expect(document.querySelector('select[data-testid="model-selector"]').value).toBe('gemini-3.1-flash-lite');
     expect(currentStorage.selectedModel).toBe('gemini-3.1-flash-lite');
     expect(screen.getByText('Answer from 3.1')).toBeInTheDocument();
+    expect(within(screen.getByText('Answer from 3.1').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.1 Flash Lite');
+    expect(within(screen.getByText('Answer from 3.5 Lite').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.5 Flash Lite');
     expect(screen.getAllByTestId('user-message').filter(element => (
       element.textContent.includes('Compare this question')
     ))).toHaveLength(2);

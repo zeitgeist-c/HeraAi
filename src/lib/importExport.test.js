@@ -14,7 +14,7 @@ describe('session import and export', () => {
     vi.restoreAllMocks()
   })
 
-  it('exports version 2.0 metadata without attachment payloads', async () => {
+  it('exports version 2.1 metadata and model provenance without attachment payloads', async () => {
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hera-export')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
@@ -27,18 +27,25 @@ describe('session import and export', () => {
       updatedAt: 100,
       activeAttachmentIds: ['file-1'],
       activeWebUrls: ['https://example.com/'],
-      messages: [{
-        role: 'user',
-        content: 'Internal prompt',
-        displayContent: '',
-        attachments: [{ id: 'file-1', name: 'notes.txt', mimeType: 'text/plain', data: 'secret' }],
-      }],
+      messages: [
+        {
+          role: 'user',
+          content: 'Internal prompt',
+          displayContent: '',
+          attachments: [{ id: 'file-1', name: 'notes.txt', mimeType: 'text/plain', data: 'secret' }],
+        },
+        {
+          role: 'model',
+          content: 'Saved answer',
+          model: 'gemini-3.7-flash',
+        },
+      ],
     }])
 
     const blob = createObjectURL.mock.calls[0][0]
     const exported = JSON.parse(await readBlob(blob))
     expect(exported).toMatchObject({
-      version: '2.0',
+      version: '2.1',
       sessions: [{
         id: 'session-1',
         title: 'Saved title',
@@ -46,17 +53,25 @@ describe('session import and export', () => {
         isStarred: true,
         activeAttachmentIds: ['file-1'],
         activeWebUrls: ['https://example.com/'],
-        messages: [{
-          role: 'user',
-          content: 'Internal prompt',
-          displayContent: '',
-          attachments: [{
-            id: 'file-1',
-            name: 'notes.txt',
-            mimeType: 'text/plain',
-            availability: 'omitted',
-          }],
-        }],
+        messages: [
+          {
+            role: 'user',
+            content: 'Internal prompt',
+            displayContent: '',
+            attachments: [{
+              id: 'file-1',
+              name: 'notes.txt',
+              mimeType: 'text/plain',
+              availability: 'omitted',
+            }],
+          },
+          {
+            role: 'model',
+            content: 'Saved answer',
+            model: 'gemini-3.7-flash',
+            attachments: [],
+          },
+        ],
       }],
     })
   })
@@ -79,6 +94,30 @@ describe('session import and export', () => {
       isStarred: false,
       updatedAt: 100,
       messages: [],
+    }])
+  })
+
+  it('preserves model provenance when importing version 2.1 messages', async () => {
+    const file = new File([JSON.stringify({
+      version: '2.1',
+      sessions: [{
+        id: 'model-session',
+        title: 'Model session',
+        messages: [{
+          role: 'model',
+          content: 'Imported answer',
+          model: 'gemini-3.6-flash',
+        }],
+      }],
+    })], 'model-session.json', { type: 'application/json' })
+
+    await expect(importSessions(file)).resolves.toMatchObject([{
+      id: 'model-session',
+      messages: [{
+        role: 'model',
+        content: 'Imported answer',
+        model: 'gemini-3.6-flash',
+      }],
     }])
   })
 

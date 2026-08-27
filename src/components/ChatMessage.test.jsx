@@ -40,6 +40,31 @@ describe('ChatMessage copy actions', () => {
     expect(await screen.findByText(/Copied!|Kopyalandı!/i)).toBeInTheDocument()
   })
 
+  it('shows the persisted response model and rerenders when only the model changes', () => {
+    const { rerender } = render(
+      <ChatMessage
+        message={{ id: 15, role: 'model', content: 'Model answer', model: 'gemini-3.7-flash' }}
+        modelLabels={modelLabels}
+      />
+    )
+
+    expect(screen.getByTestId('message-model')).toHaveTextContent('Gemini 3.7 Flash')
+
+    rerender(
+      <ChatMessage
+        message={{ id: 15, role: 'model', content: 'Model answer', model: 'future-model-id' }}
+        modelLabels={modelLabels}
+      />
+    )
+    expect(screen.getByTestId('message-model')).toHaveTextContent('future-model-id')
+  })
+
+  it('keeps legacy assistant messages without model provenance unlabeled', () => {
+    render(<ChatMessage message={{ id: 16, role: 'model', content: 'Legacy answer' }} modelLabels={modelLabels} />)
+
+    expect(screen.queryByTestId('message-model')).not.toBeInTheDocument()
+  })
+
   it('copies a user question from its action row', async () => {
     writeText.mockResolvedValue()
     render(<ChatMessage message={{ id: 4, role: 'user', content: 'Copy this question' }} />)

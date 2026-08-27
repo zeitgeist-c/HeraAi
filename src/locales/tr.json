@@ -189,7 +189,9 @@
             "cancel_transcription": "Dönüştürmeyi iptal et",
             "read_aloud": "Sesli oku",
             "preparing_speech": "Ses hazırlanıyor...",
-            "stop_speech": "Okumayı durdur"
+            "stop_speech": "Okumayı durdur",
+            "scroll_to_start": "Sohbetin başına git",
+            "scroll_to_end": "Sohbetin sonuna git"
         },
         "retry_model": {
             "title": "Model ile yeniden dene",
@@ -222,8 +224,8 @@
         "speech_failed": "Bu yanıt sesli okunamadı.",
         "speech_too_long": "Bu yanıt güvenli biçimde sesli okumak için çok uzun.",
         "code_block_skipped": "Kod bloğu atlandı.",
-        "new_messages": "Yeni mesajlar",
         "all_keys_cooldown": "Tüm API anahtarları rate limit sonrası beklemede. En erken deneme: {{time}}",
+        "model_used": "Kullanılan model",
         "sources_label": "Kaynaklar",
         "status": {
             "thinking": "Düşünüyor...",

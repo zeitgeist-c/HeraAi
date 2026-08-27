@@ -422,6 +422,9 @@ function createThinkingPlaceholder(message, queuedGeneration) {
     content: '',
     status: 'thinking',
     sources: [],
+    ...(typeof queuedGeneration.model === 'string' && queuedGeneration.model
+      ? { model: queuedGeneration.model }
+      : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -72,6 +72,7 @@ const SESSION_TITLE_MAX_LENGTH = 80
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const DICTATION_MAX_DURATION_MS = 200000
+const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const MODEL_LABELS = {
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
@@ -329,7 +330,7 @@ function createUserMessage({
   }
 }
 
-function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
+function createAssistantMessage({ id, requestId, userMessageId, startedAt, model }) {
   return {
     id,
     requestId,
@@ -338,7 +339,8 @@ function createAssistantMessage({ id, requestId, userMessageId, startedAt }) {
     role: 'model',
     content: '',
     status: 'thinking',
-    sources: []
+    sources: [],
+    ...(typeof model === 'string' && model ? { model } : {}),
   }
 }
 
@@ -423,6 +425,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
+  const composerInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const streamBufferRef = useRef('')
   const displayedAssistantContentRef = useRef('')
@@ -464,7 +467,8 @@ function App() {
   const userPausedAutoScrollRef = useRef(false)
   const forceScrollToBottomRef = useRef(false)
   const prevIsGeneratingRef = useRef(false)
-  const [showScrollDownBtn, setShowScrollDownBtn] = useState(false)
+  const [canScrollUp, setCanScrollUp] = useState(false)
+  const [canScrollDown, setCanScrollDown] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState([])
   const [isFileDragActive, setIsFileDragActive] = useState(false)
@@ -500,6 +504,15 @@ function App() {
     isGeneratingRef.current = val
   }, [])
 
+  const focusComposer = useCallback((caretPosition = null) => {
+    const textarea = composerInputRef.current
+    if (!textarea) return
+    textarea.focus()
+    if (Number.isInteger(caretPosition)) {
+      textarea.setSelectionRange(caretPosition, caretPosition)
+    }
+  }, [])
+
   useEffect(() => { activeSessionIdRef.current = activeSessionId }, [activeSessionId])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { messagesRef.current = messages }, [messages])
@@ -508,6 +521,21 @@ function App() {
     return () => {
       mountedRef.current = false
     }
+  }, [])
+
+  const syncScrollControls = useCallback(() => {
+    const element = scrollRef.current
+    if (!element) {
+      setCanScrollUp(false)
+      setCanScrollDown(false)
+      return
+    }
+
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    const nextCanScrollUp = element.scrollTop > SCROLL_RESUME_THRESHOLD_PX
+    const nextCanScrollDown = maxScrollTop - element.scrollTop > SCROLL_RESUME_THRESHOLD_PX
+    setCanScrollUp(previous => previous === nextCanScrollUp ? previous : nextCanScrollUp)
+    setCanScrollDown(previous => previous === nextCanScrollDown ? previous : nextCanScrollDown)
   }, [])
 
   const scheduleScrollToBottom = useCallback(() => {
@@ -519,7 +547,7 @@ function App() {
       autoScrollRef.current = true
       userPausedAutoScrollRef.current = false
       forceScrollToBottomRef.current = false
-      setShowScrollDownBtn(false)
+      syncScrollControls()
     }
 
     if (typeof window.requestAnimationFrame === 'function') {
@@ -531,13 +559,12 @@ function App() {
     }
 
     run()
-  }, [])
+  }, [syncScrollControls])
 
   const stickToBottomOnNextRender = useCallback(() => {
     autoScrollRef.current = true
     userPausedAutoScrollRef.current = false
     forceScrollToBottomRef.current = true
-    setShowScrollDownBtn(false)
     scheduleScrollToBottom()
   }, [scheduleScrollToBottom])
 
@@ -549,8 +576,8 @@ function App() {
     userPausedAutoScrollRef.current = true
     autoScrollRef.current = false
     forceScrollToBottomRef.current = false
-    setShowScrollDownBtn(true)
-  }, [])
+    syncScrollControls()
+  }, [syncScrollControls])
 
   const scrollChatBy = useCallback((deltaY) => {
     const container = scrollRef.current
@@ -561,6 +588,7 @@ function App() {
     }
 
     container.scrollTop = clampScrollTop(container, container.scrollTop + deltaY)
+    syncScrollControls()
     const distanceFromBottom = getScrollDistanceFromBottom(container)
     const isAtBottom = distanceFromBottom <= SCROLL_RESUME_THRESHOLD_PX
     const nearBottom = isScrollNearBottom(container)
@@ -568,19 +596,16 @@ function App() {
     if (isAtBottom && deltaY > 0) {
       userPausedAutoScrollRef.current = false
       autoScrollRef.current = true
-      setShowScrollDownBtn(false)
       return
     }
 
     if (userPausedAutoScrollRef.current) {
       autoScrollRef.current = false
-      setShowScrollDownBtn(true)
       return
     }
 
     autoScrollRef.current = nearBottom
-    setShowScrollDownBtn(!nearBottom)
-  }, [pauseAutoScroll])
+  }, [pauseAutoScroll, syncScrollControls])
 
   const applyTheme = useCallback((themeValue, customPrimaryColor) => {
     const root = document.documentElement;
@@ -1133,11 +1158,17 @@ function App() {
     if (!generation || generation.sessionId !== activeSessionIdRef.current) return null
     const assistantMessageId = generation.assistantMessageId
     let found = false
+    const applyUpdate = (message) => {
+      const updatedMessage = updater(message)
+      return typeof generation.model === 'string' && generation.model
+        ? { ...updatedMessage, model: generation.model }
+        : updatedMessage
+    }
     const currentMessages = messagesRef.current
     const nextMessages = currentMessages.map(message => {
       if (message.id !== assistantMessageId || message.role !== 'model') return message
       found = true
-      return updater(message)
+      return applyUpdate(message)
     })
 
     if (!found) {
@@ -1146,8 +1177,9 @@ function App() {
         requestId: generation.requestId || generation.jobId,
         userMessageId: generation.userMessageId,
         startedAt: generation.startedAt || Date.now(),
+        model: generation.model,
       })
-      nextMessages.push(updater(created))
+      nextMessages.push(applyUpdate(created))
     }
 
     messagesRef.current = nextMessages
@@ -1282,6 +1314,7 @@ function App() {
               status: terminalStatus,
               sources: Array.isArray(generation.sources) ? generation.sources : (message.sources || []),
               errorCode: generation.errorCode || null,
+              ...(generation.model ? { model: generation.model } : {}),
             }
           })
 
@@ -1301,6 +1334,7 @@ function App() {
                   requestId: generation.requestId || generation.jobId,
                   userMessageId: generation.userMessageId,
                   startedAt: generation.startedAt || Date.now(),
+                  model: generation.model,
                 }),
                 content: finalContent,
                 status: terminalStatus,
@@ -2200,8 +2234,26 @@ function App() {
       return
     }
 
-    setShowScrollDownBtn(true)
-  }, [messages, scheduleScrollToBottom])
+    syncScrollControls()
+  }, [messages, scheduleScrollToBottom, syncScrollControls])
+
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container) return undefined
+
+    syncScrollControls()
+    const ResizeObserverClass = globalThis.ResizeObserver
+    const resizeObserver = typeof ResizeObserverClass === 'function'
+      ? new ResizeObserverClass(syncScrollControls)
+      : null
+    resizeObserver?.observe(container)
+    window.addEventListener('resize', syncScrollControls)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', syncScrollControls)
+    }
+  }, [appConfig, isLoading, syncScrollControls])
 
   const cancelActiveGeneration = useCallback((reason = 'user') => {
     const generation = activeGenerationRef.current
@@ -2906,7 +2958,7 @@ function App() {
       }
       setInput(current => appendToInputValue(current, transcript))
       await updateStats('voice')
-      window.requestAnimationFrame(() => document.querySelector('textarea')?.focus())
+      window.requestAnimationFrame(() => focusComposer())
     } catch (error) {
       if (error?.name !== 'AbortError') {
         console.error('Gemini dictation failed', error)
@@ -2916,7 +2968,7 @@ function App() {
       if (dictationAbortRef.current === controller) dictationAbortRef.current = null
       resetDictation()
     }
-  }, [reportVoiceKeyStatus, resetDictation, t])
+  }, [focusComposer, reportVoiceKeyStatus, resetDictation, t])
 
   const stopDictationRecording = useCallback((shouldTranscribe = true) => {
     const recorder = dictationRecorderRef.current
@@ -3225,7 +3277,8 @@ function App() {
       id: assistantMessageId,
       requestId,
       userMessageId,
-      startedAt
+      startedAt,
+      model: requestModel,
     })
     const retryUserIndex = retryUserMessage
       ? messagesRef.current.findIndex(message => message.id === retryUserMessage.id)
@@ -3674,9 +3727,10 @@ function App() {
   }, [])
 
   const handlePaste = useCallback(async (event) => {
-    const items = Array.from(event.clipboardData?.items || [])
+    const clipboardData = event.clipboardData
+    const items = Array.from(clipboardData?.items || [])
     const pastedImages = items
-      .filter(item => item.type.startsWith('image/'))
+      .filter(item => SUPPORTED_PASTED_IMAGE_TYPES.has(item.type))
       .map((item, index) => {
         const file = item.getAsFile()
         if (!file) return null
@@ -3689,9 +3743,26 @@ function App() {
       })
       .filter(Boolean)
     if (pastedImages.length === 0) return
+
     event.preventDefault()
+    const pastedText = clipboardData?.getData('text/plain') || ''
+    if (pastedText) {
+      const textarea = event.currentTarget
+      const currentValue = typeof textarea.value === 'string' ? textarea.value : ''
+      const selectionStart = Number.isInteger(textarea.selectionStart)
+        ? textarea.selectionStart
+        : currentValue.length
+      const selectionEnd = Number.isInteger(textarea.selectionEnd)
+        ? textarea.selectionEnd
+        : selectionStart
+      const nextValue = `${currentValue.slice(0, selectionStart)}${pastedText}${currentValue.slice(selectionEnd)}`
+      const nextCaretPosition = selectionStart + pastedText.length
+      setInput(nextValue)
+      window.requestAnimationFrame(() => focusComposer(nextCaretPosition))
+    }
+
     await processAttachmentFiles(pastedImages, { append: true })
-  }, [processAttachmentFiles])
+  }, [focusComposer, processAttachmentFiles])
 
   const hasDraggedFiles = useCallback(dataTransfer => (
     Array.from(dataTransfer?.types || []).includes('Files')
@@ -3752,19 +3823,23 @@ function App() {
     autoScrollRef.current = true
     userPausedAutoScrollRef.current = false
     forceScrollToBottomRef.current = false
-    setShowScrollDownBtn(false)
-  }, [])
+    syncScrollControls()
+  }, [syncScrollControls])
+
+  const scrollToTop = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    pauseAutoScroll()
+    el.scrollTop = 0
+    syncScrollControls()
+  }, [pauseAutoScroll, syncScrollControls])
 
   const handleEditMessage = useCallback((text) => {
     setInput(text)
     setTimeout(() => {
-      const textarea = document.querySelector('textarea')
-      if (textarea) {
-        textarea.focus()
-        textarea.setSelectionRange(text.length, text.length)
-      }
+      focusComposer(text.length)
     }, 50)
-  }, [])
+  }, [focusComposer])
 
   const handleRetryMessage = useCallback((message, modelOverride) => {
     if (!message || isGeneratingRef.current) return
@@ -3797,6 +3872,7 @@ function App() {
 
   const handleChatScroll = useCallback((event) => {
     const container = event.currentTarget
+    syncScrollControls()
     const distanceFromBottom = getScrollDistanceFromBottom(container)
     const isAtBottom = distanceFromBottom <= SCROLL_RESUME_THRESHOLD_PX
     const nearBottom = isScrollNearBottom(container)
@@ -3805,7 +3881,6 @@ function App() {
       userPausedAutoScrollRef.current = false
       autoScrollRef.current = true
       forceScrollToBottomRef.current = false
-      setShowScrollDownBtn(false)
       return
     }
 
@@ -3816,13 +3891,11 @@ function App() {
     forceScrollToBottomRef.current = false
     if (userPausedAutoScrollRef.current) {
       autoScrollRef.current = false
-      setShowScrollDownBtn(true)
       return
     }
 
     autoScrollRef.current = nearBottom
-    setShowScrollDownBtn(!nearBottom)
-  }, [])
+  }, [syncScrollControls])
 
   const handleChatWheel = useCallback((event) => {
     const container = scrollRef.current
@@ -3839,6 +3912,12 @@ function App() {
     event.preventDefault()
     scrollChatBy(event.deltaY)
   }, [scrollChatBy])
+
+  const handleComposerPointerDown = useCallback((event) => {
+    if (event.button !== 0) return
+    if (event.target.closest?.('button, input, select, textarea, a, [role="button"]')) return
+    focusComposer()
+  }, [focusComposer])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -3975,33 +4054,22 @@ function App() {
         </div>
       )}
 
-      <main
-        className="relative min-h-0 flex-1 overscroll-contain overflow-x-hidden overflow-y-auto"
-        style={{ overflowAnchor: 'none' }}
-        ref={scrollRef}
-        onScroll={handleChatScroll}
-        onWheelCapture={handleChatWheel}
-      >
-        {showScrollDownBtn && (
-          <div className="pointer-events-none sticky bottom-3 z-10 flex justify-center">
-            <button
-              type="button"
-              onClick={() => scrollToBottom()}
-              className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-primary/20 bg-popover px-3 py-1.5 text-[11px] font-medium text-foreground shadow-lg hover:bg-secondary"
-            >
-              ↓ {t('chat.new_messages')}
-            </button>
-          </div>
-        )}
-
-        {isWelcomeOnly ? (
+      <div className="relative min-h-0 flex-1">
+        <main
+          className="h-full min-h-0 overscroll-contain overflow-x-hidden overflow-y-auto"
+          style={{ overflowAnchor: 'none' }}
+          ref={scrollRef}
+          onScroll={handleChatScroll}
+          onWheelCapture={handleChatWheel}
+        >
+          {isWelcomeOnly ? (
           <WelcomeScreen
             onCrop={handleScreenshot}
             isCropActive={isCropActive}
             onResearch={() => {
               setEnableResearch(true)
               setActiveMode('web')
-              document.querySelector('textarea')?.focus()
+              focusComposer()
             }}
             onAttach={() => fileInputRef.current?.click()}
           />
@@ -4027,11 +4095,38 @@ function App() {
               )
             })}
           </div>
+          )}
+        </main>
+
+        {canScrollUp && (
+          <button
+            type="button"
+            onClick={scrollToTop}
+            title={t('chat.tooltips.scroll_to_start')}
+            aria-label={t('chat.tooltips.scroll_to_start')}
+            className="hera-icon-button absolute right-3 top-3 z-20 h-9 w-9 border border-primary/20 bg-popover shadow-lg hover:bg-secondary"
+          >
+            <ArrowUpToLine className="h-4 w-4" />
+          </button>
         )}
-      </main>
+        {canScrollDown && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            title={t('chat.tooltips.scroll_to_end')}
+            aria-label={t('chat.tooltips.scroll_to_end')}
+            className="hera-icon-button absolute bottom-3 right-3 z-20 h-9 w-9 border border-primary/20 bg-popover shadow-lg hover:bg-secondary"
+          >
+            <ArrowDownToLine className="h-4 w-4" />
+          </button>
+        )}
+      </div>
 
       <div className="p-4 bg-background shrink-0 border-t border-border/60" onWheel={handleComposerWheel}>
-        <div className="hera-surface mx-auto w-full max-w-3xl overflow-hidden rounded-2xl transition-shadow focus-within:border-primary/35 focus-within:shadow-lg focus-within:shadow-primary/5">
+        <div
+          className="hera-surface mx-auto w-full max-w-3xl overflow-hidden rounded-2xl transition-shadow focus-within:border-primary/35 focus-within:shadow-lg focus-within:shadow-primary/5"
+          onPointerDown={handleComposerPointerDown}
+        >
           {draftWebUrls.length > 0 && enableResearch && (
             <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
               {draftWebUrls.map(url => (
@@ -4079,6 +4174,7 @@ function App() {
           )}
 
           <textarea
+            ref={composerInputRef}
             value={typeof input === 'string' ? input : ''}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

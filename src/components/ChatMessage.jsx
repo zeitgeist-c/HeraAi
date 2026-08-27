@@ -109,6 +109,9 @@ const ChatMessage = ({
     && !['error', 'cancelled', 'cancelled_empty', 'interrupted'].includes(message.status)
   const availableRetryModels = Array.isArray(retryModels) ? retryModels : []
   const hasRetryModelChoices = availableRetryModels.length > 0
+  const usedModelLabel = typeof message.model === 'string' && message.model
+    ? (modelLabels[message.model] || message.model)
+    : ''
   const errorMessage = message.errorCode
     ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
     : t('chat.status.error')
@@ -423,42 +426,53 @@ const ChatMessage = ({
 
       {(message.content || message.status === 'interrupted' || message.status === 'error') && (
         <div className="relative mt-1.5 flex flex-col items-start gap-1.5 border-t border-border/45 pt-1.5">
-          <div className="flex min-h-8 items-center gap-0.5">
-            <button
-              type="button"
-              onClick={handleCopyMessage}
-              aria-label={t('chat.tooltips.copy')}
-              className="hera-action-button"
-            >
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-              <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
-            </button>
-            {speechEligible && (
+          <div className="flex min-h-8 w-full min-w-0 items-center justify-between gap-2">
+            <div className="flex shrink-0 items-center gap-0.5">
               <button
                 type="button"
-                onClick={() => onToggleSpeech?.(message)}
-                disabled={speechDisabled}
-                aria-label={speechStatus === 'playing'
-                  ? t('chat.tooltips.stop_speech')
-                  : speechStatus === 'loading'
-                    ? t('chat.tooltips.preparing_speech')
-                    : t('chat.tooltips.read_aloud')}
-                aria-pressed={speechStatus !== 'idle'}
+                onClick={handleCopyMessage}
+                aria-label={t('chat.tooltips.copy')}
                 className="hera-action-button"
               >
-                {speechStatus === 'loading'
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : speechStatus === 'playing'
-                    ? <Square className="h-3.5 w-3.5 fill-current" />
-                    : <Volume2 className="h-3.5 w-3.5" />}
-                <span>{speechStatus === 'playing'
-                  ? t('chat.tooltips.stop')
-                  : speechStatus === 'loading'
-                    ? t('chat.tooltips.preparing_speech')
-                    : t('chat.tooltips.read_aloud')}</span>
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
               </button>
+              {speechEligible && (
+                <button
+                  type="button"
+                  onClick={() => onToggleSpeech?.(message)}
+                  disabled={speechDisabled}
+                  aria-label={speechStatus === 'playing'
+                    ? t('chat.tooltips.stop_speech')
+                    : speechStatus === 'loading'
+                      ? t('chat.tooltips.preparing_speech')
+                      : t('chat.tooltips.read_aloud')}
+                  aria-pressed={speechStatus !== 'idle'}
+                  className="hera-action-button"
+                >
+                  {speechStatus === 'loading'
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : speechStatus === 'playing'
+                      ? <Square className="h-3.5 w-3.5 fill-current" />
+                      : <Volume2 className="h-3.5 w-3.5" />}
+                  <span>{speechStatus === 'playing'
+                    ? t('chat.tooltips.stop')
+                    : speechStatus === 'loading'
+                      ? t('chat.tooltips.preparing_speech')
+                      : t('chat.tooltips.read_aloud')}</span>
+                </button>
+              )}
+              {renderRetryButton()}
+            </div>
+            {usedModelLabel && (
+              <span
+                data-testid="message-model"
+                className="min-w-0 max-w-[46%] truncate text-right text-[10px] font-medium text-muted-foreground/70"
+                title={`${t('chat.model_used')}: ${usedModelLabel}`}
+              >
+                {usedModelLabel}
+              </span>
             )}
-            {renderRetryButton()}
           </div>
           {renderRetryMenu('left')}
         </div>
@@ -476,6 +490,7 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.role === nextMessage.role &&
     prevMessage.content === nextMessage.content &&
     prevMessage.displayContent === nextMessage.displayContent &&
+    prevMessage.model === nextMessage.model &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
     prevMessage.attachments === nextMessage.attachments &&
