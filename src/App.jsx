@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -19,7 +19,6 @@ import {
   DEFAULT_PROVIDER,
   MODEL_CATALOG,
   MODEL_CAPABILITIES,
-  MODEL_LABELS,
   MODELS,
   getProviderForModel,
   resolveModelSelection,
@@ -418,6 +417,13 @@ function sortSessionsByUpdatedAt(sessions) {
 
 function App() {
   const { t } = useTranslation()
+  const localizedModelCatalog = useMemo(() => MODEL_CATALOG.map(model => ({
+    ...model,
+    label: model.labelKey ? t(model.labelKey) : model.label,
+  })), [t])
+  const localizedModelLabels = useMemo(() => Object.freeze(Object.fromEntries(
+    localizedModelCatalog.map(model => [model.modelId, model.label]),
+  )), [localizedModelCatalog])
   const [appConfig, setAppConfig] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -4154,8 +4160,8 @@ function App() {
                   message={msg}
                   onEdit={handleEditMessage}
                   onRetry={handleRetryMessage}
-                  retryModels={MODEL_CATALOG}
-                  modelLabels={MODEL_LABELS}
+                  retryModels={localizedModelCatalog}
+                  modelLabels={localizedModelLabels}
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
                   showSources={appConfig.showSources}
@@ -4425,8 +4431,8 @@ function App() {
         <div data-testid="composer-meta" className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
           <ModelSelector
             selectedModel={selectedModel}
-            models={MODEL_CATALOG}
-            modelLabels={MODEL_LABELS}
+            models={localizedModelCatalog}
+            modelLabels={localizedModelLabels}
             onModelChange={handleModelChange}
           />
           <p className="min-w-0 flex-1 truncate text-right text-[11px] leading-none text-muted-foreground/55" title={t('chat.powered_by')}>

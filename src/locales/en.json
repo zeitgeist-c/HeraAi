@@ -238,6 +238,10 @@
             "openrouter": "OpenRouter",
             "ollama": "Ollama (No Image Support)"
         },
+        "model_labels": {
+            "gpt_oss_120b": "GPT-OSS 120B (Fast)",
+            "nemotron_3_ultra": "Nemotron 3 Ultra (Slow)"
+        },
         "sources_label": "Sources",
         "status": {
             "thinking": "Thinking...",

@@ -803,8 +803,8 @@ describe('model selection', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'nemotron-3-ultra',
       'gpt-oss:120b',
+      'nemotron-3-ultra',
     ])
   })
 

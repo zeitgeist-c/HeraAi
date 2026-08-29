@@ -38,10 +38,11 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:nemotron-3-ultra`,
+    key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
     provider: PROVIDERS.OLLAMA,
-    modelId: 'nemotron-3-ultra',
-    label: 'Nemotron 3 Ultra',
+    modelId: 'gpt-oss:120b',
+    label: 'GPT-OSS 120B',
+    labelKey: 'chat.model_labels.gpt_oss_120b',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -49,10 +50,11 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
+    key: `${PROVIDERS.OLLAMA}:nemotron-3-ultra`,
     provider: PROVIDERS.OLLAMA,
-    modelId: 'gpt-oss:120b',
-    label: 'GPT-OSS 120B',
+    modelId: 'nemotron-3-ultra',
+    label: 'Nemotron 3 Ultra',
+    labelKey: 'chat.model_labels.nemotron_3_ultra',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
