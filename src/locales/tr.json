@@ -238,6 +238,10 @@
             "openrouter": "OpenRouter",
             "ollama": "Ollama (Görsel Desteklemez)"
         },
+        "model_labels": {
+            "gpt_oss_120b": "GPT-OSS 120B (Hızlı)",
+            "nemotron_3_ultra": "Nemotron 3 Ultra (Yavaş)"
+        },
         "sources_label": "Kaynaklar",
         "status": {
             "thinking": "Düşünüyor...",

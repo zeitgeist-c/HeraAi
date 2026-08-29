@@ -2730,12 +2730,16 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'nemotron-3-ultra',
       'gpt-oss:120b',
+      'nemotron-3-ultra',
     ]);
     expect(Array.from(modelSelect.querySelectorAll('optgroup')).some(group => (
       /Ollama \((No Image Support|Görsel Desteklemez)\)/i.test(group.label)
     ))).toBe(true);
+    expect(Array.from(modelSelect.options).slice(-2).map(option => option.textContent)).toEqual([
+      expect.stringMatching(/GPT-OSS 120B \((Fast|Hızlı)\)/i),
+      expect.stringMatching(/Nemotron 3 Ultra \((Slow|Yavaş)\)/i),
+    ]);
   });
 
   it('defaults the selected model to DEFAULT_MODEL when storage has none', async () => {
@@ -2872,8 +2876,8 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'nemotron-3-ultra',
       'gpt-oss:120b',
+      'nemotron-3-ultra',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
 
@@ -2960,7 +2964,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old image answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra' }));
+    fireEvent.click(screen.getByRole('button', { name: /Nemotron 3 Ultra \((Slow|Yavaş)\)/i }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,

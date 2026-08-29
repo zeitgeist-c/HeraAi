@@ -16,8 +16,8 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.6-flash'],
       ['gemini', 'gemini-3.7-flash'],
       ['openrouter', 'openrouter/free'],
-      ['ollama', 'nemotron-3-ultra'],
       ['ollama', 'gpt-oss:120b'],
+      ['ollama', 'nemotron-3-ultra'],
     ])
   })
 
@@ -34,8 +34,8 @@ describe('provider-aware model catalog', () => {
 
   it('declares PDF as Gemini-only and marks the text-only Ollama models accurately', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
-      'nemotron-3-ultra',
       'gpt-oss:120b',
+      'nemotron-3-ultra',
     ])
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsPdf).every(model => model.provider === 'gemini')).toBe(true)
     expect(getProviderForModel('openrouter/free')).toBe('openrouter')
