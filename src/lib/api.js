@@ -440,15 +440,13 @@ async function* streamGeminiWithFallback(keys, createStreamRequest, createFallba
         yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: keyStatus } }
       }
 
-      const requestScopedFailure = [
-        'timeout',
+      const nonRetryableFailure = [
         'model_unavailable',
-        'service_unavailable',
         'invalid_request',
         'safety',
         'generation_failed',
       ].includes(status)
-      if (hasStartedStreaming || requestScopedFailure) {
+      if (hasStartedStreaming || nonRetryableFailure) {
         logGeminiFailure(modelId, status, resolvedError)
         yield {
           event: 'error',

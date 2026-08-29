@@ -55,7 +55,7 @@ This creates `release/HeraAi-<version>.zip` using the version from `manifest.jso
 
 Keys are stored only in trusted extension contexts in `chrome.storage.local` on this device (`chrome.storage.sync` is never used). They are not encrypted, and real values are masked in the UI. Add as many keys as you want for each provider; the first key becomes primary and the rest are fallback keys.
 
-Fallback behavior is primary-first, not round-robin. HeraAi may try another key from the same provider only before the first response token. It never switches provider or moves OpenRouter to a paid model automatically, and it never changes keys after a partial response begins.
+Fallback behavior is primary-first, not round-robin. Before the first response token, HeraAi automatically tries the next key from the same provider after credential/permission, quota/rate-limit, timeout/network, or temporary service errors. It never switches provider or moves OpenRouter to a paid model automatically, and it never changes keys after a partial response begins.
 
 The model selector contains four Gemini models, `OpenRouter Free` (`openrouter/free`), and `MiniMax M3 (Ollama Cloud)` (`minimax-m3`). OpenRouter reports the actual routed model on each answer. Ollama Cloud key testing sends a minimal generation request and consumes a small amount of quota. PDF attachments and voice features remain Gemini-only; images and extracted text documents work with all three AI providers.
 

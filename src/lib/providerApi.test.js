@@ -81,6 +81,20 @@ describe('OpenRouter provider adapter', () => {
     expect(global.fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer other')
   })
 
+  it('does not change OpenRouter keys after partial output has started', async () => {
+    global.fetch.mockResolvedValue(streamResponse([
+      'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":503,"message":"upstream unavailable"}}\n\n',
+    ]))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, [
+      ...keys,
+      { id: 'fallback', key: 'other' },
+    ]))
+
+    expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'service_unavailable' } })
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     [401, 'api_key_invalid'],
     [429, 'rate_limited'],
@@ -157,6 +171,20 @@ describe('Ollama Cloud provider adapter', () => {
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'generation_failed' } })
     expect(global.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('tries the next Ollama key when the primary fails before output starts', async () => {
+    global.fetch
+      .mockResolvedValueOnce(streamResponse([], 429))
+      .mockResolvedValueOnce(streamResponse(['{"message":{"content":"ok"}}\n']))
+    const events = await collect(streamRemoteProvider('ollama', messages, {}, [
+      ...keys,
+      { id: 'fallback', key: 'other' },
+    ]))
+
+    expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(global.fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer other')
   })
 
   it.each([

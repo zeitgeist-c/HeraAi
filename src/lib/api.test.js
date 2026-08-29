@@ -162,6 +162,43 @@ describe('streamResearch', () => {
     expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
   })
 
+  it('tries the next Tavily key when the primary key is rate-limited', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: [{
+            title: 'Fallback result',
+            url: 'https://example.com/fallback',
+            content: 'Result from the fallback Tavily key.',
+            score: 0.8,
+          }],
+        }),
+      })
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'guncel bilgi' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [
+        { id: 't1', key: 'tavily-primary' },
+        { id: 't2', key: 'tavily-fallback' },
+      ],
+    ))
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(global.fetch.mock.calls.map(call => call[1].headers.Authorization)).toEqual([
+      'Bearer tavily-primary',
+      'Bearer tavily-fallback',
+    ])
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'key_status', data: { provider: 'tavily', keyId: 't1', status: 'cooldown' } },
+      { event: 'key_status', data: { provider: 'tavily', keyId: 't2', status: 'success' } },
+    ]))
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+  })
+
   it('routes exact public URLs through Gemini URL Context without Tavily Search', async () => {
     mocks.generateContentMock.mockResolvedValueOnce({
       text: 'Verified page summary',
@@ -472,6 +509,56 @@ describe('streamChat fallback', () => {
     ])
     expect(events.find(e => e.event === 'chunk').data.text).toBe('chunk from g2')
     expect(events.some(e => e.event === 'error')).toBe(false)
+  })
+
+  it.each([
+    ['times out', Object.assign(new Error('The operation timed out'), { name: 'AbortError' })],
+    ['returns a temporary service error', Object.assign(new Error('Service unavailable'), { status: 503 })],
+  ])('falls back to the next key when the primary %s before output starts', async (_label, primaryError) => {
+    mocks.generateContentStreamMock
+      .mockRejectedValueOnce(primaryError)
+      .mockResolvedValueOnce(geminiStream('chunk from fallback key'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [
+        { id: 'g1', key: 'AIza-primary-key-aaaaaaaa' },
+        { id: 'g2', key: 'AIza-fallback-key-bbbbbb' },
+      ],
+    ))
+
+    expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(2)
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'chunk from fallback key' } })
+    expect(events).toContainEqual({
+      event: 'key_status',
+      data: { provider: 'gemini', keyId: 'g2', status: 'success' },
+    })
+    expect(events.some(event => event.event === 'error')).toBe(false)
+  })
+
+  it('does not change Gemini keys after partial output has started', async () => {
+    mocks.generateContentStreamMock
+      .mockResolvedValueOnce((async function* partialStream() {
+        yield { text: 'partial' }
+        throw Object.assign(new Error('Service unavailable'), { status: 503 })
+      })())
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [
+        { id: 'g1', key: 'AIza-primary-key-aaaaaaaa' },
+        { id: 'g2', key: 'AIza-fallback-key-bbbbbb' },
+      ],
+    ))
+
+    expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'partial' } })
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'service_unavailable' }),
+    }))
   })
 
   it('falls back to non-streaming generation on a streaming transport failure', async () => {
