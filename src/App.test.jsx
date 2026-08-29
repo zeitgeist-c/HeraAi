@@ -2524,7 +2524,7 @@ describe('HeraAi App', () => {
     const providerHeadings = [
       /Gemini API (Keys|Anahtarları)/i,
       /OpenRouter API (Keys|Anahtarları)/i,
-      /Ollama Cloud API (Keys|Anahtarları)/i,
+      /Ollama \((No Image Support|Görsel Desteklemez)\) API (Keys|Anahtarları)/i,
       /Tavily (Search API Keys|Arama API Anahtarları)/i,
     ].map(pattern => screen.getByText(pattern).closest('button'));
 
@@ -2733,6 +2733,9 @@ describe('HeraAi App', () => {
       'nemotron-3-ultra',
       'gpt-oss:120b',
     ]);
+    expect(Array.from(modelSelect.querySelectorAll('optgroup')).some(group => (
+      /Ollama \((No Image Support|Görsel Desteklemez)\)/i.test(group.label)
+    ))).toBe(true);
   });
 
   it('defaults the selected model to DEFAULT_MODEL when storage has none', async () => {

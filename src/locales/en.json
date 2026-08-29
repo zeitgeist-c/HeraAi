@@ -23,7 +23,7 @@
             "keys_tab": "Keys",
             "gemini_section": "Gemini API Keys",
             "openrouter_section": "OpenRouter API Keys",
-            "ollama_section": "Ollama Cloud API Keys",
+            "ollama_section": "Ollama (No Image Support) API Keys",
             "tavily_section": "Tavily Search API Keys",
             "gemini_key_link": "Create a Gemini key",
             "openrouter_key_link": "Create an OpenRouter key",
@@ -236,7 +236,7 @@
         "model_providers": {
             "gemini": "Google Gemini",
             "openrouter": "OpenRouter",
-            "ollama": "Ollama Cloud"
+            "ollama": "Ollama (No Image Support)"
         },
         "sources_label": "Sources",
         "status": {

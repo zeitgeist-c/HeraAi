@@ -23,7 +23,7 @@
             "keys_tab": "Anahtarlar",
             "gemini_section": "Gemini API Anahtarları",
             "openrouter_section": "OpenRouter API Anahtarları",
-            "ollama_section": "Ollama Cloud API Anahtarları",
+            "ollama_section": "Ollama (Görsel Desteklemez) API Anahtarları",
             "tavily_section": "Tavily Arama API Anahtarları",
             "gemini_key_link": "Gemini anahtarı oluştur",
             "openrouter_key_link": "OpenRouter anahtarı oluştur",
@@ -236,7 +236,7 @@
         "model_providers": {
             "gemini": "Google Gemini",
             "openrouter": "OpenRouter",
-            "ollama": "Ollama Cloud"
+            "ollama": "Ollama (Görsel Desteklemez)"
         },
         "sources_label": "Kaynaklar",
         "status": {
