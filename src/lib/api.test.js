@@ -56,7 +56,7 @@ describe('streamResearch', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Baglamli cevap'))
   })
 
-  it('expands a short follow-up question before sending it to Tavily', async () => {
+  it('builds a contextual search query locally before sending it to Tavily', async () => {
     await collectEvents(streamResearch([
       { role: 'user', content: 'dunya suan gunesin neresinde' },
       { role: 'model', content: 'Dunya Gunes etrafindaki eliptik yorungededir.' },
@@ -64,8 +64,7 @@ describe('streamResearch', () => {
     ], [{ id: 'g1', key: 'gemini-key' }], [{ id: 't1', key: 'tavily-key' }]))
 
     const fetchBody = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(fetchBody.query).toBe('Dunya su an Gunes yorungesinde hangi tarihte ve konumda')
-    expect(fetchBody.query).not.toBe('hangi tarihten bahsediyorsun')
+    expect(fetchBody.query).toBe('dunya suan gunesin neresinde hangi tarihten bahsediyorsun')
     expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer tavily-key')
     expect(fetchBody).not.toHaveProperty('api_key')
   })
@@ -79,7 +78,7 @@ describe('streamResearch', () => {
 
     const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
     expect(finalPrompt).toContain('Orijinal kullanici sorusu: hangi tarihten bahsediyorsun')
-    expect(finalPrompt).toContain('Web arama sorgusu: Dunya su an Gunes yorungesinde hangi tarihte ve konumda')
+    expect(finalPrompt).toContain('Web arama sorgusu: dunya suan gunesin neresinde hangi tarihten bahsediyorsun')
     expect(finalPrompt).toContain('Kullanici: dunya suan gunesin neresinde')
     expect(finalPrompt).toContain('Dunya Gunes yorungesi')
   })
@@ -94,7 +93,7 @@ describe('streamResearch', () => {
       { systemInstruction: '  Her zaman Turkce yanit ver.  ' },
     ))
 
-    expect(mocks.generateContentMock.mock.calls[0][0].config).not.toHaveProperty('systemInstruction')
+    expect(mocks.generateContentMock).not.toHaveBeenCalled()
     expect(mocks.generateContentStreamMock.mock.calls[0][0]).toEqual(expect.objectContaining({
       model: 'gemini-3.7-flash',
       config: expect.objectContaining({ systemInstruction: 'Her zaman Turkce yanit ver.' }),
@@ -119,20 +118,15 @@ describe('streamResearch', () => {
     expect(finalPrompt).not.toContain('Response failed')
   })
 
-  it('does not mark a Gemini key rate-limited when query expansion returns empty text', async () => {
-    mocks.generateContentMock.mockResolvedValueOnce({ text: '' })
-
+  it('does not call Gemini to create the Tavily query', async () => {
     const events = await collectEvents(streamResearch(
       [{ role: 'user', content: 'follow-up question' }],
       [{ id: 'g1', key: 'gemini-key' }],
       [{ id: 't1', key: 'tavily-key' }],
     ))
 
-    expect(events
-      .filter(event => event.event === 'key_status' && event.data.provider === 'gemini')
-      .map(event => event.data)).toEqual([
-      { provider: 'gemini', keyId: 'g1', status: 'success' },
-    ])
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
   it('returns tavily_key_missing when research has no Tavily key', async () => {
@@ -673,13 +667,15 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 4 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 6 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'openrouter/free',
+      'minimax-m3',
     ])
   })
 

@@ -2,7 +2,7 @@
 
 AI-powered Chrome extension built with React 19, Vite 7, and Tailwind CSS.
 
-HeraAi runs fully inside the Chrome extension. There is no Express backend and no `.env` file. Gemini and Tavily API keys are added from the extension settings and stored locally in `chrome.storage.local`.
+HeraAi runs fully inside the Chrome extension. There is no Express backend and no `.env` file. Gemini, OpenRouter, Ollama Cloud, and Tavily API keys are added from the extension settings and stored locally in `chrome.storage.local`.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ HeraAi runs fully inside the Chrome extension. There is no Express backend and n
 Chrome Extension
   ├─ React side panel UI
   ├─ chrome.storage.local API key storage
-  ├─ Direct Gemini API calls for chat and vision
+  ├─ Provider adapters for Gemini, OpenRouter Free, and Ollama Cloud
   └─ Direct Tavily API calls for web research
 ```
 
@@ -19,7 +19,7 @@ Chrome Extension
 - Node.js 18+
 - npm 9+
 - Chrome browser
-- Gemini API key from Google AI Studio
+- An API key for at least one AI provider: Gemini, OpenRouter, or Ollama Cloud
 - Tavily API key only if you want Web Research mode
 
 ## Setup
@@ -49,13 +49,15 @@ This creates `release/HeraAi-<version>.zip` using the version from `manifest.jso
 
 1. Open the HeraAi side panel.
 2. Click Settings.
-3. Add at least one Gemini API key.
+3. Add at least one key for the provider you want to use.
 4. Optional: add a Tavily API key for Web Research mode.
 5. Save settings.
 
-Keys are stored only in `chrome.storage.local` on this device (`chrome.storage.sync` is never used). Real key values are masked in the UI as `AIza...xYz9`. Add as many keys as you want for each provider; the first key you add becomes the primary, and the rest are fallback keys.
+Keys are stored only in trusted extension contexts in `chrome.storage.local` on this device (`chrome.storage.sync` is never used). They are not encrypted, and real values are masked in the UI. Add as many keys as you want for each provider; the first key becomes primary and the rest are fallback keys.
 
-Fallback behavior is primary-first, not round-robin: the primary key is used on every request. If the primary returns a rate limit (429), quota exhaustion, timeout, or other transient provider error, HeraAi tries the next available fallback key for that request, then resumes the primary once its cooldown clears. Invalid keys, policy/safety refusals, and bad request errors do not trigger fallback.
+Fallback behavior is primary-first, not round-robin. HeraAi may try another key from the same provider only before the first response token. It never switches provider or moves OpenRouter to a paid model automatically, and it never changes keys after a partial response begins.
+
+The model selector contains four Gemini models, `OpenRouter Free` (`openrouter/free`), and `MiniMax M3 (Ollama Cloud)` (`minimax-m3`). OpenRouter reports the actual routed model on each answer. Ollama Cloud key testing sends a minimal generation request and consumes a small amount of quota. PDF attachments and voice features remain Gemini-only; images and extracted text documents work with all three AI providers.
 
 If every key for a required provider is in cooldown at the same time, the request is blocked and HeraAi shows the earliest retry time instead of failing silently.
 
@@ -63,11 +65,11 @@ If every key for a required provider is in cooldown at the same time, the reques
 
 Use the globe button in the chat input area.
 
-- Off: Gemini answers from the chat context.
-- On, with no URL: Tavily searches the web, then Gemini writes an answer using the search results and sources.
-- On, with one to five public URLs: Gemini URL Context reads only those pages. If retrieval fails and a Tavily key is configured, Tavily Extract is used as the exact-page fallback.
+- Off: the selected model answers from the chat context.
+- On, with no URL: Tavily searches the web, then the selected model writes one final answer using the results and sources.
+- On, with public URLs: Gemini models try Gemini URL Context first; OpenRouter and Ollama require Tavily Extract.
 
-Tavily is only contacted when Web Research is on. Exact public URL reading first uses Gemini and can work without Tavily; general web search and URL extraction fallback require a Tavily key. Translate, Summarize, Explain, Vision and OCR use Gemini.
+Tavily is only contacted when Web Research is on. Search queries are prepared locally without an extra model call. General search requires Tavily; exact public URL reading can work without Tavily only when a Gemini model successfully uses URL Context.
 
 ## Personal Use Notice
 
@@ -92,7 +94,9 @@ src/
   App.jsx                  Main side panel application
   background/              Chrome extension service worker
   components/              React UI components
-  lib/api.js               Direct Gemini and Tavily API client
+  lib/api.js               Provider coordination and Tavily research
+  lib/providerApi.js       OpenRouter SSE and Ollama NDJSON adapters
+  lib/models.js            Provider-aware model catalog
   lib/keyManager.js        Local API key storage helpers
   locales/                 i18n translations
 manifest.json              Chrome extension manifest

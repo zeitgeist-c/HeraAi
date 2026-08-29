@@ -1,17 +1,13 @@
 import { GoogleGenAI } from '@google/genai'
+import {
+  DEFAULT_MODEL,
+  MODEL_CAPABILITIES,
+  MODELS,
+  getProviderForModel,
+} from './models.js'
+import { streamRemoteProvider, testOllamaKey, testOpenRouterKey } from './providerApi.js'
 
-export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
-export const MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-3.5-flash-lite',
-  'gemini-3.6-flash',
-  'gemini-3.7-flash',
-]
-export const MODEL_CAPABILITIES = Object.freeze(Object.fromEntries(MODELS.map(id => [id, {
-  supportsImage: true,
-  supportsPdf: true,
-  supportsUrlContext: true,
-}])))
+export { DEFAULT_MODEL, MODEL_CAPABILITIES, MODELS }
 const GEMINI_API_VERSION = 'v1'
 const GEMINI_URL_CONTEXT_API_VERSION = 'v1beta'
 const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 60000
@@ -487,7 +483,7 @@ function createGeminiRequestParameters(messages, options, requestSignal, modelId
   }
 }
 
-export async function* streamChat(messages, options = {}, geminiKeys = [], signal, model) {
+async function* streamGeminiChat(messages, options = {}, geminiKeys = [], signal, model) {
   const modelId = model || DEFAULT_MODEL
 
   yield* streamGeminiWithFallback(
@@ -503,7 +499,7 @@ export async function* streamChat(messages, options = {}, geminiKeys = [], signa
   )
 }
 
-export async function* streamVision(messages, image, options = {}, geminiKeys = [], signal, model) {
+async function* streamGeminiVision(messages, image, options = {}, geminiKeys = [], signal, model) {
   const modelId = model || DEFAULT_MODEL
 
   yield* streamGeminiWithFallback(
@@ -517,6 +513,26 @@ export async function* streamVision(messages, image, options = {}, geminiKeys = 
     signal,
     modelId,
   )
+}
+
+export async function* streamChat(messages, options = {}, providerKeys = [], signal, model, provider) {
+  const modelId = model || DEFAULT_MODEL
+  const providerId = provider || getProviderForModel(modelId)
+  if (providerId === 'gemini') {
+    yield* streamGeminiChat(messages, options, providerKeys, signal, modelId)
+    return
+  }
+  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal)
+}
+
+export async function* streamVision(messages, image, options = {}, providerKeys = [], signal, model, provider) {
+  const modelId = model || DEFAULT_MODEL
+  const providerId = provider || getProviderForModel(modelId)
+  if (providerId === 'gemini') {
+    yield* streamGeminiVision(messages, image, options, providerKeys, signal, modelId)
+    return
+  }
+  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, image)
 }
 
 async function searchTavily(question, tavilyKeys, signal) {
@@ -635,63 +651,10 @@ function buildFallbackResearchQuery(conversationMessages, question) {
   return sanitizeResearchQuery(previousUser?.content ? `${previousUser.content} ${question}` : question)
 }
 
-function buildResearchQueryPrompt(context, question) {
-  return `Sen bir web arama sorgusu hazirlama yardimcisisin.
-
-Gorev: Kullanici takip sorusu kisa veya belirsizse, onceki konusma baglamini kullanarak tek satirlik acik bir web arama sorgusu yaz.
-
-Kurallar:
-- Sadece arama sorgusunu yaz.
-- Cevap verme, aciklama yapma.
-- Turkce yaz.
-- Soru onceki baglama bagliysa baglamdaki ana konuyu sorguya ekle.
-- Tarih/zaman sorularinda bugunun tarihini koru: ${new Date().toISOString().slice(0, 10)}.
-
-Konusma baglami:
-${context || '(baglam yok)'}
-
-Son kullanici sorusu:
-${question}`
-}
-
-async function generateResearchQuery(conversationMessages, question, geminiKeys, signal, model) {
+async function generateResearchQuery(conversationMessages, question) {
   const fallbackQuery = buildFallbackResearchQuery(conversationMessages, question)
   const context = buildConversationContext(conversationMessages)
-  const entries = validKeys(geminiKeys)
-  const modelId = model || DEFAULT_MODEL
-
-  if (entries.length === 0) {
-    return { query: fallbackQuery, context, keyStatuses: [] }
-  }
-
-  const keyStatuses = []
-  for (const entry of entries) {
-    try {
-      throwIfAborted(signal)
-      const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
-      const genAI = createGeminiClient(entry.key.trim())
-      const result = await runGeminiRequest(
-        requestSignal => genAI.models.generateContent({
-          model: modelId,
-          contents: buildResearchQueryPrompt(context, question),
-          config: { abortSignal: requestSignal },
-        }),
-        requestTimeoutMs,
-        signal,
-      )
-      const text = sanitizeResearchQuery(result?.text || '')
-      if (text) {
-        keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: 'success' })
-        return { query: text, context, keyStatuses }
-      }
-    } catch (err) {
-      if (err.name === 'AbortError' && signal?.aborted) throw err
-      const keyStatus = geminiKeyStatus(classifyGeminiError(err))
-      if (keyStatus) keyStatuses.push({ provider: 'gemini', keyId: entry.id, status: keyStatus })
-    }
-  }
-
-  return { query: fallbackQuery, context, keyStatuses }
+  return { query: fallbackQuery, context, keyStatuses: [] }
 }
 
 function buildResearchPrompt(question, researchQuery, conversationContext, results) {
@@ -890,12 +853,13 @@ function buildExtractedUrlPrompt(question, results, language = 'tr') {
   return `${safety}\n\n${pages}\n\nUser request:\n${question}`
 }
 
-async function* streamUrlResearch(input, urls, geminiKeys, tavilyKeys, signal, model, options) {
+async function* streamUrlResearch(input, urls, providerKeys, tavilyKeys, signal, model, options, provider) {
   const messages = Array.isArray(input) ? input : [{ role: 'user', content: input }]
   const modelId = model || DEFAULT_MODEL
-  const primary = MODEL_CAPABILITIES[modelId]?.supportsUrlContext === false
+  const providerId = provider || getProviderForModel(modelId)
+  const primary = providerId !== 'gemini' || MODEL_CAPABILITIES[modelId]?.supportsUrlContext === false
     ? { retrievalFailed: true, keyStatuses: [] }
-    : await tryGeminiUrlContext(messages, urls, options, geminiKeys, signal, modelId)
+    : await tryGeminiUrlContext(messages, urls, options, providerKeys, signal, modelId)
   for (const status of primary.keyStatuses || []) yield { event: 'key_status', data: status }
   if (primary.text && primary.sources) {
     yield { event: 'chunk', data: { text: primary.text } }
@@ -924,7 +888,14 @@ async function* streamUrlResearch(input, urls, geminiKeys, tavilyKeys, signal, m
   const fallbackMessages = normalized.map((message, index) => index === lastUserIndex
     ? { ...message, content: buildExtractedUrlPrompt(question, extraction.results, options.language) }
     : message)
-  for await (const event of streamChat(fallbackMessages, urlSafetyOptions(options), geminiKeys, signal, modelId)) {
+  for await (const event of streamChat(
+    fallbackMessages,
+    urlSafetyOptions(options),
+    providerKeys,
+    signal,
+    modelId,
+    providerId,
+  )) {
     yield event
     if (event.event === 'error') return
   }
@@ -945,10 +916,18 @@ async function* streamUrlResearch(input, urls, geminiKeys, tavilyKeys, signal, m
   }
 }
 
-export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], signal, model, options = {}) {
+export async function* streamResearch(
+  input,
+  providerKeys = [],
+  tavilyKeys = [],
+  signal,
+  model,
+  options = {},
+  provider,
+) {
   const urls = Array.isArray(options?.webContext?.urls) ? options.webContext.urls : []
   if (options?.webContext?.kind === 'url' && urls.length > 0) {
-    yield* streamUrlResearch(input, urls, geminiKeys, tavilyKeys, signal, model, options)
+    yield* streamUrlResearch(input, urls, providerKeys, tavilyKeys, signal, model, options, provider)
     return
   }
   const conversationMessages = Array.isArray(input)
@@ -969,7 +948,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
     return
   }
 
-  const queryResult = await generateResearchQuery(conversationMessages, question, geminiKeys, signal, model)
+  const queryResult = await generateResearchQuery(conversationMessages, question)
   for (const keyStatus of queryResult.keyStatuses) {
     yield { event: 'key_status', data: keyStatus }
   }
@@ -1010,7 +989,7 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
         },
       ]
     : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }]
-  for await (const evt of streamChat(messages, options, geminiKeys, signal, model)) {
+  for await (const evt of streamChat(messages, options, providerKeys, signal, model, provider)) {
     yield evt
     if (evt.event === 'error') return
   }
@@ -1029,7 +1008,9 @@ export async function* streamResearch(input, geminiKeys = [], tavilyKeys = [], s
 export async function testKey(provider, key, model = DEFAULT_MODEL) {
   const normalizedKey = typeof key === 'string' ? key.trim() : ''
   if (provider === 'gemini') {
-    const modelId = MODELS.includes(model) ? model : DEFAULT_MODEL
+    const modelId = MODELS.includes(model) && getProviderForModel(model) === 'gemini'
+      ? model
+      : DEFAULT_MODEL
     const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
     try {
       const genAI = createGeminiClient(normalizedKey)
@@ -1072,6 +1053,9 @@ export async function testKey(provider, key, model = DEFAULT_MODEL) {
       return { success: false, provider, errorType: 'network' }
     }
   }
+
+  if (provider === 'openrouter') return testOpenRouterKey(normalizedKey)
+  if (provider === 'ollama') return testOllamaKey(normalizedKey)
 
   return { success: false, provider, errorType: 'invalid' }
 }

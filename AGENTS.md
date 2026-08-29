@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using Google Gemini and Tavily with support for multiple languages (i18next).
+Hera is a Chrome extension built with React 19, Vite 7, and Tailwind CSS. It provides AI-powered assistance using Google Gemini, OpenRouter Free, Ollama Cloud, and Tavily with support for multiple languages (i18next).
 
 The extension runs in two primary contexts:
 - **Side Panel (UI)**: The main React application (`src/App.jsx`).
@@ -10,11 +10,11 @@ The extension runs in two primary contexts:
 
 ## API Providers
 
-Hera uses two provider APIs:
+Hera uses four provider APIs:
 1. **Google Gemini (Direct)**: Streams chat and multimodal responses, accepts image/PDF inline data, and reads public URLs through URL Context.
 2. **Tavily**: Provides general web search and exact-page extraction fallback when Gemini URL Context cannot retrieve a public URL.
-
-OpenRouter and Ollama are not present in the current application.
+3. **OpenRouter (Direct)**: Streams `openrouter/free` chat and multimodal responses through SSE.
+4. **Ollama Cloud (Direct)**: Streams `minimax-m3` chat and multimodal responses through NDJSON.
 
 ## Core Features & Data Flow
 

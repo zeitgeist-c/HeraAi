@@ -104,6 +104,7 @@ describe('offscreen bootstrap bridge', () => {
       model: 'gemini-test',
       requestMessages: startMessage.requestMessages,
       geminiKeys: startMessage.geminiKeys,
+      providerKeys: startMessage.geminiKeys,
       tavilyKeys: [],
       systemInstruction: 'system',
       language: 'tr',
@@ -220,6 +221,12 @@ describe('offscreen bootstrap bridge', () => {
 
     worker.emit({ kind: 'snapshot', rev: 3, content: 'full text', sources: [] })
     worker.emit({ kind: 'key_status', provider: 'gemini', keyId: 'g1', status: 'success' })
+    worker.emit({
+      kind: 'model_resolved',
+      provider: 'openrouter',
+      requestedModel: 'openrouter/free',
+      resolvedModel: 'meta-llama/free',
+    })
     worker.emit({ kind: 'heartbeat', uptimeMs: 15_000 })
 
     expect(runtime.sendMessage).toHaveBeenCalledWith({
@@ -229,6 +236,7 @@ describe('offscreen bootstrap bridge', () => {
       content: 'full text',
       sources: [],
       status: 'running',
+      resolvedModel: null,
     })
     expect(runtime.sendMessage).toHaveBeenCalledWith({
       type: 'KEY_STATUS',
@@ -236,6 +244,13 @@ describe('offscreen bootstrap bridge', () => {
       provider: 'gemini',
       keyId: 'g1',
       status: 'success',
+    })
+    expect(runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'MODEL_RESOLVED',
+      jobId: 'job-route',
+      provider: 'openrouter',
+      requestedModel: 'openrouter/free',
+      resolvedModel: 'meta-llama/free',
     })
     expect(runtime.sendMessage).toHaveBeenCalledWith({
       type: 'HEARTBEAT',
@@ -259,6 +274,7 @@ describe('offscreen bootstrap bridge', () => {
       content: 'full text',
       sources: [],
       errorCode: null,
+      resolvedModel: null,
     })
     expect(runtime.sendMessage).toHaveBeenCalledWith({
       type: 'WORKER_DONE',
@@ -268,6 +284,7 @@ describe('offscreen bootstrap bridge', () => {
       content: 'full text',
       sources: [],
       errorCode: null,
+      resolvedModel: null,
     })
     expect(worker.terminate).toHaveBeenCalledTimes(1)
     expect(bridge.getJobCount()).toBe(0)
@@ -290,6 +307,7 @@ describe('offscreen bootstrap bridge', () => {
       finalRev: 4,
       content: 'partial',
       sources: [],
+      resolvedModel: null,
     })
 
     expect(runtime.sendMessage).toHaveBeenCalledWith({
@@ -300,6 +318,7 @@ describe('offscreen bootstrap bridge', () => {
       finalRev: 4,
       content: 'partial',
       sources: [],
+      resolvedModel: null,
     })
     expect(worker.terminate).toHaveBeenCalledTimes(1)
     expect(bridge.getJobCount()).toBe(0)

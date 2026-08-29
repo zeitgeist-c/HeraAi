@@ -76,7 +76,9 @@ async function hydrateRequestMessages(payload) {
 
 async function selectStream(payload, signal, engines) {
   const requestMessages = await hydrateRequestMessages(payload)
-  const geminiKeys = Array.isArray(payload.geminiKeys) ? payload.geminiKeys : []
+  const providerKeys = Array.isArray(payload.providerKeys)
+    ? payload.providerKeys
+    : (Array.isArray(payload.geminiKeys) ? payload.geminiKeys : [])
   const tavilyKeys = Array.isArray(payload.tavilyKeys) ? payload.tavilyKeys : []
   const requestOptions = {
     systemInstruction: payload.systemInstruction || '',
@@ -87,12 +89,35 @@ async function selectStream(payload, signal, engines) {
     const researchOptions = payload.webContext
       ? { ...requestOptions, webContext: payload.webContext }
       : requestOptions
-    return engines.streamResearch(requestMessages, geminiKeys, tavilyKeys, signal, payload.model, researchOptions)
+    return engines.streamResearch(
+      requestMessages,
+      providerKeys,
+      tavilyKeys,
+      signal,
+      payload.model,
+      researchOptions,
+      payload.provider,
+    )
   }
   if (payload.mode === 'vision') {
-    return engines.streamVision(requestMessages, null, requestOptions, geminiKeys, signal, payload.model)
+    return engines.streamVision(
+      requestMessages,
+      null,
+      requestOptions,
+      providerKeys,
+      signal,
+      payload.model,
+      payload.provider,
+    )
   }
-  return engines.streamChat(requestMessages, requestOptions, geminiKeys, signal, payload.model)
+  return engines.streamChat(
+    requestMessages,
+    requestOptions,
+    providerKeys,
+    signal,
+    payload.model,
+    payload.provider,
+  )
 }
 
 export function createGenerationWorkerRuntime({
@@ -133,6 +158,7 @@ export function createGenerationWorkerRuntime({
       rev: job.revision,
       content: job.content,
       sources: job.sources,
+      resolvedModel: job.resolvedModel,
       status: 'running',
     })
     return true
@@ -165,6 +191,7 @@ export function createGenerationWorkerRuntime({
       finalRev: job.revision,
       content: job.content,
       sources: job.sources,
+      resolvedModel: job.resolvedModel,
       errorCode: null,
     })
   }
@@ -185,6 +212,7 @@ export function createGenerationWorkerRuntime({
       finalRev: job.revision,
       content: job.content,
       sources: job.sources,
+      resolvedModel: job.resolvedModel,
     })
   }
 
@@ -201,6 +229,7 @@ export function createGenerationWorkerRuntime({
       finalRev: job.revision,
       content: job.content,
       sources: job.sources,
+      resolvedModel: job.resolvedModel,
       errorCode: null,
     })
   }
@@ -239,6 +268,25 @@ export function createGenerationWorkerRuntime({
           job.sources = normalizeSources(event.data?.sources)
           job.snapshotDirty = true
           scheduleSnapshot(job)
+          continue
+        }
+
+        if (event?.event === 'model_resolved') {
+          const resolvedModel = typeof event.data?.resolvedModel === 'string'
+            ? event.data.resolvedModel.trim()
+            : ''
+          if (resolvedModel && resolvedModel !== job.resolvedModel) {
+            job.resolvedModel = resolvedModel
+            job.snapshotDirty = true
+            emit({
+              kind: 'model_resolved',
+              jobId: job.jobId,
+              provider: event.data?.provider || job.payload.provider || null,
+              requestedModel: event.data?.requestedModel || job.payload.model || null,
+              resolvedModel,
+            })
+            scheduleSnapshot(job)
+          }
           continue
         }
 
@@ -291,6 +339,7 @@ export function createGenerationWorkerRuntime({
       controller: new AbortController(),
       content: '',
       sources: [],
+      resolvedModel: null,
       revision: 0,
       presentedRevision: 0,
       snapshotDirty: false,

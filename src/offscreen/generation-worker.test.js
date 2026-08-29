@@ -149,6 +149,7 @@ describe('generation worker runtime', () => {
         content: 'Hello',
         sources: [],
         status: 'running',
+        resolvedModel: null,
       },
       {
         kind: 'snapshot',
@@ -157,6 +158,7 @@ describe('generation worker runtime', () => {
         content: 'Hello world',
         sources: [{ index: 1, url: 'https://example.com' }],
         status: 'running',
+        resolvedModel: null,
       },
     ])
     expect(timers).toHaveLength(1)
@@ -198,6 +200,28 @@ describe('generation worker runtime', () => {
     }))
     expect(errorEvent).not.toHaveProperty('message')
     expect(emit.mock.calls.map(([event]) => event.kind)).not.toContain('done')
+  })
+
+  it('persists resolved model provenance in snapshots and terminal events', async () => {
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({
+      emit,
+      engines: createEngines([
+        { event: 'model_resolved', data: { provider: 'openrouter', resolvedModel: 'meta-llama/free' } },
+        { event: 'chunk', data: { text: 'routed' } },
+      ]),
+    })
+
+    await runtime.handleMessage({ kind: 'start', jobId: 'job-resolved', mode: 'chat' })
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'snapshot',
+      resolvedModel: 'meta-llama/free',
+    }))
+    expect(emit).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'done',
+      resolvedModel: 'meta-llama/free',
+    }))
   })
 
   it('aborts the active iterator and reports a cancelled terminal event', async () => {

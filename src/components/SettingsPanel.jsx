@@ -60,12 +60,18 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
 
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
+  const [openRouterKeys, setOpenRouterKeys] = useState([])
+  const [ollamaKeys, setOllamaKeys] = useState([])
   const [newGeminiKey, setNewGeminiKey] = useState('')
   const [newTavilyKey, setNewTavilyKey] = useState('')
+  const [newOpenRouterKey, setNewOpenRouterKey] = useState('')
+  const [newOllamaKey, setNewOllamaKey] = useState('')
   const [testingKeyId, setTestingKeyId] = useState(null)
   const [testingAllProvider, setTestingAllProvider] = useState(null)
   const [showGeminiInput, setShowGeminiInput] = useState(false)
   const [showTavilyInput, setShowTavilyInput] = useState(false)
+  const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
+  const [showOllamaInput, setShowOllamaInput] = useState(false)
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -76,17 +82,27 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     async function load() {
       setGeminiKeys(await getKeys('gemini'))
       setTavilyKeys(await getKeys('tavily'))
+      setOpenRouterKeys(await getKeys('openrouter'))
+      setOllamaKeys(await getKeys('ollama'))
     }
     load()
   }, [])
 
   const refreshKeys = async (provider) => {
     if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
-    else setTavilyKeys(await getKeys('tavily'))
+    else if (provider === 'tavily') setTavilyKeys(await getKeys('tavily'))
+    else if (provider === 'openrouter') setOpenRouterKeys(await getKeys('openrouter'))
+    else if (provider === 'ollama') setOllamaKeys(await getKeys('ollama'))
   }
 
   const handleAddKey = async (provider) => {
-    const rawKey = provider === 'gemini' ? newGeminiKey : newTavilyKey
+    const rawKeys = {
+      gemini: newGeminiKey,
+      tavily: newTavilyKey,
+      openrouter: newOpenRouterKey,
+      ollama: newOllamaKey,
+    }
+    const rawKey = rawKeys[provider] || ''
     if (!rawKey.trim()) {
       toast.error(t('setup.keys.empty_error'))
       return
@@ -95,7 +111,9 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       await addKey(provider, rawKey)
       toast.success(t('setup.keys.add_success'))
       if (provider === 'gemini') setNewGeminiKey('')
-      else setNewTavilyKey('')
+      else if (provider === 'tavily') setNewTavilyKey('')
+      else if (provider === 'openrouter') setNewOpenRouterKey('')
+      else if (provider === 'ollama') setNewOllamaKey('')
       await refreshKeys(provider)
     } catch (err) {
       if (err.message === 'key_duplicate_error') {
@@ -169,7 +187,12 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   }
 
   const handleTestAll = async (provider) => {
-    const keysList = provider === 'gemini' ? geminiKeys : tavilyKeys
+    const keysList = {
+      gemini: geminiKeys,
+      tavily: tavilyKeys,
+      openrouter: openRouterKeys,
+      ollama: ollamaKeys,
+    }[provider] || []
     if (keysList.length === 0) return
     setTestingAllProvider(provider)
     try {
@@ -199,7 +222,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       showSources,
     }
 
-    chrome.storage.local.set({ ...newConfig, apiProvider: 'google' }, () => {
+    chrome.storage.local.set(newConfig, () => {
       onSave(newConfig)
       toast.success(t('setup.api.saved_success'))
     })
@@ -268,11 +291,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   }
 
   const renderKeySection = (provider) => {
-    const keysList = provider === 'gemini' ? geminiKeys : tavilyKeys
-    const inputValue = provider === 'gemini' ? newGeminiKey : newTavilyKey
-    const setInputValue = provider === 'gemini' ? setNewGeminiKey : setNewTavilyKey
-    const showInput = provider === 'gemini' ? showGeminiInput : showTavilyInput
-    const setShowInput = provider === 'gemini' ? setShowGeminiInput : setShowTavilyInput
+    const providerState = {
+      gemini: [geminiKeys, newGeminiKey, setNewGeminiKey, showGeminiInput, setShowGeminiInput],
+      tavily: [tavilyKeys, newTavilyKey, setNewTavilyKey, showTavilyInput, setShowTavilyInput],
+      openrouter: [openRouterKeys, newOpenRouterKey, setNewOpenRouterKey, showOpenRouterInput, setShowOpenRouterInput],
+      ollama: [ollamaKeys, newOllamaKey, setNewOllamaKey, showOllamaInput, setShowOllamaInput],
+    }[provider]
+    const [keysList, inputValue, setInputValue, showInput, setShowInput] = providerState
     const testingAll = testingAllProvider === provider
 
     return (
@@ -373,6 +398,21 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               </div>
               <div className="flex flex-col gap-6">
                 {renderKeySection('gemini')}
+                <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                  <p>{t('setup.keys.openrouter_notice')}</p>
+                  <a className="mt-1 inline-block font-medium text-primary hover:underline" href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">
+                    {t('setup.keys.openrouter_key_link')}
+                  </a>
+                </div>
+                {renderKeySection('openrouter')}
+                <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                  <p>{t('setup.keys.ollama_notice')}</p>
+                  <p className="mt-1 text-amber-700 dark:text-amber-300">{t('setup.keys.ollama_test_notice')}</p>
+                  <a className="mt-1 inline-block font-medium text-primary hover:underline" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">
+                    {t('setup.keys.ollama_key_link')}
+                  </a>
+                </div>
+                {renderKeySection('ollama')}
                 {renderKeySection('tavily')}
               </div>
             </div>

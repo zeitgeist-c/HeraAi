@@ -14,7 +14,7 @@ describe('session import and export', () => {
     vi.restoreAllMocks()
   })
 
-  it('exports version 2.1 metadata and model provenance without attachment payloads', async () => {
+  it('exports version 2.2 metadata and provider provenance without attachment payloads', async () => {
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hera-export')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
@@ -37,7 +37,9 @@ describe('session import and export', () => {
         {
           role: 'model',
           content: 'Saved answer',
-          model: 'gemini-3.7-flash',
+          model: 'openrouter/free',
+          provider: 'openrouter',
+          resolvedModel: 'meta-llama/llama-4-scout:free',
         },
       ],
     }])
@@ -45,7 +47,7 @@ describe('session import and export', () => {
     const blob = createObjectURL.mock.calls[0][0]
     const exported = JSON.parse(await readBlob(blob))
     expect(exported).toMatchObject({
-      version: '2.1',
+      version: '2.2',
       sessions: [{
         id: 'session-1',
         title: 'Saved title',
@@ -68,7 +70,9 @@ describe('session import and export', () => {
           {
             role: 'model',
             content: 'Saved answer',
-            model: 'gemini-3.7-flash',
+            model: 'openrouter/free',
+            provider: 'openrouter',
+            resolvedModel: 'meta-llama/llama-4-scout:free',
             attachments: [],
           },
         ],

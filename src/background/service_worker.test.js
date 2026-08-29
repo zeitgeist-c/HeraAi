@@ -54,6 +54,7 @@ const createChromeMock = ({
     requestedKeys.forEach(key => delete storage[key]);
     callback?.();
   });
+  const setAccessLevel = vi.fn().mockResolvedValue(undefined);
 
   const runtimeSendMessage = vi.fn((message, callback) => {
     events.push(`runtime:${message.type}`);
@@ -131,6 +132,7 @@ const createChromeMock = ({
         get: storageGet,
         set: storageSet,
         remove: storageRemove,
+        setAccessLevel,
       },
     },
     tabs: {
@@ -162,6 +164,7 @@ const createChromeMock = ({
     storageGet,
     storageSet,
     storageRemove,
+    setAccessLevel,
     runtimeSendMessage,
     isOffscreenOpen: () => documentOpen,
     setOffscreenJobs: ({ active = null, terminalForwarding = null } = {}) => {
@@ -251,6 +254,7 @@ describe('background service worker browser compatibility', () => {
       openPanelOnActionClick: true,
     });
     expect(mock.actionListener).not.toHaveBeenCalled();
+    expect(mock.setAccessLevel).toHaveBeenCalledWith({ accessLevel: 'TRUSTED_CONTEXTS' });
   });
 
   it('opens Hera in a tab when the side panel API is unavailable', async () => {
@@ -390,7 +394,7 @@ describe('background generation coordinator', () => {
       target: 'offscreen',
       forwardedBy: 'service_worker',
       jobId: 'job-1',
-      geminiKeys: [{ id: 'g1', key: 'gemini-secret', isPrimary: true }],
+      providerKeys: [{ id: 'g1', key: 'gemini-secret', isPrimary: true }],
       tavilyKeys: [],
       requestMessages: [{ role: 'user', content: 'Hello' }],
     });
@@ -506,6 +510,47 @@ describe('background generation coordinator', () => {
       activeAttachmentIds: ['attachment-1', 'attachment-2'],
       activeWebUrls: ['https://example.com/article', 'https://example.com/previous'],
     });
+  });
+
+  it('forwards only the selected provider key pool and keeps secrets out of persisted state', async () => {
+    keyManagerMocks.resolveKeysForRequest.mockResolvedValueOnce({
+      keys: [{ id: 'or1', key: 'openrouter-secret', isPrimary: true }],
+      allInCooldown: false,
+    });
+    const mock = createChromeMock({ initialStorage: { sessions: [] } });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage({
+      provider: 'openrouter',
+      model: 'openrouter/free',
+    }));
+
+    expect(response.ok).toBe(true);
+    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenCalledTimes(1);
+    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenCalledWith('openrouter');
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0]).toMatchObject({
+      provider: 'openrouter',
+      providerKeys: [{ id: 'or1', key: 'openrouter-secret', isPrimary: true }],
+      tavilyKeys: [],
+    });
+    expect(JSON.stringify(mock.storage)).not.toContain('openrouter-secret');
+    expect(mock.storage.activeGeneration).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/free',
+    });
+
+    await expect(dispatch(listener, {
+      type: 'MODEL_RESOLVED',
+      jobId: 'job-1',
+      provider: 'openrouter',
+      requestedModel: 'openrouter/free',
+      resolvedModel: 'meta-llama/free',
+    })).resolves.toMatchObject({ accepted: true, resolvedModel: 'meta-llama/free' });
+    expect(mock.storage.activeGeneration.resolvedModel).toBe('meta-llama/free');
+    expect(runtimeMessages(mock, 'MODEL_RESOLVED')).toContainEqual(expect.objectContaining({
+      forwardedBy: 'service_worker',
+      resolvedModel: 'meta-llama/free',
+    }));
   });
 
   it('rejects a second job while a different generation is active', async () => {

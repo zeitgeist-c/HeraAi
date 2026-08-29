@@ -107,11 +107,18 @@ const ChatMessage = ({
     && Boolean(visibleContent)
     && !isPending
     && !['error', 'cancelled', 'cancelled_empty', 'interrupted'].includes(message.status)
-  const availableRetryModels = Array.isArray(retryModels) ? retryModels : []
+  const availableRetryModels = Array.isArray(retryModels)
+    ? retryModels.map(model => typeof model === 'string'
+        ? { key: model, modelId: model, label: modelLabels[model] || model }
+        : model)
+    : []
   const hasRetryModelChoices = availableRetryModels.length > 0
-  const usedModelLabel = typeof message.model === 'string' && message.model
+  const requestedModelLabel = typeof message.model === 'string' && message.model
     ? (modelLabels[message.model] || message.model)
     : ''
+  const usedModelLabel = message.resolvedModel && message.resolvedModel !== message.model
+    ? `${requestedModelLabel || message.model} → ${message.resolvedModel}`
+    : requestedModelLabel
   const errorMessage = message.errorCode
     ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
     : t('chat.status.error')
@@ -243,14 +250,15 @@ const ChatMessage = ({
         </div>
         <div className="space-y-0.5 p-1.5">
           {availableRetryModels.map((model) => {
-            const isCurrentModel = model === currentModel
+            const modelId = model.modelId
+            const isCurrentModel = modelId === currentModel
             return (
               <button
-                key={model}
+                key={model.key || modelId}
                 type="button"
-                data-retry-model={model}
+                data-retry-model={modelId}
                 data-current-model={isCurrentModel ? 'true' : undefined}
-                onClick={() => handleRetryWithModel(model)}
+                onClick={() => handleRetryWithModel(modelId)}
                 disabled={retryDisabled || isPending}
                 className={`flex min-h-9 w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:pointer-events-none disabled:opacity-45 ${
                   isCurrentModel
@@ -266,7 +274,7 @@ const ChatMessage = ({
                   {isCurrentModel && <Check className="h-2.5 w-2.5" />}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {modelLabels[model] || model}
+                  {model.label || modelLabels[modelId] || modelId}
                 </span>
                 {isCurrentModel && (
                   <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
