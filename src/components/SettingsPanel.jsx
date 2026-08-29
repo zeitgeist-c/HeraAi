@@ -1,5 +1,17 @@
 import { useState, useEffect } from 'react'
-import { Settings, Save, Sparkles, ArrowLeft, Loader2, Key, Eye, EyeOff, ShieldAlert } from 'lucide-react'
+import {
+  Settings,
+  Save,
+  Sparkles,
+  ArrowLeft,
+  Loader2,
+  Key,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  ChevronDown,
+  ExternalLink,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import i18n from '../i18n'
@@ -9,6 +21,13 @@ import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } 
 const AVAILABLE_LANGUAGES = [
   { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
   { code: 'en', name: 'English', flag: '🇬🇧' },
+]
+
+const KEY_PROVIDERS = [
+  { id: 'gemini', keyUrl: 'https://aistudio.google.com/api-keys' },
+  { id: 'openrouter', keyUrl: 'https://openrouter.ai/settings/keys' },
+  { id: 'ollama', keyUrl: 'https://ollama.com/settings/keys' },
+  { id: 'tavily', keyUrl: 'https://app.tavily.com/home' },
 ]
 
 function computeStatus(key) {
@@ -72,6 +91,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [showTavilyInput, setShowTavilyInput] = useState(false)
   const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
   const [showOllamaInput, setShowOllamaInput] = useState(false)
+  const [expandedProvider, setExpandedProvider] = useState('gemini')
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -291,6 +311,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   }
 
   const renderKeySection = (provider) => {
+    const providerConfig = KEY_PROVIDERS.find(item => item.id === provider)
     const providerState = {
       gemini: [geminiKeys, newGeminiKey, setNewGeminiKey, showGeminiInput, setShowGeminiInput],
       tavily: [tavilyKeys, newTavilyKey, setNewTavilyKey, showTavilyInput, setShowTavilyInput],
@@ -302,10 +323,15 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
 
     return (
       <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Key className="w-4 h-4 text-primary" />
-          {t(`setup.keys.${provider}_section`)}
-        </h3>
+        <a
+          className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+          href={providerConfig.keyUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t(`setup.keys.${provider}_key_link`)}
+          <ExternalLink className="h-3 w-3" />
+        </a>
         <div className="flex gap-2">
           <div className="relative flex-1 min-w-0">
             <input
@@ -354,6 +380,53 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     )
   }
 
+  const renderProviderCard = (provider) => {
+    const keysList = {
+      gemini: geminiKeys,
+      tavily: tavilyKeys,
+      openrouter: openRouterKeys,
+      ollama: ollamaKeys,
+    }[provider] || []
+    const isExpanded = expandedProvider === provider
+    const headingId = `provider-heading-${provider}`
+    const panelId = `provider-panel-${provider}`
+
+    return (
+      <section key={provider} className="overflow-hidden rounded-xl border border-border/75 bg-background/35">
+        <button
+          id={headingId}
+          type="button"
+          onClick={() => setExpandedProvider(current => current === provider ? null : provider)}
+          aria-expanded={isExpanded}
+          aria-controls={panelId}
+          className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/45"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Key className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate text-xs font-semibold text-foreground">
+              {t(`setup.keys.${provider}_section`)}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {keysList.length}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </span>
+        </button>
+        <div
+          id={panelId}
+          role="region"
+          aria-labelledby={headingId}
+          hidden={!isExpanded}
+          className="border-t border-border/70 p-3"
+        >
+          {renderKeySection(provider)}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div className="hera-panel flex h-full min-h-screen w-full flex-col bg-background text-foreground">
       <header className="hera-panel-header">
@@ -396,24 +469,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                 <p className="text-[11px] leading-relaxed">{t('setup.keys.security_warning')}</p>
               </div>
-              <div className="flex flex-col gap-6">
-                {renderKeySection('gemini')}
-                <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-[11px] leading-relaxed text-muted-foreground">
-                  <p>{t('setup.keys.openrouter_notice')}</p>
-                  <a className="mt-1 inline-block font-medium text-primary hover:underline" href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">
-                    {t('setup.keys.openrouter_key_link')}
-                  </a>
-                </div>
-                {renderKeySection('openrouter')}
-                <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-[11px] leading-relaxed text-muted-foreground">
-                  <p>{t('setup.keys.ollama_notice')}</p>
-                  <p className="mt-1 text-amber-700 dark:text-amber-300">{t('setup.keys.ollama_test_notice')}</p>
-                  <a className="mt-1 inline-block font-medium text-primary hover:underline" href="https://ollama.com/settings/keys" target="_blank" rel="noreferrer">
-                    {t('setup.keys.ollama_key_link')}
-                  </a>
-                </div>
-                {renderKeySection('ollama')}
-                {renderKeySection('tavily')}
+              <div className="flex flex-col gap-2">
+                {KEY_PROVIDERS.map(({ id }) => renderProviderCard(id))}
               </div>
             </div>
           )}

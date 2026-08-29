@@ -2515,6 +2515,47 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/API keys are stored in this browser|API anahtarları yalnızca bu cihazdaki/i)).toBeInTheDocument();
   });
 
+  it('separates API providers into collapsible cards and links to every key portal', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    openSettingsPanel();
+
+    const providerHeadings = [
+      /Gemini API (Keys|Anahtarları)/i,
+      /OpenRouter API (Keys|Anahtarları)/i,
+      /Ollama Cloud API (Keys|Anahtarları)/i,
+      /Tavily (Search API Keys|Arama API Anahtarları)/i,
+    ].map(pattern => screen.getByText(pattern).closest('button'));
+
+    expect(providerHeadings.map(button => button.getAttribute('aria-expanded'))).toEqual([
+      'true',
+      'false',
+      'false',
+      'false',
+    ]);
+
+    fireEvent.click(providerHeadings[1]);
+    expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'false');
+    expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
+
+    const expectedLinks = [
+      ['https://aistudio.google.com/api-keys', /Gemini/i],
+      ['https://openrouter.ai/settings/keys', /OpenRouter/i],
+      ['https://ollama.com/settings/keys', /Ollama/i],
+      ['https://app.tavily.com/home', /Tavily/i],
+    ];
+    for (const [href, label] of expectedLinks) {
+      const link = document.querySelector(`a[href="${href}"]`);
+      expect(link).toBeInTheDocument();
+      expect(link).toHaveTextContent(label);
+      expect(link).toHaveAttribute('target', '_blank');
+    }
+
+    expect(screen.queryByText(/free-model router|ücretsiz model yönlendiricisini/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/high-usage model|yüksek kullanım sınıfındaki model/i)).not.toBeInTheDocument();
+  });
+
   it('writes a quota_exceeded status marker when a Tavily key test reports quota exhausted', async () => {
     api.testKey.mockResolvedValueOnce({ success: false, provider: 'tavily', errorType: 'quota' });
     render(<App />);
