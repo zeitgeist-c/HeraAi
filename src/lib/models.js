@@ -6,6 +6,8 @@ export const PROVIDERS = Object.freeze({
 
 export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
+export const DEFAULT_OLLAMA_MODEL = 'nemotron-3-ultra'
+export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud'])
 
 const geminiModel = (modelId, label) => ({
   key: `${PROVIDERS.GEMINI}:${modelId}`,
@@ -36,21 +38,10 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:minimax-m3`,
-    provider: PROVIDERS.OLLAMA,
-    modelId: 'minimax-m3',
-    label: 'MiniMax M3 (Ollama Cloud)',
-    capabilities: {
-      supportsImage: true,
-      supportsPdf: false,
-      supportsUrlContext: false,
-    },
-  },
-  {
     key: `${PROVIDERS.OLLAMA}:nemotron-3-ultra`,
     provider: PROVIDERS.OLLAMA,
     modelId: 'nemotron-3-ultra',
-    label: 'Nemotron 3 Ultra (Ollama Cloud)',
+    label: 'Nemotron 3 Ultra',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -61,7 +52,7 @@ export const MODEL_CATALOG = Object.freeze([
     key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
     provider: PROVIDERS.OLLAMA,
     modelId: 'gpt-oss:120b',
-    label: 'GPT-OSS 120B (Ollama Cloud)',
+    label: 'GPT-OSS 120B',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -88,7 +79,14 @@ export function getProviderForModel(modelId, fallback = DEFAULT_PROVIDER) {
   return getModelDescriptor(modelId)?.provider || fallback
 }
 
+export function isRetiredModelId(modelId) {
+  return typeof modelId === 'string' && RETIRED_MODEL_IDS.includes(modelId.trim().toLowerCase())
+}
+
 export function resolveModelSelection(provider, modelId) {
+  if (provider === PROVIDERS.OLLAMA && isRetiredModelId(modelId)) {
+    return getModelDescriptor(DEFAULT_OLLAMA_MODEL, PROVIDERS.OLLAMA)
+  }
   const exact = getModelDescriptor(modelId, provider)
   if (exact) return exact
   const legacy = getModelDescriptor(modelId)

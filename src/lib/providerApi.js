@@ -1,7 +1,8 @@
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const OPENROUTER_MODEL = 'openrouter/free'
 export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api'
-export const OLLAMA_CLOUD_MODEL = 'minimax-m3'
+export const OLLAMA_CLOUD_MODEL = 'nemotron-3-ultra'
+export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
 
 const REQUEST_TIMEOUT_MS = 120_000
 const STREAM_IDLE_TIMEOUT_MS = 120_000
@@ -183,6 +184,9 @@ function toOllamaMessages(messages, systemInstruction, fallbackImage = null) {
       attachments.push({ name: 'image.png', mimeType: 'image/png', data: fallbackImage })
     }
     assertNoPdf(attachments)
+    if (attachments.some(attachment => attachment?.mimeType?.startsWith('image/'))) {
+      throw createProviderError('image_not_supported', 'The selected Ollama model accepts text only')
+    }
     const textParts = [message.content]
     const images = []
     for (const attachment of attachments) {
@@ -380,13 +384,31 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
 
 export async function testOpenRouterKey(key) {
   try {
-    const request = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/key`, {
-      headers: { Authorization: `Bearer ${String(key || '').trim()}` },
+    const request = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${String(key || '').trim()}`,
+        'Content-Type': 'application/json',
+        'X-OpenRouter-Title': 'HeraAi',
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        messages: [{ role: 'user', content: 'OK' }],
+        stream: false,
+        max_tokens: 1,
+      }),
     })
     try {
-      if (request.response.ok) return { success: true, provider: 'openrouter' }
-      const error = await errorFromResponse(request.response)
-      return { success: false, provider: 'openrouter', errorType: testErrorType(error) }
+      if (!request.response.ok) throw await errorFromResponse(request.response)
+      const data = await request.response.json()
+      if (data?.error) {
+        const message = data.error?.message || String(data.error)
+        throw createProviderError(providerErrorCode(Number(data.error?.code || 0), message), message)
+      }
+      if (!Array.isArray(data?.choices) || !data.choices[0]?.message) {
+        throw createProviderError('invalid_response', 'Invalid OpenRouter test response')
+      }
+      return { success: true, provider: 'openrouter' }
     } finally {
       request.cleanup()
     }
@@ -397,15 +419,31 @@ export async function testOpenRouterKey(key) {
 
 export async function testOllamaKey(key) {
   try {
-    const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/ps`, {
+    const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/chat`, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${String(key || '').trim()}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        model: OLLAMA_TEST_MODEL,
+        messages: [{ role: 'user', content: 'OK' }],
+        stream: false,
+        think: 'low',
+        options: { num_predict: 1 },
+      }),
     })
     try {
-      if (request.response.ok) return { success: true, provider: 'ollama' }
-      const error = await errorFromResponse(request.response)
-      return { success: false, provider: 'ollama', errorType: testErrorType(error) }
+      if (!request.response.ok) throw await errorFromResponse(request.response)
+      const data = await request.response.json()
+      if (data?.error) {
+        const message = data.error?.message || String(data.error)
+        throw createProviderError(providerErrorCode(0, message), message)
+      }
+      if (!data?.message || typeof data.message !== 'object') {
+        throw createProviderError('invalid_response', 'Invalid Ollama test response')
+      }
+      return { success: true, provider: 'ollama' }
     } finally {
       request.cleanup()
     }

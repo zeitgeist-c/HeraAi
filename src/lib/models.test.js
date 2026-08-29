@@ -8,15 +8,14 @@ import {
 } from './models.js'
 
 describe('provider-aware model catalog', () => {
-  it('contains four Gemini models, OpenRouter Free, and three Ollama Cloud models', () => {
-    expect(MODEL_CATALOG).toHaveLength(8)
+  it('contains four Gemini models, OpenRouter Free, and two Ollama Cloud models', () => {
+    expect(MODEL_CATALOG).toHaveLength(7)
     expect(MODEL_CATALOG.map(model => [model.provider, model.modelId])).toEqual([
       ['gemini', 'gemini-3.1-flash-lite'],
       ['gemini', 'gemini-3.5-flash-lite'],
       ['gemini', 'gemini-3.6-flash'],
       ['gemini', 'gemini-3.7-flash'],
       ['openrouter', 'openrouter/free'],
-      ['ollama', 'minimax-m3'],
       ['ollama', 'nemotron-3-ultra'],
       ['ollama', 'gpt-oss:120b'],
     ])
@@ -40,8 +39,14 @@ describe('provider-aware model catalog', () => {
     ])
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsPdf).every(model => model.provider === 'gemini')).toBe(true)
     expect(getProviderForModel('openrouter/free')).toBe('openrouter')
-    expect(getProviderForModel('minimax-m3')).toBe('ollama')
     expect(getProviderForModel('nemotron-3-ultra')).toBe('ollama')
     expect(getProviderForModel('gpt-oss:120b')).toBe('ollama')
+  })
+
+  it('migrates the retired MiniMax selection to Nemotron', () => {
+    expect(resolveModelSelection('ollama', 'minimax-m3')).toMatchObject({
+      provider: 'ollama',
+      modelId: 'nemotron-3-ultra',
+    })
   })
 })

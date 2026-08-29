@@ -24,6 +24,7 @@ const TAVILY_EXTRACT_TOTAL_MAX_CHARS = 750000
 const RESEARCH_CONTEXT_TURNS = 6
 const RESEARCH_CONTEXT_MAX_CHARS = 2200
 const RESEARCH_QUERY_MAX_CHARS = 240
+const GEMINI_TEST_MODEL = 'gemini-3.1-flash-lite'
 
 function createAbortError() {
   const err = new Error('Request aborted')
@@ -243,7 +244,7 @@ function classifyTavilyStatus(status) {
 }
 
 function testKeyErrorType(provider, err) {
-  if (err?.name === 'AbortError') return 'timeout'
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return 'timeout'
   if (provider === 'gemini') {
     const classification = classifyGeminiError(err)
     if (classification === 'cooldown') return 'rate_limit'
@@ -254,14 +255,18 @@ function testKeyErrorType(provider, err) {
     if (classification === 'billing_required') return 'billing_required'
     if (classification === 'permission_denied') return 'permission_denied'
     if (classification === 'network') return 'network'
-    return 'invalid'
+    if (classification === 'invalid_key') return 'invalid'
+    return 'unknown'
   }
   if (provider === 'tavily') {
     const status = err?.status || 0
+    if (!status) return 'network'
     if (status === 429) return 'rate_limit'
-    if (status === 401 || status === 403) return 'invalid'
-    if (status >= 500) return 'network'
-    return 'network'
+    if (status === 401) return 'invalid'
+    if (status === 403) return 'permission_denied'
+    if (status === 404) return 'model_unavailable'
+    if (status >= 500) return 'service_unavailable'
+    return 'unknown'
   }
   return 'network'
 }
@@ -1003,24 +1008,27 @@ export async function* streamResearch(
   }
 }
 
-export async function testKey(provider, key, model = DEFAULT_MODEL) {
+export async function testKey(provider, key, _model = DEFAULT_MODEL) {
   const normalizedKey = typeof key === 'string' ? key.trim() : ''
   if (provider === 'gemini') {
-    const modelId = MODELS.includes(model) && getProviderForModel(model) === 'gemini'
-      ? model
-      : DEFAULT_MODEL
-    const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
+    const requestTimeoutMs = getGeminiRequestTimeoutMs(GEMINI_TEST_MODEL)
     try {
       const genAI = createGeminiClient(normalizedKey)
-      await runGeminiRequest(
+      const response = await runGeminiRequest(
         requestSignal => genAI.models.generateContent({
-          model: modelId,
-          contents: 'test',
-          config: { abortSignal: requestSignal },
+          model: GEMINI_TEST_MODEL,
+          contents: 'OK',
+          config: {
+            abortSignal: requestSignal,
+            maxOutputTokens: 1,
+          },
         }),
         requestTimeoutMs,
         undefined,
       )
+      if (!response || !Array.isArray(response.candidates)) {
+        return { success: false, provider, errorType: 'unknown' }
+      }
       return { success: true, provider }
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -1033,22 +1041,32 @@ export async function testKey(provider, key, model = DEFAULT_MODEL) {
 
   if (provider === 'tavily') {
     try {
-      const response = await fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${normalizedKey}`,
-        },
-        body: JSON.stringify({ query: 'test', max_results: 1 }),
-      })
-      if (response.ok) return { success: true, provider }
+      const response = await runGeminiRequest(
+        requestSignal => fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${normalizedKey}`,
+          },
+          body: JSON.stringify({
+            query: 'test',
+            max_results: 1,
+            include_answer: false,
+          }),
+          signal: requestSignal,
+        }),
+        TAVILY_TIMEOUT_MS,
+        undefined,
+      )
+      if (response.ok) {
+        const data = await response.json()
+        if (Array.isArray(data?.results)) return { success: true, provider }
+        return { success: false, provider, errorType: 'unknown' }
+      }
       return { success: false, provider, errorType: testKeyErrorType('tavily', { status: response.status }) }
     } catch (err) {
-      if (err?.name === 'AbortError') {
-        return { success: false, provider, errorType: 'timeout' }
-      }
       console.error('Tavily key test failed')
-      return { success: false, provider, errorType: 'network' }
+      return { success: false, provider, errorType: testKeyErrorType('tavily', err) }
     }
   }
 

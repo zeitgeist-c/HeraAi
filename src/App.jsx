@@ -59,6 +59,12 @@ import { updateStats } from './lib/stats'
 import { resolveKeysForRequest } from './lib/keyManager'
 import { generateSpeech, transcribeAudio } from './lib/voiceApi'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
+import {
+  hasRetiredModelProvenance,
+  sanitizeRetiredModelMessages,
+  sanitizeRetiredModelSessions,
+  stripRetiredModelProvenance,
+} from './lib/modelMigration'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -1967,6 +1973,8 @@ function App() {
       // an orphaned "thinking" message, or remove the placeholder for a newer job.
       let storedSessions = Array.isArray(result.sessions) ? result.sessions : []
       let legacyAttachmentsMigrated = false
+      const retiredModelMigration = sanitizeRetiredModelSessions(storedSessions)
+      storedSessions = retiredModelMigration.sessions
       try {
         const migration = await migrateLegacySessionAttachments(storedSessions)
         storedSessions = migration.sessions
@@ -1980,7 +1988,7 @@ function App() {
       let nextSessions = storedSessions.map(normalizeSessionMetadata)
       let nextActiveSessionId = null
       let nextMessages = welcomeMessages
-      let shouldPersistSessions = legacyAttachmentsMigrated
+      let shouldPersistSessions = legacyAttachmentsMigrated || retiredModelMigration.changed
 
       if (nextSessions.length > 0) {
         if (config.startupBehavior === 'resume') {
@@ -1999,7 +2007,8 @@ function App() {
           shouldPersistSessions = true
         }
       } else if (Array.isArray(result.chatHistory) && result.chatHistory.length > 1) {
-        const repairedHistory = repairMessageIds(result.chatHistory, msgIdCounter).messages
+        const sanitizedHistory = sanitizeRetiredModelMessages(result.chatHistory).messages
+        const repairedHistory = repairMessageIds(sanitizedHistory, msgIdCounter).messages
         const historyId = Date.now().toString()
         const historySession = createSession({
           id: historyId,
@@ -2069,9 +2078,11 @@ function App() {
       // read is pending, adopt all three fields together so finalization can
       // always resolve the generation's session.
       if (hasPendingSessionsChange) {
-        nextSessions = Array.isArray(pendingSessionsChange)
-          ? pendingSessionsChange.map(normalizeSessionMetadata)
-          : []
+        const pendingMigration = sanitizeRetiredModelSessions(
+          Array.isArray(pendingSessionsChange) ? pendingSessionsChange : [],
+        )
+        nextSessions = pendingMigration.sessions.map(normalizeSessionMetadata)
+        shouldPersistSessions = shouldPersistSessions || pendingMigration.changed
         nextSessions.forEach(session => {
           if (session?.id) persistedSessionIdsRef.current.add(session.id)
         })
@@ -2108,6 +2119,22 @@ function App() {
 
       if (shouldPersistSessions) {
         void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: nextActiveSessionId })
+      }
+
+      if (generation?.jobId && hasRetiredModelProvenance(generation)) {
+        try {
+          const cancellation = await sendRuntimeMessage({
+            type: 'CANCEL',
+            jobId: generation.jobId,
+            reason: 'model_retired',
+          })
+          generation = cancellation?.activeGeneration || null
+          if (generation) generation = stripRetiredModelProvenance(generation).value
+        } catch (error) {
+          console.error('Retired model generation cancellation failed', error)
+          generation = null
+          void chrome.storage.local.remove(['activeGeneration'])
+        }
       }
       void cleanupOrphanAttachments(nextSessions).catch(error => {
         console.error('Attachment cleanup failed', error)

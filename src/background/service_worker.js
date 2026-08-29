@@ -1,6 +1,10 @@
 import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
 import { getProviderForModel } from '../lib/models.js';
 import {
+  hasRetiredModelProvenance,
+  stripRetiredModelProvenance,
+} from '../lib/modelMigration.js';
+import {
   getAutoMessageTitle,
   getMessageDisplayContent,
   isHiddenPromptAutoTitle,
@@ -1125,6 +1129,21 @@ async function handleDoneAck(message) {
 
 async function handleGetState() {
   let activeGeneration = await getActiveGeneration();
+
+  if (activeGeneration && hasRetiredModelProvenance(activeGeneration)) {
+    if (ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)) {
+      const cancellation = await handleCancel({
+        jobId: activeGeneration.jobId,
+        reason: 'model_retired',
+      });
+      activeGeneration = cancellation.activeGeneration || null;
+    }
+    if (activeGeneration) {
+      const sanitized = stripRetiredModelProvenance(activeGeneration);
+      activeGeneration = sanitized.value;
+      if (sanitized.changed) await setActiveGeneration(activeGeneration);
+    }
+  }
 
   if (activeGeneration && ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)) {
     const queuedWithoutCoordinator = activeGeneration.status === 'queued';
