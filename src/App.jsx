@@ -14,7 +14,15 @@ import ShortcutsPanel from './components/ShortcutsPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
 import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
-import { MODELS, DEFAULT_MODEL } from './lib/api'
+import {
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+  MODEL_CATALOG,
+  MODEL_LABELS,
+  MODELS,
+  getProviderForModel,
+  resolveModelSelection,
+} from './lib/models'
 import {
   bytesToBase64,
   createAudioBufferFromPcm16,
@@ -73,13 +81,6 @@ const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const DICTATION_MAX_DURATION_MS = 200000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
-const MODEL_LABELS = {
-  'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
-  'gemini-3.6-flash': 'Gemini 3.6 Flash',
-  'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
-  'gemini-3.7-flash': 'Gemini 3.7 Flash',
-}
-
 function mergeUniqueStrings(existing = [], additions = []) {
   return Array.from(new Set([...(existing || []), ...(additions || [])].filter(Boolean)))
 }
@@ -330,7 +331,7 @@ function createUserMessage({
   }
 }
 
-function createAssistantMessage({ id, requestId, userMessageId, startedAt, model }) {
+function createAssistantMessage({ id, requestId, userMessageId, startedAt, model, provider, resolvedModel }) {
   return {
     id,
     requestId,
@@ -341,6 +342,8 @@ function createAssistantMessage({ id, requestId, userMessageId, startedAt, model
     status: 'thinking',
     sources: [],
     ...(typeof model === 'string' && model ? { model } : {}),
+    ...(typeof provider === 'string' && provider ? { provider } : {}),
+    ...(typeof resolvedModel === 'string' && resolvedModel ? { resolvedModel } : {}),
   }
 }
 
@@ -423,6 +426,7 @@ function App() {
   const [activeMode, setActiveMode] = useState(null)
   const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
+  const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDER)
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const composerInputRef = useRef(null)
@@ -1160,9 +1164,14 @@ function App() {
     let found = false
     const applyUpdate = (message) => {
       const updatedMessage = updater(message)
-      return typeof generation.model === 'string' && generation.model
-        ? { ...updatedMessage, model: generation.model }
-        : updatedMessage
+      return {
+        ...updatedMessage,
+        ...(typeof generation.model === 'string' && generation.model ? { model: generation.model } : {}),
+        ...(typeof generation.provider === 'string' && generation.provider ? { provider: generation.provider } : {}),
+        ...(typeof generation.resolvedModel === 'string' && generation.resolvedModel
+          ? { resolvedModel: generation.resolvedModel }
+          : {}),
+      }
     }
     const currentMessages = messagesRef.current
     const nextMessages = currentMessages.map(message => {
@@ -1178,6 +1187,8 @@ function App() {
         userMessageId: generation.userMessageId,
         startedAt: generation.startedAt || Date.now(),
         model: generation.model,
+        provider: generation.provider,
+        resolvedModel: generation.resolvedModel,
       })
       nextMessages.push(applyUpdate(created))
     }
@@ -1315,6 +1326,8 @@ function App() {
               sources: Array.isArray(generation.sources) ? generation.sources : (message.sources || []),
               errorCode: generation.errorCode || null,
               ...(generation.model ? { model: generation.model } : {}),
+              ...(generation.provider ? { provider: generation.provider } : {}),
+              ...(generation.resolvedModel ? { resolvedModel: generation.resolvedModel } : {}),
             }
           })
 
@@ -1335,6 +1348,8 @@ function App() {
                   userMessageId: generation.userMessageId,
                   startedAt: generation.startedAt || Date.now(),
                   model: generation.model,
+                  provider: generation.provider,
+                  resolvedModel: generation.resolvedModel,
                 }),
                 content: finalContent,
                 status: terminalStatus,
@@ -1888,6 +1903,7 @@ function App() {
           'showSources',
           'selectedText',
           'selectedModel',
+          'selectedProvider',
         ])
       } catch (error) {
         console.error('Chrome storage initialization failed', error)
@@ -1926,15 +1942,21 @@ function App() {
       const translate = i18n.getFixedT(config.language)
       setAppConfig(config)
       applyTheme(config.theme, config.customPrimaryColor)
-      const resolvedSelectedModel = result.selectedModel && MODELS.includes(result.selectedModel)
-        ? result.selectedModel
-        : DEFAULT_MODEL
+      const resolvedSelection = resolveModelSelection(result.selectedProvider, result.selectedModel)
+      const resolvedSelectedModel = resolvedSelection.modelId
       setSelectedModel(resolvedSelectedModel)
-      if (result.selectedModel && result.selectedModel !== resolvedSelectedModel) {
+      setSelectedProvider(resolvedSelection.provider)
+      if (
+        result.selectedModel !== resolvedSelectedModel
+        || result.selectedProvider !== resolvedSelection.provider
+      ) {
         try {
-          await chrome.storage.local.set({ selectedModel: resolvedSelectedModel })
+          await chrome.storage.local.set({
+            selectedModel: resolvedSelectedModel,
+            selectedProvider: resolvedSelection.provider,
+          })
         } catch (error) {
-          console.error('Invalid stored model cleanup failed', error)
+          console.error('Stored model selection migration failed', error)
         }
       }
 
@@ -3179,6 +3201,14 @@ function App() {
     const requestModel = MODELS.includes(actionOptions?.modelOverride)
       ? actionOptions.modelOverride
       : selectedModel
+    const requestProvider = getProviderForModel(requestModel, selectedProvider)
+    if (
+      requestProvider !== 'gemini'
+      && sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
+    ) {
+      toast.error(t('chat.generation_errors.pdf_requires_gemini'))
+      return
+    }
 
     let explicitUrls = []
     try {
@@ -3279,6 +3309,7 @@ function App() {
       userMessageId,
       startedAt,
       model: requestModel,
+      provider: requestProvider,
     })
     const retryUserIndex = retryUserMessage
       ? messagesRef.current.findIndex(message => message.id === retryUserMessage.id)
@@ -3311,6 +3342,7 @@ function App() {
       completedAt: null,
       mode,
       model: requestModel,
+      provider: requestProvider,
       language: appConfig?.language || i18n.language || 'tr',
       status: 'queued',
       revision: 0,
@@ -3438,6 +3470,7 @@ function App() {
         startedAt,
         mode,
         model: requestModel,
+        provider: requestProvider,
         language: generation.language,
         sessionTitle,
         systemInstruction: appConfig?.systemInstruction || '',
@@ -3488,7 +3521,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -4003,8 +4036,12 @@ function App() {
   )
 
   const handleModelChange = (nextModel) => {
+    const nextProvider = getProviderForModel(nextModel)
     setSelectedModel(nextModel)
-    if (chrome && chrome.storage) chrome.storage.local.set({ selectedModel: nextModel })
+    setSelectedProvider(nextProvider)
+    if (chrome && chrome.storage) {
+      chrome.storage.local.set({ selectedModel: nextModel, selectedProvider: nextProvider })
+    }
   }
 
   return (
@@ -4082,7 +4119,7 @@ function App() {
                   message={msg}
                   onEdit={handleEditMessage}
                   onRetry={handleRetryMessage}
-                  retryModels={MODELS}
+                  retryModels={MODEL_CATALOG}
                   modelLabels={MODEL_LABELS}
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
@@ -4353,7 +4390,7 @@ function App() {
         <div data-testid="composer-meta" className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
           <ModelSelector
             selectedModel={selectedModel}
-            models={MODELS}
+            models={MODEL_CATALOG}
             modelLabels={MODEL_LABELS}
             onModelChange={handleModelChange}
           />

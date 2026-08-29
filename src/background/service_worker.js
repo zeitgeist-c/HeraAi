@@ -1,4 +1,5 @@
 import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
+import { getProviderForModel } from '../lib/models.js';
 import {
   getAutoMessageTitle,
   getMessageDisplayContent,
@@ -12,7 +13,7 @@ const OFFSCREEN_COMMAND_RETRY_DELAYS_MS = [25, 75, 150];
 const HEARTBEAT_STALE_AFTER_MS = 45_000;
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running']);
 const ACKNOWLEDGEABLE_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted']);
-const VALID_KEY_PROVIDERS = new Set(['gemini', 'tavily']);
+const VALID_KEY_PROVIDERS = new Set(['gemini', 'tavily', 'openrouter', 'ollama']);
 
 let generationQueue = Promise.resolve();
 const latestKeyStatuses = new Map();
@@ -195,6 +196,9 @@ function withoutSensitiveGenerationData(generation) {
   const {
     geminiKeys: _geminiKeys,
     tavilyKeys: _tavilyKeys,
+    providerKeys: _providerKeys,
+    openRouterKeys: _openRouterKeys,
+    ollamaKeys: _ollamaKeys,
     keysForGemini: _keysForGemini,
     keysForTavily: _keysForTavily,
     geminiApiKeys: _geminiApiKeys,
@@ -329,6 +333,8 @@ function createQueuedGeneration(message, storedGeneration = null) {
     streamCompletedAt: null,
     mode: message.mode ?? stored.mode ?? 'chat',
     model: message.model ?? stored.model ?? null,
+    provider: message.provider ?? stored.provider ?? getProviderForModel(message.model),
+    resolvedModel: message.resolvedModel ?? stored.resolvedModel ?? null,
     language: message.language ?? stored.language ?? 'tr',
     status: 'queued',
     revision: normalizedRevision(stored.revision),
@@ -425,6 +431,12 @@ function createThinkingPlaceholder(message, queuedGeneration) {
     ...(typeof queuedGeneration.model === 'string' && queuedGeneration.model
       ? { model: queuedGeneration.model }
       : {}),
+    ...(typeof queuedGeneration.provider === 'string' && queuedGeneration.provider
+      ? { provider: queuedGeneration.provider }
+      : {}),
+    ...(typeof queuedGeneration.resolvedModel === 'string' && queuedGeneration.resolvedModel
+      ? { resolvedModel: queuedGeneration.resolvedModel }
+      : {}),
   };
 }
 
@@ -476,6 +488,7 @@ async function writeTerminalError(activeGeneration, errorCode, details = {}) {
     sources: acceptsReportedContent && Array.isArray(details.sources)
       ? details.sources
       : (Array.isArray(activeGeneration.sources) ? activeGeneration.sources : []),
+    resolvedModel: details.resolvedModel || activeGeneration.resolvedModel || null,
     errorCode: errorCode || 'generation_failed',
     streamCompletedAt: now,
     completedAt: now,
@@ -643,12 +656,13 @@ async function handleGenerationStart(message) {
   await setActiveGeneration(runningGeneration);
 
   try {
-    const geminiResolution = await resolveKeysForRequest('gemini');
-    if (geminiResolution.allInCooldown) {
+    const provider = runningGeneration.provider || getProviderForModel(runningGeneration.model);
+    const providerResolution = await resolveKeysForRequest(provider);
+    if (providerResolution.allInCooldown) {
       const failedGeneration = await writeTerminalError(
         runningGeneration,
         'all_keys_cooldown',
-        { earliestCooldownEnd: geminiResolution.earliestCooldownEnd },
+        { earliestCooldownEnd: providerResolution.earliestCooldownEnd },
       );
       return {
         ok: false,
@@ -687,7 +701,8 @@ async function handleGenerationStart(message) {
       requestMessages,
       attachmentIds: Array.isArray(message.attachmentIds) ? message.attachmentIds : [],
       webContext: message.webContext || { kind: 'none', urls: [] },
-      geminiKeys: geminiResolution.keys || [],
+      provider,
+      providerKeys: providerResolution.keys || [],
       tavilyKeys: tavilyResolution.keys || [],
       model: runningGeneration.model,
       mode: runningGeneration.mode,
@@ -755,6 +770,7 @@ async function handleSnapshot(message) {
     sources: Array.isArray(message.sources)
       ? message.sources
       : (Array.isArray(activeGeneration.sources) ? activeGeneration.sources : []),
+    resolvedModel: message.resolvedModel || activeGeneration.resolvedModel || null,
     lastSnapshotAt: now,
     presentedRevision: revision,
     updatedAt: now,
@@ -804,6 +820,37 @@ async function handleHeartbeat(message) {
   };
   await setActiveGeneration(nextGeneration);
   return { ok: true, accepted: true, receivedAt };
+}
+
+async function handleModelResolved(message) {
+  const activeGeneration = await getActiveGeneration();
+  const resolvedModel = typeof message.resolvedModel === 'string'
+    ? message.resolvedModel.trim()
+    : '';
+  if (
+    !resolvedModel
+    || !activeGeneration
+    || activeGeneration.jobId !== message.jobId
+    || !ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)
+  ) {
+    return { ok: true, accepted: false, ignored: true };
+  }
+
+  const nextGeneration = {
+    ...withoutSensitiveGenerationData(activeGeneration),
+    resolvedModel,
+    updatedAt: Date.now(),
+  };
+  await setActiveGeneration(nextGeneration);
+  await broadcastRuntimeMessage({
+    type: 'MODEL_RESOLVED',
+    forwardedBy: 'service_worker',
+    jobId: nextGeneration.jobId,
+    provider: message.provider || nextGeneration.provider || null,
+    requestedModel: message.requestedModel || nextGeneration.model || null,
+    resolvedModel,
+  });
+  return { ok: true, accepted: true, resolvedModel };
 }
 
 function keyMetadataForStatus(status, now) {
@@ -907,6 +954,7 @@ async function handleWorkerDone(message) {
     sources: acceptsReportedContent && Array.isArray(message.sources)
       ? message.sources
       : (Array.isArray(activeGeneration.sources) ? activeGeneration.sources : []),
+    resolvedModel: message.resolvedModel || activeGeneration.resolvedModel || null,
     errorCode: null,
     cancelReason: message.cancelled
       ? (activeGeneration.cancelReason ?? message.reason ?? null)
@@ -1130,6 +1178,8 @@ function handleProtocolMessage(message) {
       return handleSnapshot(message);
     case 'KEY_STATUS':
       return handleKeyStatus(message);
+    case 'MODEL_RESOLVED':
+      return handleModelResolved(message);
     case 'HEARTBEAT':
       return handleHeartbeat(message);
     case 'WORKER_DONE':
@@ -1144,6 +1194,11 @@ function handleProtocolMessage(message) {
     default:
       return Promise.resolve({ ok: false, errorCode: 'unsupported_message' });
   }
+}
+
+if (typeof chrome.storage?.local?.setAccessLevel === 'function') {
+  Promise.resolve(chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }))
+    .catch(error => console.error('Storage access level could not be restricted', error));
 }
 
 // Prefer the native side panel. Browsers without this Chrome-specific API
@@ -1195,6 +1250,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     'GET_STATE',
     'SNAPSHOT',
     'KEY_STATUS',
+    'MODEL_RESOLVED',
     'HEARTBEAT',
     'WORKER_DONE',
     'WORKER_ERROR',

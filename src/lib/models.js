@@ -1,0 +1,75 @@
+export const PROVIDERS = Object.freeze({
+  GEMINI: 'gemini',
+  OPENROUTER: 'openrouter',
+  OLLAMA: 'ollama',
+})
+
+export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
+
+const geminiModel = (modelId, label) => ({
+  key: `${PROVIDERS.GEMINI}:${modelId}`,
+  provider: PROVIDERS.GEMINI,
+  modelId,
+  label,
+  capabilities: {
+    supportsImage: true,
+    supportsPdf: true,
+    supportsUrlContext: true,
+  },
+})
+
+export const MODEL_CATALOG = Object.freeze([
+  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'),
+  geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'),
+  geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash'),
+  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash'),
+  {
+    key: `${PROVIDERS.OPENROUTER}:openrouter/free`,
+    provider: PROVIDERS.OPENROUTER,
+    modelId: 'openrouter/free',
+    label: 'OpenRouter Free',
+    capabilities: {
+      supportsImage: true,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+  {
+    key: `${PROVIDERS.OLLAMA}:minimax-m3`,
+    provider: PROVIDERS.OLLAMA,
+    modelId: 'minimax-m3',
+    label: 'MiniMax M3 (Ollama Cloud)',
+    capabilities: {
+      supportsImage: true,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+])
+
+export const MODELS = Object.freeze(MODEL_CATALOG.map(model => model.modelId))
+export const MODEL_LABELS = Object.freeze(Object.fromEntries(
+  MODEL_CATALOG.map(model => [model.modelId, model.label]),
+))
+export const MODEL_CAPABILITIES = Object.freeze(Object.fromEntries(
+  MODEL_CATALOG.map(model => [model.modelId, Object.freeze({ ...model.capabilities })]),
+))
+
+export function getModelDescriptor(modelId, provider = null) {
+  return MODEL_CATALOG.find(model => (
+    model.modelId === modelId && (!provider || model.provider === provider)
+  )) || null
+}
+
+export function getProviderForModel(modelId, fallback = DEFAULT_PROVIDER) {
+  return getModelDescriptor(modelId)?.provider || fallback
+}
+
+export function resolveModelSelection(provider, modelId) {
+  const exact = getModelDescriptor(modelId, provider)
+  if (exact) return exact
+  const legacy = getModelDescriptor(modelId)
+  if (legacy) return legacy
+  return getModelDescriptor(DEFAULT_MODEL, DEFAULT_PROVIDER)
+}

@@ -1,5 +1,10 @@
-const PROVIDERS = ['gemini', 'tavily'];
-const STORAGE_KEYS = { gemini: 'geminiApiKeys', tavily: 'tavilyApiKeys' };
+const PROVIDERS = ['gemini', 'tavily', 'openrouter', 'ollama'];
+const STORAGE_KEYS = {
+  gemini: 'geminiApiKeys',
+  tavily: 'tavilyApiKeys',
+  openrouter: 'openRouterApiKeys',
+  ollama: 'ollamaApiKeys',
+};
 
 function getStorageKey(provider) {
   if (!PROVIDERS.includes(provider)) throw new Error(`Invalid provider: ${provider}`);

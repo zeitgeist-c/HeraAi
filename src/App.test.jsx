@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import toast from 'react-hot-toast';
 
 import App from './App';
 import * as api from './lib/api';
@@ -2469,7 +2470,7 @@ describe('HeraAi App', () => {
     }));
   });
 
-  it('renders Gemini and Tavily key inputs as type=password', async () => {
+  it('renders all provider key inputs as type=password', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2477,7 +2478,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
     expect(document.querySelectorAll('input[type="text"]').length).toBe(0);
@@ -2491,7 +2492,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
     const geminiInput = document.querySelectorAll('input[type="password"]')[0];
@@ -2523,14 +2524,14 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
-    const tavilyInput = document.querySelectorAll('input[type="password"]')[1];
+    const tavilyInput = document.querySelectorAll('input[type="password"]')[3];
     fireEvent.change(tavilyInput, { target: { value: 'tvly-test-key-abcdefg1234' } });
 
     const addButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.textContent?.match(/Add Key|Anahtar Ekle/i));
-    fireEvent.click(addButtons[1]);
+    fireEvent.click(addButtons[3]);
 
     await waitFor(() => {
       expect(currentStorage.tavilyApiKeys).toHaveLength(1);
@@ -2597,7 +2598,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
     const testAllBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.match(/Test All|Tümünü Test Et/i));
@@ -2633,7 +2634,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
     const keyRows = () => Array.from(document.querySelectorAll('span.font-mono'));
@@ -2660,7 +2661,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
     const geminiInput = document.querySelectorAll('input[type="password"]')[0];
@@ -2672,7 +2673,7 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders the model selector below the composer with the 4 supported model ids', async () => {
+  it('renders the provider-grouped model selector with the 6 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2687,6 +2688,8 @@ describe('HeraAi App', () => {
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'openrouter/free',
+      'minimax-m3',
     ]);
   });
 
@@ -2697,6 +2700,28 @@ describe('HeraAi App', () => {
 
     const modelSelect = document.querySelector('select[data-testid="model-selector"]');
     expect(modelSelect.value).toBe('gemini-3.1-flash-lite');
+  });
+
+  it('migrates a provider-less legacy Gemini selection once', async () => {
+    currentStorage.selectedModel = 'gemini-3.6-flash';
+    render(<App />);
+
+    await waitFor(() => expect(currentStorage.selectedProvider).toBe('gemini'));
+    expect(document.querySelector('select[data-testid="model-selector"]')).toHaveValue('gemini-3.6-flash');
+  });
+
+  it('persists provider and model together when selecting OpenRouter Free', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('select[data-testid="model-selector"]'), {
+      target: { value: 'openrouter/free' },
+    });
+
+    await waitFor(() => expect(currentStorage).toMatchObject({
+      selectedProvider: 'openrouter',
+      selectedModel: 'openrouter/free',
+    }));
   });
 
   it('passes the chosen model into streamChat on the next send', async () => {
@@ -2751,6 +2776,8 @@ describe('HeraAi App', () => {
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'openrouter/free',
+      'minimax-m3',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
 
@@ -2771,6 +2798,44 @@ describe('HeraAi App', () => {
     expect(screen.getAllByTestId('user-message').filter(element => (
       element.textContent.includes('Compare this question')
     ))).toHaveLength(2);
+  });
+
+  it('blocks a PDF retry before starting OpenRouter generation', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'pdf-retry-session',
+      sessions: [{
+        id: 'pdf-retry-session',
+        title: 'PDF retry',
+        updatedAt: Date.now(),
+        messages: [
+          {
+            id: 'pdf-user',
+            role: 'user',
+            content: 'Read this PDF',
+            mode: 'vision',
+            attachments: [{ id: 'pdf-1', name: 'paper.pdf', mimeType: 'application/pdf', data: 'PDF' }],
+          },
+          { id: 'pdf-answer', userMessageId: 'pdf-user', role: 'model', content: 'Old PDF answer', status: 'done' },
+        ],
+      }],
+    };
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('Old PDF answer');
+    fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'OpenRouter Free' }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
+      /PDF attachments are supported only|PDF ekleri yalnızca/i,
+    )));
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(api.streamVision).not.toHaveBeenCalled();
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
+      message?.type === 'HERA_GENERATION_START'
+    ))).toBe(false);
   });
 
   it('keeps the full visible conversation when retrying an older answer', async () => {

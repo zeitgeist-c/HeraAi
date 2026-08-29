@@ -7,6 +7,7 @@ const createDefaultWorker = () => new Worker(
 
 function hasResolvedKeys(message) {
   return (
+    Object.prototype.hasOwnProperty.call(message || {}, 'providerKeys') ||
     Object.prototype.hasOwnProperty.call(message || {}, 'geminiKeys') ||
     Object.prototype.hasOwnProperty.call(message || {}, 'keysForGemini')
   )
@@ -24,7 +25,9 @@ function normalizeStartMessage(message) {
   return {
     ...payload,
     kind: 'start',
-    geminiKeys: Array.isArray(message.geminiKeys) ? message.geminiKeys : (keysForGemini || []),
+    providerKeys: Array.isArray(message.providerKeys)
+      ? message.providerKeys
+      : (Array.isArray(message.geminiKeys) ? message.geminiKeys : (keysForGemini || [])),
     tavilyKeys: Array.isArray(message.tavilyKeys) ? message.tavilyKeys : (keysForTavily || []),
   }
 }
@@ -95,6 +98,7 @@ export function createOffscreenBridge({
         revision: data.rev ?? data.revision,
         content: data.content || '',
         sources: Array.isArray(data.sources) ? data.sources : [],
+        resolvedModel: data.resolvedModel || null,
         status: 'running',
       })
       return
@@ -107,6 +111,17 @@ export function createOffscreenBridge({
         provider: data.provider,
         keyId: data.keyId,
         status: data.status,
+      })
+      return
+    }
+
+    if (data.kind === 'model_resolved') {
+      void forwardWithRetry({
+        type: 'MODEL_RESOLVED',
+        jobId,
+        provider: data.provider || null,
+        requestedModel: data.requestedModel || null,
+        resolvedModel: data.resolvedModel || null,
       })
       return
     }
@@ -130,6 +145,7 @@ export function createOffscreenBridge({
         finalRev: data.finalRev ?? data.revision ?? 0,
         content: data.content || '',
         sources: Array.isArray(data.sources) ? data.sources : [],
+        resolvedModel: data.resolvedModel || null,
       }
       terminateJob(jobId, worker)
       forwardTerminalMessage(jobId, payload)
@@ -144,6 +160,7 @@ export function createOffscreenBridge({
         finalRev: data.finalRev ?? 0,
         content: data.content || '',
         sources: Array.isArray(data.sources) ? data.sources : [],
+        resolvedModel: data.resolvedModel || null,
         errorCode: data.errorCode || null,
       }
       terminateJob(jobId, worker)

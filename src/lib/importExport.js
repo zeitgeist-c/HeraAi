@@ -1,6 +1,8 @@
+import { getProviderForModel } from './models'
+
 export const exportSessions = (sessions) => {
   const exportData = {
-    version: '2.1',
+    version: '2.2',
     exportedAt: new Date().toISOString(),
     sessions: sessions.map(s => ({
       id: s.id,
@@ -15,6 +17,8 @@ export const exportSessions = (sessions) => {
         content: m.content,
         ...(typeof m.displayContent === 'string' ? { displayContent: m.displayContent } : {}),
         ...(typeof m.model === 'string' && m.model ? { model: m.model } : {}),
+        ...(typeof m.provider === 'string' && m.provider ? { provider: m.provider } : {}),
+        ...(typeof m.resolvedModel === 'string' && m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}),
         ...(typeof m.mode === 'string' ? { mode: m.mode } : {}),
         ...(Array.isArray(m.webUrls) ? { webUrls: m.webUrls } : {}),
         ...(Array.isArray(m.displayWebUrls) ? { displayWebUrls: m.displayWebUrls } : {}),
@@ -64,6 +68,9 @@ export const importSessions = (file) => {
           activeWebUrls: Array.isArray(s.activeWebUrls) ? s.activeWebUrls : [],
           messages: (s.messages || []).map(message => ({
             ...message,
+            ...(message.model && !message.provider
+              ? { provider: getProviderForModel(message.model) }
+              : {}),
             attachments: (message.attachments || []).map(attachment => (
               attachment?.data
                 ? attachment

@@ -65,6 +65,24 @@ describe('ChatMessage copy actions', () => {
     expect(screen.queryByTestId('message-model')).not.toBeInTheDocument()
   })
 
+  it('shows the actual routed model for OpenRouter answers', () => {
+    render(<ChatMessage
+      message={{
+        id: 17,
+        role: 'model',
+        content: 'Routed answer',
+        model: 'openrouter/free',
+        provider: 'openrouter',
+        resolvedModel: 'meta-llama/llama-4-scout:free',
+      }}
+      modelLabels={{ ...modelLabels, 'openrouter/free': 'OpenRouter Free' }}
+    />)
+
+    expect(screen.getByTestId('message-model')).toHaveTextContent(
+      'OpenRouter Free → meta-llama/llama-4-scout:free',
+    )
+  })
+
   it('copies a user question from its action row', async () => {
     writeText.mockResolvedValue()
     render(<ChatMessage message={{ id: 4, role: 'user', content: 'Copy this question' }} />)
