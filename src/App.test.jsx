@@ -2714,7 +2714,7 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders the provider-grouped model selector with the 6 supported model ids', async () => {
+  it('renders the provider-grouped model selector with the 8 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2731,6 +2731,8 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'openrouter/free',
       'minimax-m3',
+      'nemotron-3-ultra',
+      'gpt-oss:120b',
     ]);
   });
 
@@ -2751,17 +2753,21 @@ describe('HeraAi App', () => {
     expect(document.querySelector('select[data-testid="model-selector"]')).toHaveValue('gemini-3.6-flash');
   });
 
-  it('persists provider and model together when selecting OpenRouter Free', async () => {
+  it.each([
+    ['openrouter/free', 'openrouter'],
+    ['nemotron-3-ultra', 'ollama'],
+    ['gpt-oss:120b', 'ollama'],
+  ])('persists provider and model together when selecting %s', async (modelId, providerId) => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     fireEvent.change(document.querySelector('select[data-testid="model-selector"]'), {
-      target: { value: 'openrouter/free' },
+      target: { value: modelId },
     });
 
     await waitFor(() => expect(currentStorage).toMatchObject({
-      selectedProvider: 'openrouter',
-      selectedModel: 'openrouter/free',
+      selectedProvider: providerId,
+      selectedModel: modelId,
     }));
   });
 
@@ -2819,6 +2825,8 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'openrouter/free',
       'minimax-m3',
+      'nemotron-3-ultra',
+      'gpt-oss:120b',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
 
@@ -2871,6 +2879,44 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /PDF attachments are supported only|PDF ekleri yalnızca/i,
+    )));
+    expect(api.streamChat).not.toHaveBeenCalled();
+    expect(api.streamVision).not.toHaveBeenCalled();
+    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
+      message?.type === 'HERA_GENERATION_START'
+    ))).toBe(false);
+  });
+
+  it('blocks an image retry before starting a text-only Ollama model', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'text-only-image-retry-session',
+      sessions: [{
+        id: 'text-only-image-retry-session',
+        title: 'Text-only image retry',
+        updatedAt: Date.now(),
+        messages: [
+          {
+            id: 'image-user',
+            role: 'user',
+            content: 'Describe this image',
+            mode: 'vision',
+            attachments: [{ id: 'image-1', name: 'diagram.png', mimeType: 'image/png', data: 'BASE64' }],
+          },
+          { id: 'image-answer', userMessageId: 'image-user', role: 'model', content: 'Old image answer', status: 'done' },
+        ],
+      }],
+    };
+
+    render(<App />);
+    const oldAnswer = await screen.findByText('Old image answer');
+    fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra (Ollama Cloud)' }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
+      /selected model accepts text only|Seçili model yalnızca metin/i,
     )));
     expect(api.streamChat).not.toHaveBeenCalled();
     expect(api.streamVision).not.toHaveBeenCalled();

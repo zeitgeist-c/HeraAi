@@ -46,6 +46,28 @@ export const MODEL_CATALOG = Object.freeze([
       supportsUrlContext: false,
     },
   },
+  {
+    key: `${PROVIDERS.OLLAMA}:nemotron-3-ultra`,
+    provider: PROVIDERS.OLLAMA,
+    modelId: 'nemotron-3-ultra',
+    label: 'Nemotron 3 Ultra (Ollama Cloud)',
+    capabilities: {
+      supportsImage: false,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+  {
+    key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
+    provider: PROVIDERS.OLLAMA,
+    modelId: 'gpt-oss:120b',
+    label: 'GPT-OSS 120B (Ollama Cloud)',
+    capabilities: {
+      supportsImage: false,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
 ])
 
 export const MODELS = Object.freeze(MODEL_CATALOG.map(model => model.modelId))

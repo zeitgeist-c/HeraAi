@@ -267,7 +267,7 @@ async function* streamOpenRouterRequest(messages, options, key, signal, fallback
   }
 }
 
-async function* streamOllamaRequest(messages, options, key, signal, fallbackImage) {
+async function* streamOllamaRequest(messages, options, key, signal, fallbackImage, modelId) {
   const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/chat`, {
     method: 'POST',
     headers: {
@@ -275,7 +275,7 @@ async function* streamOllamaRequest(messages, options, key, signal, fallbackImag
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: OLLAMA_CLOUD_MODEL,
+      model: modelId,
       messages: toOllamaMessages(messages, options.systemInstruction, fallbackImage),
       stream: true,
     }),
@@ -301,7 +301,7 @@ async function* streamOllamaRequest(messages, options, key, signal, fallbackImag
       if (data.error) throw createProviderError(providerErrorCode(0, data.error), data.error)
       if (data.model && data.model !== resolvedModel) {
         resolvedModel = data.model
-        yield { event: 'model_resolved', data: { provider: 'ollama', requestedModel: OLLAMA_CLOUD_MODEL, resolvedModel } }
+        yield { event: 'model_resolved', data: { provider: 'ollama', requestedModel: modelId, resolvedModel } }
       }
       const text = typeof data.message?.content === 'string' ? data.message.content : ''
       if (text) yield { event: 'chunk', data: { text } }
@@ -322,13 +322,16 @@ async function* streamOllamaRequest(messages, options, key, signal, fallbackImag
   }
 }
 
-export async function* streamRemoteProvider(provider, messages, options = {}, keys = [], signal, fallbackImage = null) {
+export async function* streamRemoteProvider(provider, messages, options = {}, keys = [], signal, fallbackImage = null, model = null) {
   const entries = validKeys(keys)
   if (entries.length === 0) {
     yield { event: 'error', data: { code: 'api_key_missing' } }
     return
   }
 
+  const requestedModel = provider === 'ollama'
+    ? (String(model || '').trim() || OLLAMA_CLOUD_MODEL)
+    : OPENROUTER_MODEL
   let lastError = createProviderError('generation_failed', 'Generation failed')
   for (const entry of entries) {
     let hasContent = false
@@ -336,7 +339,7 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
     try {
       const stream = provider === 'openrouter'
         ? streamOpenRouterRequest(messages, options, entry.key.trim(), signal, fallbackImage)
-        : streamOllamaRequest(messages, options, entry.key.trim(), signal, fallbackImage)
+        : streamOllamaRequest(messages, options, entry.key.trim(), signal, fallbackImage, requestedModel)
       for await (const event of stream) {
         if (event.event === 'model_resolved') {
           if (hasContent) yield event
@@ -394,18 +397,10 @@ export async function testOpenRouterKey(key) {
 
 export async function testOllamaKey(key) {
   try {
-    const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/chat`, {
-      method: 'POST',
+    const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/ps`, {
       headers: {
         Authorization: `Bearer ${String(key || '').trim()}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: OLLAMA_CLOUD_MODEL,
-        messages: [{ role: 'user', content: 'Reply with OK.' }],
-        stream: false,
-        options: { num_predict: 1 },
-      }),
     })
     try {
       if (request.response.ok) return { success: true, provider: 'ollama' }

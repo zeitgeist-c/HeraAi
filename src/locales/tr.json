@@ -269,6 +269,7 @@
             "attachment_empty": "Dosyada okunabilir metin bulunamadı.",
             "attachment_missing": "Özgün ek artık mevcut değil. Dosyayı yeniden ekleyin.",
             "pdf_requires_gemini": "PDF ekleri yalnızca Gemini modeliyle desteklenir. Gemini'yi seçip yeniden deneyin.",
+            "image_not_supported": "Seçili model yalnızca metin kabul eder. Görseller için Gemini, OpenRouter Free veya MiniMax M3 seçin.",
             "url_invalid": "Geçerli bir HTTP veya HTTPS adresi girin.",
             "url_private": "Yerel, özel ağ veya kullanıcı bilgisi içeren URL'ler okunamaz.",
             "url_limit_exceeded": "Tek istekte en fazla 10 herkese açık URL okuyabilirsiniz.",

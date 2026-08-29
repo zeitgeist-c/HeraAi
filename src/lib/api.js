@@ -520,7 +520,7 @@ export async function* streamChat(messages, options = {}, providerKeys = [], sig
     yield* streamGeminiChat(messages, options, providerKeys, signal, modelId)
     return
   }
-  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal)
+  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, null, modelId)
 }
 
 export async function* streamVision(messages, image, options = {}, providerKeys = [], signal, model, provider) {
@@ -530,7 +530,7 @@ export async function* streamVision(messages, image, options = {}, providerKeys 
     yield* streamGeminiVision(messages, image, options, providerKeys, signal, modelId)
     return
   }
-  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, image)
+  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, image, modelId)
 }
 
 async function searchTavily(question, tavilyKeys, signal) {

@@ -18,6 +18,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
   MODEL_CATALOG,
+  MODEL_CAPABILITIES,
   MODEL_LABELS,
   MODELS,
   getProviderForModel,
@@ -3207,6 +3208,13 @@ function App() {
       && sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
     ) {
       toast.error(t('chat.generation_errors.pdf_requires_gemini'))
+      return
+    }
+    if (
+      MODEL_CAPABILITIES[requestModel]?.supportsImage === false
+      && sourceAttachments.some(attachment => attachment?.mimeType?.startsWith('image/'))
+    ) {
+      toast.error(t('chat.generation_errors.image_not_supported'))
       return
     }
 
