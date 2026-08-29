@@ -160,6 +160,35 @@ describe('Ollama Cloud provider adapter', () => {
     expect(body).toMatchObject({ model: OLLAMA_CLOUD_MODEL, messages: [{ images: ['BASE64'] }] })
   })
 
+  it.each([
+    'nemotron-3-ultra',
+    'gpt-oss:120b',
+  ])('sends the selected Ollama Cloud model %s through the direct API', async modelId => {
+    global.fetch.mockResolvedValue(streamResponse([
+      `{"model":"${modelId}","message":{"content":"ok"}}\n`,
+    ]))
+
+    const events = await collect(streamRemoteProvider(
+      'ollama',
+      messages,
+      {},
+      keys,
+      undefined,
+      null,
+      modelId,
+    ))
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe(modelId)
+    expect(events[0]).toEqual({
+      event: 'model_resolved',
+      data: {
+        provider: 'ollama',
+        requestedModel: modelId,
+        resolvedModel: modelId,
+      },
+    })
+  })
+
   it('surfaces a stream error after partial output without trying another key', async () => {
     global.fetch.mockResolvedValue(streamResponse([
       '{"message":{"content":"partial"}}\n{"error":"upstream failed"}\n',
@@ -198,16 +227,29 @@ describe('Ollama Cloud provider adapter', () => {
     expect(events.at(-1)).toEqual({ event: 'error', data: { code } })
   })
 
-  it('uses a minimal direct minimax-m3 generation to test access', async () => {
+  it('validates an Ollama key without starting a model or consuming generation quota', async () => {
     global.fetch.mockResolvedValue({ ok: true, status: 200 })
     await expect(testOllamaKey(' secret ')).resolves.toMatchObject({ success: true })
     const [url, request] = global.fetch.mock.calls[0]
-    expect(url).toBe('https://ollama.com/api/chat')
-    expect(JSON.parse(request.body)).toEqual({
-      model: 'minimax-m3',
-      messages: [{ role: 'user', content: 'Reply with OK.' }],
-      stream: false,
-      options: { num_predict: 1 },
+    expect(url).toBe('https://ollama.com/api/ps')
+    expect(request).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer secret' },
+    }))
+    expect(request).not.toHaveProperty('method')
+    expect(request).not.toHaveProperty('body')
+  })
+
+  it('reports a 401 from the quota-free Ollama key check as an invalid key', async () => {
+    global.fetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'unauthorized' }),
+    })
+
+    await expect(testOllamaKey('bad-key')).resolves.toEqual({
+      success: false,
+      provider: 'ollama',
+      errorType: 'invalid',
     })
   })
 

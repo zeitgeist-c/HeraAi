@@ -26,6 +26,27 @@ function geminiStream(text) {
   })()
 }
 
+function ollamaStream(text, model) {
+  const encoder = new TextEncoder()
+  let consumed = false
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (consumed) return { value: undefined, done: true }
+          consumed = true
+          return {
+            value: encoder.encode(`${JSON.stringify({ model, message: { content: text } })}\n`),
+            done: false,
+          }
+        },
+      }),
+    },
+  }
+}
+
 async function collectEvents(stream) {
   const events = []
   for await (const event of stream) {
@@ -754,7 +775,7 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 6 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 8 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
@@ -763,6 +784,8 @@ describe('model selection', () => {
       'gemini-3.7-flash',
       'openrouter/free',
       'minimax-m3',
+      'nemotron-3-ultra',
+      'gpt-oss:120b',
     ])
   })
 
@@ -782,6 +805,24 @@ describe('model selection', () => {
         apiVersion: 'v1',
       },
     })
+  })
+
+  it.each([
+    'nemotron-3-ultra',
+    'gpt-oss:120b',
+  ])('passes the selected Ollama model %s to the direct provider request', async modelId => {
+    global.fetch = vi.fn().mockResolvedValue(ollamaStream('ok', modelId))
+
+    await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'o1', key: 'ollama-key' }],
+      undefined,
+      modelId,
+      'ollama',
+    ))
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe(modelId)
   })
 
   it('passes the selected model into generateContentStream for streamVision', async () => {
