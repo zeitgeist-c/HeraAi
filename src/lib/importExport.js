@@ -1,10 +1,12 @@
 import { getProviderForModel } from './models'
+import { sanitizeRetiredModelMessages, sanitizeRetiredModelSessions } from './modelMigration'
 
 export const exportSessions = (sessions) => {
+  const sanitizedSessions = sanitizeRetiredModelSessions(sessions).sessions
   const exportData = {
     version: '2.2',
     exportedAt: new Date().toISOString(),
-    sessions: sessions.map(s => ({
+    sessions: sanitizedSessions.map(s => ({
       id: s.id,
       title: s.title,
       isTitleCustom: s.isTitleCustom === true,
@@ -66,7 +68,7 @@ export const importSessions = (file) => {
           updatedAt: s.updatedAt || Date.now(),
           activeAttachmentIds: Array.isArray(s.activeAttachmentIds) ? s.activeAttachmentIds : [],
           activeWebUrls: Array.isArray(s.activeWebUrls) ? s.activeWebUrls : [],
-          messages: (s.messages || []).map(message => ({
+          messages: sanitizeRetiredModelMessages(s.messages || []).messages.map(message => ({
             ...message,
             ...(message.model && !message.provider
               ? { provider: getProviderForModel(message.model) }

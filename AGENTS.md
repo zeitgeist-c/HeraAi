@@ -14,7 +14,7 @@ Hera uses four provider APIs:
 1. **Google Gemini (Direct)**: Streams chat and multimodal responses, accepts image/PDF inline data, and reads public URLs through URL Context.
 2. **Tavily**: Provides general web search and exact-page extraction fallback when Gemini URL Context cannot retrieve a public URL.
 3. **OpenRouter (Direct)**: Streams `openrouter/free` chat and multimodal responses through SSE.
-4. **Ollama Cloud (Direct)**: Streams `minimax-m3` chat and multimodal responses through NDJSON.
+4. **Ollama Cloud (Direct)**: Streams `nemotron-3-ultra` and `gpt-oss:120b` text responses through NDJSON.
 
 ## Core Features & Data Flow
 

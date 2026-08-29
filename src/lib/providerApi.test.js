@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   OLLAMA_CLOUD_MODEL,
+  OLLAMA_TEST_MODEL,
   OPENROUTER_MODEL,
   streamRemoteProvider,
   testOllamaKey,
@@ -23,6 +24,15 @@ function streamResponse(chunks, status = 200) {
           : { value: undefined, done: true },
       }),
     },
+  }
+}
+
+function jsonResponse(data, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => data,
+    text: async () => JSON.stringify(data),
   }
 }
 
@@ -129,13 +139,29 @@ describe('OpenRouter provider adapter', () => {
     ]))
   })
 
-  it('validates a key with the quota-free current-key endpoint', async () => {
-    global.fetch.mockResolvedValue({ ok: true, status: 200 })
+  it('validates a key with a one-token OpenRouter Free generation', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'O' } }] }))
     await expect(testOpenRouterKey(' secret ')).resolves.toMatchObject({ success: true })
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://openrouter.ai/api/v1/key',
-      expect.objectContaining({ headers: { Authorization: 'Bearer secret' } }),
-    )
+    const [url, request] = global.fetch.mock.calls[0]
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    expect(request).toEqual(expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: 'Bearer secret' }),
+    }))
+    expect(JSON.parse(request.body)).toMatchObject({
+      model: 'openrouter/free',
+      stream: false,
+      max_tokens: 1,
+    })
+  })
+
+  it('rejects a malformed successful OpenRouter response without calling the key invalid', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ unexpected: true }))
+    await expect(testOpenRouterKey('secret')).resolves.toEqual({
+      success: false,
+      provider: 'openrouter',
+      errorType: 'invalid_response',
+    })
   })
 })
 
@@ -146,18 +172,17 @@ describe('Ollama Cloud provider adapter', () => {
     vi.restoreAllMocks()
   })
 
-  it('parses fragmented NDJSON content, ignores thinking, and forwards raw image base64', async () => {
+  it('parses fragmented NDJSON content and ignores thinking', async () => {
     global.fetch.mockResolvedValue(streamResponse([
-      '{"model":"minimax-m3","message":{"thinking":"hidden","content":"Hel',
+      '{"model":"nemotron-3-ultra","message":{"thinking":"hidden","content":"Hel',
       'lo"}}\n{"message":{"content":" world"},"done":false}\n{"done":true}\n',
     ]))
-    const withImage = [{ role: 'user', content: 'Look', attachments: [{ mimeType: 'image/png', data: 'BASE64' }] }]
-    const events = await collect(streamRemoteProvider('ollama', withImage, {}, keys))
+    const events = await collect(streamRemoteProvider('ollama', messages, {}, keys))
 
     expect(events.map(event => event.event)).toEqual(['model_resolved', 'key_status', 'chunk', 'chunk'])
     expect(events.filter(event => event.event === 'chunk').map(event => event.data.text).join('')).toBe('Hello world')
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(body).toMatchObject({ model: OLLAMA_CLOUD_MODEL, messages: [{ images: ['BASE64'] }] })
+    expect(body).toMatchObject({ model: OLLAMA_CLOUD_MODEL, messages: [{ content: 'Hello' }] })
   })
 
   it.each([
@@ -227,30 +252,59 @@ describe('Ollama Cloud provider adapter', () => {
     expect(events.at(-1)).toEqual({ event: 'error', data: { code } })
   })
 
-  it('validates an Ollama key without starting a model or consuming generation quota', async () => {
-    global.fetch.mockResolvedValue({ ok: true, status: 200 })
+  it('validates an Ollama key with a one-token low-thinking GPT-OSS 20B request', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ message: { content: 'O' }, done: true }))
     await expect(testOllamaKey(' secret ')).resolves.toMatchObject({ success: true })
     const [url, request] = global.fetch.mock.calls[0]
-    expect(url).toBe('https://ollama.com/api/ps')
+    expect(url).toBe('https://ollama.com/api/chat')
     expect(request).toEqual(expect.objectContaining({
-      headers: { Authorization: 'Bearer secret' },
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json',
+      },
     }))
-    expect(request).not.toHaveProperty('method')
-    expect(request).not.toHaveProperty('body')
+    expect(JSON.parse(request.body)).toEqual({
+      model: OLLAMA_TEST_MODEL,
+      messages: [{ role: 'user', content: 'OK' }],
+      stream: false,
+      think: 'low',
+      options: { num_predict: 1 },
+    })
   })
 
-  it('reports a 401 from the quota-free Ollama key check as an invalid key', async () => {
-    global.fetch.mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: 'unauthorized' }),
-    })
+  it('reports a 401 from the Ollama generation check as an invalid key', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ error: 'unauthorized' }, 401))
 
     await expect(testOllamaKey('bad-key')).resolves.toEqual({
       success: false,
       provider: 'ollama',
       errorType: 'invalid',
     })
+  })
+
+  it('rejects a malformed successful Ollama response without calling the key invalid', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ done: true }))
+    await expect(testOllamaKey('secret')).resolves.toEqual({
+      success: false,
+      provider: 'ollama',
+      errorType: 'invalid_response',
+    })
+  })
+
+  it('keeps Ollama model-access and service failures distinct from invalid keys', async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ error: 'model not found' }, 404))
+    await expect(testOllamaKey('secret')).resolves.toMatchObject({ errorType: 'model_unavailable' })
+
+    global.fetch.mockResolvedValueOnce(jsonResponse({ error: 'upstream unavailable' }, 502))
+    await expect(testOllamaKey('secret')).resolves.toMatchObject({ errorType: 'service_unavailable' })
+  })
+
+  it('rejects images before making an Ollama request', async () => {
+    const imageMessages = [{ role: 'user', content: 'Look', attachments: [{ mimeType: 'image/png', data: 'BASE64' }] }]
+    const events = await collect(streamRemoteProvider('ollama', imageMessages, {}, keys))
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'image_not_supported' } })
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 
   it('rejects PDFs before making a provider request', async () => {

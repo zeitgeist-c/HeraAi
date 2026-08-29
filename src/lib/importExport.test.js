@@ -41,6 +41,13 @@ describe('session import and export', () => {
           provider: 'openrouter',
           resolvedModel: 'meta-llama/llama-4-scout:free',
         },
+        {
+          role: 'model',
+          content: 'Retired answer',
+          model: 'minimax-m3',
+          provider: 'ollama',
+          resolvedModel: 'minimax-m3:cloud',
+        },
       ],
     }])
 
@@ -73,6 +80,12 @@ describe('session import and export', () => {
             model: 'openrouter/free',
             provider: 'openrouter',
             resolvedModel: 'meta-llama/llama-4-scout:free',
+            attachments: [],
+          },
+          {
+            role: 'model',
+            content: 'Retired answer',
+            provider: 'ollama',
             attachments: [],
           },
         ],
@@ -123,6 +136,31 @@ describe('session import and export', () => {
         model: 'gemini-3.6-flash',
       }],
     }])
+  })
+
+  it('removes retired MiniMax provenance from imported messages without deleting content', async () => {
+    const file = new File([JSON.stringify({
+      version: '2.2',
+      sessions: [{
+        id: 'retired-model-session',
+        messages: [{
+          role: 'model',
+          content: 'Preserved answer',
+          provider: 'ollama',
+          model: 'minimax-m3',
+          resolvedModel: 'minimax-m3:cloud',
+        }],
+      }],
+    })], 'retired-model.json', { type: 'application/json' })
+
+    const imported = await importSessions(file)
+    expect(imported[0].messages[0]).toEqual(expect.objectContaining({
+      role: 'model',
+      content: 'Preserved answer',
+      provider: 'ollama',
+    }))
+    expect(imported[0].messages[0]).not.toHaveProperty('model')
+    expect(imported[0].messages[0]).not.toHaveProperty('resolvedModel')
   })
 
   it('restores version 1.1 metadata using strict boolean values', async () => {

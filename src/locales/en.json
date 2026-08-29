@@ -66,6 +66,7 @@
             "test_billing_required": "This model requires billing or project access.",
             "test_permission_denied": "This API key does not have permission to use the selected model.",
             "test_unknown": "Test failed",
+            "test_usage_warning": "Key tests send a small real request and may use a small amount of quota or search credit.",
             "test_all_progress": "Testing {{done}}/{{total}}"
         },
         "general": {
@@ -269,7 +270,7 @@
             "attachment_empty": "The file contains no readable text.",
             "attachment_missing": "The original attachment is no longer available. Attach it again.",
             "pdf_requires_gemini": "PDF attachments are supported only with a Gemini model. Select Gemini and retry.",
-            "image_not_supported": "The selected model accepts text only. Choose Gemini, OpenRouter Free, or MiniMax M3 for images.",
+            "image_not_supported": "The selected model accepts text only. Choose Gemini or OpenRouter Free for images.",
             "url_invalid": "Enter a valid HTTP or HTTPS URL.",
             "url_private": "Local, private-network, or credential-bearing URLs cannot be read.",
             "url_limit_exceeded": "You can read at most 10 public URLs in one request.",

@@ -38,7 +38,7 @@ function computeStatus(key) {
   if (['network', 'timeout', 'model_unavailable', 'service_unavailable', 'billing_required', 'permission_denied'].includes(key.lastErrorType)) {
     return key.lastSuccessAt ? 'success' : 'pending'
   }
-  if (key.lastErrorAt && (!key.lastSuccessAt || key.lastErrorAt > key.lastSuccessAt)) return 'invalid'
+  if (key.lastErrorAt && (!key.lastSuccessAt || key.lastErrorAt > key.lastSuccessAt)) return 'pending'
   if (key.lastSuccessAt) return 'success'
   return 'pending'
 }
@@ -169,7 +169,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         ? 'rate_limited'
         : result.errorType === 'quota'
           ? 'quota_exceeded'
-          : result.errorType || 'invalid'
+          : result.errorType || 'unknown'
       const updates = {
         lastErrorAt: Date.now(),
         lastErrorType: mappedType,
@@ -332,6 +332,9 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           {t(`setup.keys.${provider}_key_link`)}
           <ExternalLink className="h-3 w-3" />
         </a>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t('setup.keys.test_usage_warning')}
+        </p>
         <div className="flex gap-2">
           <div className="relative flex-1 min-w-0">
             <input

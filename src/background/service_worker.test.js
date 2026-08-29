@@ -1018,6 +1018,32 @@ describe('background generation coordinator', () => {
     expect(mock.storageSet).not.toHaveBeenCalled();
   });
 
+  it('cancels a running retired MiniMax job and removes its provenance', async () => {
+    const mock = createChromeMock({
+      initialStorage: {
+        activeGeneration: queuedGeneration({
+          status: 'running',
+          model: 'minimax-m3',
+          resolvedModel: 'minimax-m3:cloud',
+          provider: 'ollama',
+        }),
+      },
+      offscreenOpen: true,
+    });
+    const listener = await loadWorker(mock);
+
+    const state = await dispatch(listener, { type: 'GET_STATE' });
+
+    expect(state.activeGeneration).toMatchObject({
+      status: 'cancelled',
+      cancelReason: 'model_retired',
+      provider: 'ollama',
+    });
+    expect(state.activeGeneration).not.toHaveProperty('model');
+    expect(state.activeGeneration).not.toHaveProperty('resolvedModel');
+    expect(mock.closeDocument).toHaveBeenCalledTimes(1);
+  });
+
   it('interrupts and closes a running job whose heartbeat grace has expired', async () => {
     const staleTimestamp = Date.now() - 45_001;
     const mock = createChromeMock({

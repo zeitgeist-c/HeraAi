@@ -2714,7 +2714,7 @@ describe('HeraAi App', () => {
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
   });
 
-  it('renders the provider-grouped model selector with the 8 supported model ids', async () => {
+  it('renders the provider-grouped model selector with the 7 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2730,7 +2730,6 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'minimax-m3',
       'nemotron-3-ultra',
       'gpt-oss:120b',
     ]);
@@ -2751,6 +2750,52 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(currentStorage.selectedProvider).toBe('gemini'));
     expect(document.querySelector('select[data-testid="model-selector"]')).toHaveValue('gemini-3.6-flash');
+  });
+
+  it('migrates a retired MiniMax selection to Nemotron', async () => {
+    currentStorage.selectedProvider = 'ollama';
+    currentStorage.selectedModel = 'minimax-m3';
+    render(<App />);
+
+    await waitFor(() => expect(currentStorage).toMatchObject({
+      selectedProvider: 'ollama',
+      selectedModel: 'nemotron-3-ultra',
+    }));
+    expect(document.querySelector('select[data-testid="model-selector"]')).toHaveValue('nemotron-3-ultra');
+  });
+
+  it('removes retired MiniMax provenance from stored sessions without deleting answers', async () => {
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'retired-session',
+      sessions: [{
+        id: 'retired-session',
+        title: 'Retired model',
+        updatedAt: 100,
+        messages: [
+          { id: 'u1', role: 'user', content: 'Question' },
+          {
+            id: 'a1',
+            role: 'model',
+            content: 'Preserved MiniMax answer',
+            provider: 'ollama',
+            model: 'minimax-m3',
+            resolvedModel: 'minimax-m3:cloud',
+          },
+        ],
+      }],
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText('Preserved MiniMax answer')).toBeInTheDocument();
+    await waitFor(() => {
+      const storedAnswer = currentStorage.sessions[0].messages[1];
+      expect(storedAnswer).not.toHaveProperty('model');
+      expect(storedAnswer).not.toHaveProperty('resolvedModel');
+      expect(storedAnswer.content).toBe('Preserved MiniMax answer');
+    });
   });
 
   it.each([
@@ -2824,7 +2869,6 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'minimax-m3',
       'nemotron-3-ultra',
       'gpt-oss:120b',
     ]);
@@ -2913,7 +2957,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old image answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra (Ollama Cloud)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,

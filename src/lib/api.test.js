@@ -350,10 +350,17 @@ describe('testKey (Gemini)', () => {
   })
 
   it('returns success when the Gemini SDK accepts a tiny request', async () => {
-    mocks.generateContentMock.mockResolvedValue({})
+    mocks.generateContentMock.mockResolvedValue({ candidates: [{}] })
     const result = await testKey('gemini', 'AIza-valid-key-12345abcdef')
 
     expect(result).toEqual({ success: true, provider: 'gemini' })
+  })
+
+  it('rejects a malformed successful Gemini response without calling the key invalid', async () => {
+    mocks.generateContentMock.mockResolvedValue({ unexpected: true })
+    const result = await testKey('gemini', 'AIza-valid-key-12345abcdef')
+
+    expect(result).toEqual({ success: false, provider: 'gemini', errorType: 'unknown' })
   })
 
   it('classifies a 429 error as rate_limit', async () => {
@@ -380,12 +387,12 @@ describe('testKey (Gemini)', () => {
     expect(result.errorType).toBe('invalid')
   })
 
-  it('classifies a SAFETY block as invalid (no fallback expected)', async () => {
+  it('does not classify a SAFETY block as an invalid key', async () => {
     mocks.generateContentMock.mockRejectedValue(new Error('blocked content SAFETY'))
     const result = await testKey('gemini', 'AIza-key-safety')
 
     expect(result.success).toBe(false)
-    expect(result.errorType).toBe('invalid')
+    expect(result.errorType).toBe('unknown')
   })
 
   it('classifies an abort/timeout as timeout', async () => {
@@ -406,12 +413,16 @@ describe('testKey (Gemini)', () => {
     expect(result.errorType).toBe('network')
   })
 
-  it('tests the selected Gemini model instead of silently testing the default model', async () => {
-    mocks.generateContentMock.mockResolvedValue({})
+  it('always tests the low-usage Gemini model with one output token', async () => {
+    mocks.generateContentMock.mockResolvedValue({ candidates: [{}] })
 
     await testKey('gemini', 'AIza-model-key', 'gemini-3.6-flash')
 
-    expect(mocks.generateContentMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
+    expect(mocks.generateContentMock.mock.calls[0][0]).toMatchObject({
+      model: 'gemini-3.1-flash-lite',
+      contents: 'OK',
+      config: { maxOutputTokens: 1 },
+    })
   })
 
   it('reports selected-model access failures without calling the key invalid', async () => {
@@ -455,10 +466,19 @@ describe('testKey (Tavily)', () => {
   })
 
   it('returns success when Tavily responds 200', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ results: [] }),
+    })
     const result = await testKey('tavily', 'tvly-valid-key-abcdefg')
 
     expect(result).toEqual({ success: true, provider: 'tavily' })
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      query: 'test',
+      max_results: 1,
+      include_answer: false,
+    })
   })
 
   it('classifies 401 as invalid', async () => {
@@ -477,12 +497,12 @@ describe('testKey (Tavily)', () => {
     expect(result.errorType).toBe('rate_limit')
   })
 
-  it('classifies 5xx as network', async () => {
+  it('classifies 5xx as service_unavailable', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
     const result = await testKey('tavily', 'tvly-server-error')
 
     expect(result.success).toBe(false)
-    expect(result.errorType).toBe('network')
+    expect(result.errorType).toBe('service_unavailable')
   })
 
   it('classifies an abort error as timeout', async () => {
@@ -775,7 +795,7 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 8 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 7 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
@@ -783,7 +803,6 @@ describe('model selection', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'openrouter/free',
-      'minimax-m3',
       'nemotron-3-ultra',
       'gpt-oss:120b',
     ])
@@ -849,13 +868,13 @@ describe('model selection', () => {
     expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
   })
 
-  it('testKey uses DEFAULT_MODEL by default and honors an explicitly selected model', async () => {
-    mocks.generateContentMock.mockResolvedValue({})
+  it('testKey always uses the low-usage Gemini test model', async () => {
+    mocks.generateContentMock.mockResolvedValue({ candidates: [{}] })
 
     await testKey('gemini', 'AIza-valid-key-12345abcde')
     await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.7-flash')
 
     expect(mocks.generateContentMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
-    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe('gemini-3.7-flash')
+    expect(mocks.generateContentMock.mock.calls[1][0].model).toBe(DEFAULT_MODEL)
   })
 })
