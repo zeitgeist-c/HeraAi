@@ -2145,6 +2145,25 @@ describe('HeraAi App', () => {
     expect(screen.getAllByRole('button', { name: /Remove link|Bağlantıyı kaldır/i })).toHaveLength(1);
   });
 
+  it('automatically reads a pasted page URL without the research toggle', async () => {
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Auto page summary' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'https://example.com/article özetle' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Auto page summary')).toBeInTheDocument();
+    expect(api.streamResearch).toHaveBeenCalledTimes(1);
+    expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
+      kind: 'url',
+      urls: ['https://example.com/article'],
+    });
+  });
+
   it('does not retain a previous image for an independent vision follow-up', async () => {
     api.streamVision
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'First file answer' } }]))
@@ -3694,7 +3713,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
 
     const pinRow = screen.getByText('Pin this chat').closest('.group');
     fireEvent.click(within(pinRow).getByRole('button', { name: 'Star chat' }));
@@ -3757,7 +3776,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
     expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
 
@@ -3797,7 +3816,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
 
     await waitFor(() => expect(currentStorage.sessions[0]?.id).not.toBe('only-chat'));
@@ -3850,7 +3869,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
 
     const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
     let releaseMetadataRead;
@@ -3973,7 +3992,7 @@ describe('HeraAi App', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
 
     await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -4043,7 +4062,7 @@ describe('HeraAi App', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     const runningRow = screen.getByText('Single running chat').closest('.group');
     fireEvent.click(within(runningRow).getByRole('button', { name: 'Delete chat' }));
 
@@ -4113,7 +4132,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(releasePendingMetadataRead).toBeTypeOf('function'));
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     const renamedRow = screen.getByText('Pagehide-safe title').closest('.group');
     fireEvent.click(within(renamedRow).getByRole('button', { name: 'Star chat' }));
     await waitFor(() => {
@@ -4151,7 +4170,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     expect(screen.getByTitle('Pagehide-safe title')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     const restoredRow = screen.getByText('Pagehide-safe title').closest('.group');
     expect(within(restoredRow).getByRole('button', { name: 'Remove star' })).toHaveAttribute('aria-pressed', 'true');
   });
@@ -4185,7 +4204,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
 
     const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
     let releaseDeletionRead;
@@ -4359,7 +4378,7 @@ describe('HeraAi App', () => {
       render(<App />);
       await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
       fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
       fireEvent.click(screen.getByRole('button', { name: 'Bulk delete' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
 
@@ -4432,7 +4451,7 @@ describe('HeraAi App', () => {
       expect(global.chrome.storage.local.set.mock.calls.some(([data]) => Array.isArray(data?.sessions))).toBe(false);
 
       fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Chat' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
       await act(async () => {
         await Promise.resolve();
@@ -4487,7 +4506,7 @@ describe('HeraAi App', () => {
     const view = render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
 
     const defaultStorageGet = global.chrome.storage.local.get.getMockImplementation();
     let releaseMetadataRead;
@@ -4553,7 +4572,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     expect(screen.getByTitle('Current chat')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     const restoredTargetRow = screen.getByText('Background chat renamed').closest('.group');
     expect(within(restoredTargetRow).getByRole('button', { name: 'Remove star' })).toHaveAttribute('aria-pressed', 'true');
   });
@@ -4608,7 +4627,7 @@ describe('HeraAi App', () => {
     const view = render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     const targetRow = screen.getByText('Structural delete target').closest('.group');
     fireEvent.click(within(targetRow).getByRole('button', { name: 'Delete chat' }));
     await waitFor(() => expect(releaseDeletionWrite).toBeTypeOf('function'));
@@ -4637,7 +4656,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     expect(screen.getByText('Structural survivor')).toBeInTheDocument();
     expect(screen.queryByText('Structural delete target')).not.toBeInTheDocument();
   });
@@ -4747,7 +4766,7 @@ describe('HeraAi App', () => {
     expect(await findChatText('Alpha imported content')).toBeInTheDocument();
     expect(screen.queryByText('Old active content')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     expect(screen.getByText('Imported Alpha')).toBeInTheDocument();
     expect(screen.getByText('Imported Beta')).toBeInTheDocument();
     expect(screen.queryByText('Old active chat')).not.toBeInTheDocument();
@@ -4803,7 +4822,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     expect(screen.getByTitle('New Chat')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'View Chat History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     expect(screen.getByText('New Chat')).toBeInTheDocument();
     expect(screen.queryByText('Old chat before empty import')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Bulk delete' })).toBeEnabled();

@@ -7,7 +7,6 @@ import {
   Download,
   FileText,
   History,
-  Keyboard,
   Menu,
   MessageSquarePlus,
   Pencil,
@@ -34,7 +33,6 @@ function AppHeader({
   onImport,
   onSettings,
   onStats,
-  onShortcuts,
   searchOpen = false,
   searchQuery = '',
   searchCounterText = '',
@@ -126,10 +124,7 @@ function AppHeader({
 
   const menuItems = [
     { label: t('chat.tooltips.export'), icon: Download, action: onExport },
-    { label: t('chat.tooltips.export_markdown'), icon: FileText, action: onExportMarkdown },
-    { label: t('chat.tooltips.copy_chat'), icon: Copy, action: onCopyChat },
     { label: t('chat.tooltips.statistics'), icon: BarChart3, action: onStats },
-    { label: t('chat.tooltips.shortcuts'), icon: Keyboard, action: onShortcuts },
     { label: t('chat.tooltips.settings'), icon: Settings, action: onSettings },
   ]
 
@@ -265,6 +260,26 @@ function AppHeader({
           className={`hera-icon-button ${searchOpen ? 'bg-primary/10 text-primary' : ''}`}
         >
           <Search className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          data-testid="header-export-markdown"
+          title={t('chat.tooltips.export_markdown')}
+          aria-label={t('chat.tooltips.export_markdown')}
+          onClick={onExportMarkdown}
+          className="hera-icon-button"
+        >
+          <FileText className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          data-testid="header-copy-chat"
+          title={t('chat.tooltips.copy_chat')}
+          aria-label={t('chat.tooltips.copy_chat')}
+          onClick={onCopyChat}
+          className="hera-icon-button"
+        >
+          <Copy className="h-4 w-4" />
         </button>
         <button
           type="button"

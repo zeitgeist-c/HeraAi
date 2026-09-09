@@ -10,7 +10,6 @@ import AppHeader from './components/AppHeader'
 import ChatMessage from './components/ChatMessage'
 import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
-import ShortcutsPanel from './components/ShortcutsPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
 import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
@@ -437,7 +436,6 @@ function App() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [showStats, setShowStats] = useState(false)
-  const [showShortcuts, setShowShortcuts] = useState(false)
   const [chatSearchOpen, setChatSearchOpen] = useState(false)
   const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [chatSearchIndex, setChatSearchIndex] = useState(0)
@@ -549,12 +547,12 @@ function App() {
   useEffect(() => {
     focusComposer()
     const handleWindowFocus = () => {
-      if (showSettings || showHistory || showStats || showShortcuts) return
+      if (showSettings || showHistory || showStats) return
       focusComposer()
     }
     window.addEventListener('focus', handleWindowFocus)
     return () => window.removeEventListener('focus', handleWindowFocus)
-  }, [focusComposer, showSettings, showHistory, showStats, showShortcuts])
+  }, [focusComposer, showSettings, showHistory, showStats])
 
   const chatSearchMatchIds = useMemo(
     () => findChatMatchIds(messages, chatSearchQuery),
@@ -3320,10 +3318,11 @@ function App() {
     if (isGeneratingRef.current) return
 
     const supportedModes = new Set(['chat', 'vision', 'web'])
-    const automaticMode = (enableResearch || canReusePreviousWeb)
+    const autoDetectedUrls = retryUserMessage ? [] : listPublicUrls(userText)
+    const automaticMode = (enableResearch || canReusePreviousWeb || autoDetectedUrls.length > 0)
       ? 'web'
       : (draftAttachments.length > 0 || canReusePreviousImage ? 'vision' : 'chat')
-    const mode = supportedModes.has(actionOptions?.modeOverride)
+    let mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
       : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
     const requestModel = MODELS.includes(actionOptions?.modelOverride)
@@ -3339,10 +3338,20 @@ function App() {
             : extractPublicUrls(userText))
         : []
     } catch (error) {
-      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
-        defaultValue: error?.message || t('chat.connection_error'),
-      }))
-      return
+      const autoTriggered = mode === 'web'
+        && !enableResearch
+        && !canReusePreviousWeb
+        && !retryUserMessage
+        && error?.code === 'url_private'
+      if (autoTriggered) {
+        explicitUrls = []
+        mode = 'chat'
+      } else {
+        toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+          defaultValue: error?.message || t('chat.connection_error'),
+        }))
+        return
+      }
     }
     const contextSelection = retryUserMessage
       ? { attachments: draftAttachments, urls: explicitUrls }
@@ -4188,10 +4197,6 @@ function App() {
     return <StatsPanel onClose={() => setShowStats(false)} />
   }
 
-  if (showShortcuts) {
-    return <ShortcutsPanel onClose={() => setShowShortcuts(false)} />
-  }
-
   const isWelcomeOnly = (
     messages.length === 1 &&
     messages[0]?.role === 'model' &&
@@ -4249,7 +4254,6 @@ function App() {
         onImport={handleImport}
         onSettings={() => setShowSettings(true)}
         onStats={() => setShowStats(true)}
-        onShortcuts={() => setShowShortcuts(true)}
         searchOpen={chatSearchOpen}
         searchQuery={chatSearchQuery}
         searchCounterText={chatSearchCounterText}
