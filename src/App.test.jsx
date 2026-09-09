@@ -2342,8 +2342,9 @@ describe('HeraAi App', () => {
       'file-text',
       'lightbulb',
     ];
+    const composer = document.querySelector('textarea').closest('.hera-surface');
     const buttons = quickActionIcons.map(icon => (
-      Array.from(document.querySelectorAll('button'))
+      Array.from(composer.querySelectorAll('button'))
         .find(button => button.querySelector(`svg.lucide-${icon}`))
     ));
     const ocrButton = buttons[2];
@@ -2352,8 +2353,8 @@ describe('HeraAi App', () => {
     expect(ocrButton).toHaveAttribute('title', expect.stringMatching(/Ekli görselden metin çıkar|Extract text from image/i));
     expect(ocrButton).toHaveAttribute('aria-label', ocrButton.title);
     expect(buttons.every(Boolean)).toBe(true);
-    expect(buttons.map(button => Array.from(document.querySelectorAll('button')).indexOf(button)))
-      .toEqual([...buttons].map(button => Array.from(document.querySelectorAll('button')).indexOf(button)).sort((a, b) => a - b));
+    expect(buttons.map(button => Array.from(composer.querySelectorAll('button')).indexOf(button)))
+      .toEqual([...buttons].map(button => Array.from(composer.querySelectorAll('button')).indexOf(button)).sort((a, b) => a - b));
   });
 
   it('toggles an active screen selection off with the same crop button', async () => {
