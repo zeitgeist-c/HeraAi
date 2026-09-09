@@ -18,7 +18,7 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.7-flash'],
       ['gemini', 'gemini-3.8-flash'],
       ['openrouter', 'openrouter/free'],
-      ['openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
+      ['openrouter', 'nvidia/nemotron-3-super-120b-a12b:free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-ultra'],
     ])
@@ -34,7 +34,7 @@ describe('provider-aware model catalog', () => {
       'gemini-3.7-flash': 'slow',
       'gemini-3.8-flash': 'slow',
       'openrouter/free': 'medium',
-      'nvidia/nemotron-3-ultra-550b-a55b:free': 'slow',
+      'nvidia/nemotron-3-super-120b-a12b:free': 'medium',
       'gpt-oss:120b': 'fast',
       'nemotron-3-ultra': 'slow',
     })
@@ -53,7 +53,7 @@ describe('provider-aware model catalog', () => {
 
   it('declares PDF as Gemini-only and marks text-only models accurately', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ])

@@ -1059,7 +1059,7 @@ describe('model selection', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ])

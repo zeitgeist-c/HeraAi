@@ -115,11 +115,6 @@ const ChatMessage = ({
         : model)
     : []
   const hasRetryModelChoices = availableRetryModels.length > 0
-  const retryLabelCounts = availableRetryModels.reduce((counts, model) => {
-    const label = model.label || modelLabels[model.modelId] || model.modelId
-    counts[label] = (counts[label] || 0) + 1
-    return counts
-  }, {})
   const requestedModelLabel = typeof message.model === 'string' && message.model
     ? (modelLabels[message.model] || message.model)
     : ''
@@ -260,7 +255,7 @@ const ChatMessage = ({
             const modelId = model.modelId
             const isCurrentModel = modelId === currentModel
             const rowLabel = model.label || modelLabels[modelId] || modelId
-            const showProvider = retryLabelCounts[rowLabel] > 1 && Boolean(model.provider)
+            const showProvider = Boolean(model.provider)
             return (
               <button
                 key={model.key || modelId}
@@ -286,7 +281,7 @@ const ChatMessage = ({
                   {rowLabel}
                 </span>
                 {showProvider && (
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                  <span aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground">
                     {t(`chat.model_providers.${model.provider}`)}
                   </span>
                 )}
