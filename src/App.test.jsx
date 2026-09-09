@@ -2164,6 +2164,48 @@ describe('HeraAi App', () => {
     });
   });
 
+  it('routes time-sensitive questions to automatic search without the research toggle', async () => {
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Auto search answer' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Bugün dolar kuru ne kadar?' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Auto search answer')).toBeInTheDocument();
+    expect(api.streamResearch).toHaveBeenCalledTimes(1);
+    expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
+      kind: 'search',
+      urls: [],
+      searchMode: 'auto',
+    });
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('marks toggle-driven search as explicit so it keeps using Tavily', async () => {
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Explicit search answer' } },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea');
+    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
+    fireEvent.click(webButton);
+    fireEvent.change(input, { target: { value: 'Bana bir masal anlat' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Explicit search answer')).toBeInTheDocument();
+    expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
+      kind: 'search',
+      urls: [],
+      searchMode: 'explicit',
+    });
+  });
+
   it('does not retain a previous image for an independent vision follow-up', async () => {
     api.streamVision
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'First file answer' } }]))
@@ -2639,6 +2681,10 @@ describe('HeraAi App', () => {
     ]);
 
     fireEvent.click(providerHeadings[1]);
+    expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'true');
+    expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(providerHeadings[0]);
     expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'false');
     expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
 
@@ -2834,6 +2880,7 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
+      'thinkingmachines/inkling:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ]);
@@ -2981,6 +3028,7 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
+      'thinkingmachines/inkling:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ]);

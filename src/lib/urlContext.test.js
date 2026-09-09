@@ -4,6 +4,7 @@ import {
   extractPublicUrls,
   isUrlOnlyText,
   listPublicUrls,
+  needsWebSearch,
   normalizePublicUrl,
   removePublicUrlFromText,
 } from './urlContext.js'
@@ -53,5 +54,30 @@ describe('public URL parsing', () => {
     const urls = ['https://example.com/article']
     expect(isUrlOnlyText('https://example.com/article', urls)).toBe(true)
     expect(isUrlOnlyText('Summarize https://example.com/article', urls)).toBe(false)
+  })
+})
+
+describe('needsWebSearch', () => {
+  it.each([
+    'Bugün dolar kuru ne kadar?',
+    'Yarın hava durumu nasıl?',
+    'Güncel altın fiyatı nedir?',
+    'Son dakika haberleri neler?',
+    'Maçı kim kazandı?',
+    'Borsa bugün nasıl kapattı?',
+    'Who won the match?',
+    'Latest stock price?',
+  ])('detects a time-sensitive question: %s', (text) => {
+    expect(needsWebSearch(text)).toBe(true)
+  })
+
+  it.each([
+    'Bana bir masal anlat',
+    'Bu cümleyi İngilizceye çevir',
+    'Fonksiyon nasıl yazılır?',
+    '',
+    '   ',
+  ])('leaves ordinary chat alone: %s', (text) => {
+    expect(needsWebSearch(text)).toBe(false)
   })
 })

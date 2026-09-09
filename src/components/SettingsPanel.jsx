@@ -91,7 +91,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [showTavilyInput, setShowTavilyInput] = useState(false)
   const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
   const [showOllamaInput, setShowOllamaInput] = useState(false)
-  const [expandedProvider, setExpandedProvider] = useState('gemini')
+  const [expandedProviders, setExpandedProviders] = useState(['gemini'])
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -390,7 +390,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       openrouter: openRouterKeys,
       ollama: ollamaKeys,
     }[provider] || []
-    const isExpanded = expandedProvider === provider
+    const isExpanded = expandedProviders.includes(provider)
     const headingId = `provider-heading-${provider}`
     const panelId = `provider-panel-${provider}`
 
@@ -399,7 +399,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         <button
           id={headingId}
           type="button"
-          onClick={() => setExpandedProvider(current => current === provider ? null : provider)}
+          onClick={() => setExpandedProviders(current => current.includes(provider) ? current.filter(item => item !== provider) : [...current, provider])}
           aria-expanded={isExpanded}
           aria-controls={panelId}
           className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/45"

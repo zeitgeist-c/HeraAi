@@ -127,6 +127,7 @@
         "history_title": "Chat History",
         "history_search_placeholder": "Search chats…",
         "chat_copied": "Chat copied",
+        "model_fallback_notice": "{{from}} was unavailable, continued with {{to}}.",
         "search_messages_placeholder": "Search in chat…",
         "search_no_results": "No results",
         "search_prev": "Previous result",

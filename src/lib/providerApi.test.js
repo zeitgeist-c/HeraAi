@@ -70,6 +70,67 @@ describe('OpenRouter provider adapter', () => {
     expect(body.model).toBe('openrouter/free')
   })
 
+  it('sends the selected OpenRouter model instead of the router', async () => {
+    global.fetch.mockResolvedValue(streamResponse([
+      'data: {"model":"thinkingmachines/inkling:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
+    ]))
+
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body)
+    expect(body.model).toBe('thinkingmachines/inkling:free')
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'chunk', data: { text: 'hi' } },
+    ]))
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+  })
+
+  it('falls back to the OpenRouter router when a named free model is gone', async () => {
+    global.fetch
+      .mockResolvedValueOnce(streamResponse([], 404))
+      .mockResolvedValueOnce(streamResponse([
+        'data: {"model":"meta-llama/free","choices":[{"delta":{"content":"ok"}}]}\n\n',
+      ]))
+
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('thinkingmachines/inkling:free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'thinkingmachines/inkling:free', resolvedModel: 'openrouter/free' } },
+      { event: 'chunk', data: { text: 'ok' } },
+    ]))
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+  })
+
+  it('falls back to the router when a named model is rate-limited', async () => {
+    global.fetch
+      .mockResolvedValueOnce(streamResponse([], 429))
+      .mockResolvedValueOnce(streamResponse([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+      ]))
+
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+  })
+
+  it('does not fall back to the router after partial output', async () => {
+    global.fetch.mockResolvedValue(streamResponse([
+      'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":429,"message":"rate limit"}}\n\n',
+    ]))
+
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'rate_limited' } })
+  })
+
   it('maps an error embedded in a 200 stream without falling across providers', async () => {
     global.fetch.mockResolvedValue(streamResponse([
       'data: {"error":{"code":429,"message":"rate limit"}}\n\n',

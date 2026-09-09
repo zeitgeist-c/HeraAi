@@ -83,6 +83,7 @@ async function selectStream(payload, signal, engines) {
   const requestOptions = {
     systemInstruction: payload.systemInstruction || '',
     language: payload.language || 'tr',
+    fallbackGeminiKeys: Array.isArray(payload.fallbackGeminiKeys) ? payload.fallbackGeminiKeys : [],
   }
 
   if (payload.mode === 'web') {

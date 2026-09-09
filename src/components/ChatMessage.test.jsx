@@ -11,6 +11,10 @@ const retryModels = [
   'gemini-3.6-flash',
   'gemini-3.7-flash',
   'gemini-3.8-flash',
+  'openrouter/free',
+  'thinkingmachines/inkling:free',
+  'gpt-oss:120b',
+  'nemotron-3-ultra',
 ]
 
 const modelLabels = {
@@ -19,6 +23,10 @@ const modelLabels = {
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.7-flash': 'Gemini 3.7 Flash',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'openrouter/free': 'OpenRouter Free',
+  'thinkingmachines/inkling:free': 'Inkling (free)',
+  'gpt-oss:120b': 'GPT-OSS 120B',
+  'nemotron-3-ultra': 'Nemotron 3 Ultra',
 }
 
 describe('ChatMessage copy actions', () => {

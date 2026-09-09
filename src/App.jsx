@@ -19,6 +19,7 @@ import {
   MODEL_CATALOG,
   MODEL_CAPABILITIES,
   MODELS,
+  describeModelFallback,
   getProviderForModel,
   resolveModelSelection,
 } from './lib/models'
@@ -45,6 +46,7 @@ import {
   isUrlOnlyText,
   listPublicUrls,
   MAX_PUBLIC_URLS,
+  needsWebSearch,
   normalizePublicUrl,
   removePublicUrlFromText,
 } from './lib/urlContext'
@@ -1476,6 +1478,18 @@ function App() {
           }))
         } else if (effectiveGenerationStatus === 'interrupted' && isVisibleAtCommit) {
           notifyError(t('chat.status.interrupted'))
+        } else if (effectiveGenerationStatus === 'completed' && isVisibleAtCommit) {
+          const fallbackNotice = describeModelFallback(
+            generation.model,
+            generation.resolvedModel,
+            localizedModelLabels,
+          )
+          if (fallbackNotice) {
+            notifySuccess(t('chat.model_fallback_notice', {
+              from: fallbackNotice.from,
+              to: fallbackNotice.to,
+            }))
+          }
         }
 
         if (finalizationRetryRef.current.jobId === generation.jobId) {
@@ -1598,7 +1612,7 @@ function App() {
       promise: finalizationPromise,
     }
     return finalizationPromise
-  }, [drainAssistantBuffer, persistSessionMessages, queueGenerationContent, setGenerating, stopAssistantDisplayQueue, t])
+  }, [drainAssistantBuffer, localizedModelLabels, persistSessionMessages, queueGenerationContent, setGenerating, stopAssistantDisplayQueue, t])
 
   finalizeGenerationHandlerRef.current = finalizeGeneration
 
@@ -3319,7 +3333,12 @@ function App() {
 
     const supportedModes = new Set(['chat', 'vision', 'web'])
     const autoDetectedUrls = retryUserMessage ? [] : listPublicUrls(userText)
-    const automaticMode = (enableResearch || canReusePreviousWeb || autoDetectedUrls.length > 0)
+    const autoWebSearch = !retryUserMessage
+      && draftAttachments.length === 0
+      && !canReusePreviousImage
+      && autoDetectedUrls.length === 0
+      && needsWebSearch(userText)
+    const automaticMode = (enableResearch || canReusePreviousWeb || autoDetectedUrls.length > 0 || autoWebSearch)
       ? 'web'
       : (draftAttachments.length > 0 || canReusePreviousImage ? 'vision' : 'chat')
     let mode = supportedModes.has(actionOptions?.modeOverride)
@@ -3396,6 +3415,9 @@ function App() {
     const webContext = {
       kind: mode === 'web' ? (requestUrls.length > 0 ? 'url' : 'search') : 'none',
       urls: requestUrls,
+      ...(mode === 'web' && requestUrls.length === 0
+        ? { searchMode: (enableResearch || retryUserMessage?.mode === 'web') ? 'explicit' : 'auto' }
+        : {}),
     }
     let requestText = userText
     let displayContent = actionOptions?.displayContent

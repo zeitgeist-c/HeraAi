@@ -138,3 +138,53 @@ export function isUrlOnlyText(text, urls) {
   remainder = remainder.replace(/\[[^\]]*\]\(\s*\)/g, '').replace(/[\s,;:.!?()[\]{}<>-]+/g, '')
   return remainder.length === 0
 }
+
+const AUTO_WEB_SEARCH_PHRASES = Object.freeze([
+  'bugün',
+  'bugun',
+  'yarın',
+  'yarin',
+  'güncel',
+  'guncel',
+  'son dakika',
+  'son durum',
+  'şu an',
+  'suan',
+  'şuan',
+  'kaç tl',
+  'kac tl',
+  'kaç dolar',
+  'kac dolar',
+  'dolar kuru',
+  'euro kuru',
+  'altın fiyatı',
+  'altin fiyati',
+  'fiyatı ne',
+  'fiyati ne',
+  'hava durumu',
+  'kim kazandı',
+  'kim kazandi',
+  'kaç kaç',
+  'kac kac',
+  'puan durumu',
+  'borsa',
+  'bitcoin',
+  'deprem',
+  'nöbetçi',
+  'nobetci',
+  'vizyonda',
+  'sonuçlar',
+  'sonuclar',
+  'latest',
+  'current price',
+  'weather in',
+  'who won',
+  'stock price',
+  'breaking news',
+])
+
+export function needsWebSearch(text) {
+  const normalized = String(text || '').toLocaleLowerCase('tr')
+  if (!normalized.trim()) return false
+  return AUTO_WEB_SEARCH_PHRASES.some(phrase => normalized.includes(phrase))
+}

@@ -94,15 +94,15 @@ describe('generation worker runtime', () => {
       expect(args[2]).toBe(tavilyKeys)
       expect(args[3]).toBeInstanceOf(AbortSignal)
       expect(args[4]).toBe('gemini-test')
-      expect(args[5]).toEqual({ systemInstruction: 'system', language: 'en' })
+      expect(args[5]).toEqual({ systemInstruction: 'system', language: 'en', fallbackGeminiKeys: [] })
     } else if (mode === 'vision') {
       expect(args[1]).toBeNull()
-      expect(args[2]).toEqual({ systemInstruction: 'system', language: 'en' })
+      expect(args[2]).toEqual({ systemInstruction: 'system', language: 'en', fallbackGeminiKeys: [] })
       expect(args[3]).toBe(geminiKeys)
       expect(args[4]).toBeInstanceOf(AbortSignal)
       expect(args[5]).toBe('gemini-test')
     } else {
-      expect(args[1]).toEqual({ systemInstruction: 'system', language: 'en' })
+      expect(args[1]).toEqual({ systemInstruction: 'system', language: 'en', fallbackGeminiKeys: [] })
       expect(args[2]).toBe(geminiKeys)
       expect(args[3]).toBeInstanceOf(AbortSignal)
       expect(args[4]).toBe('gemini-test')
@@ -112,6 +112,29 @@ describe('generation worker runtime', () => {
       jobId: `job-${mode}`,
       cancelled: false,
     }))
+  })
+
+  it('forwards Gemini fallback keys into the request options', async () => {
+    const engines = createEngines([])
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines })
+    const fallbackGeminiKeys = [{ id: 'g9', key: 'fallback-secret' }]
+
+    await runtime.handleMessage({
+      kind: 'start',
+      jobId: 'job-fallback',
+      mode: 'chat',
+      model: 'gpt-oss:120b',
+      provider: 'ollama',
+      requestMessages: [{ role: 'user', content: 'hello' }],
+      providerKeys: [{ id: 'o1', key: 'ollama-secret' }],
+      fallbackGeminiKeys,
+      systemInstruction: 'system',
+      language: 'en',
+    })
+
+    const args = engines.streamChat.mock.calls[0]
+    expect(args[1]).toMatchObject({ fallbackGeminiKeys })
   })
 
   it('emits increasing full-content snapshots with a 150 ms throttle and a final flush', async () => {

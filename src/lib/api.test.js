@@ -18,7 +18,7 @@ vi.mock('@google/genai', () => ({
   }),
 }))
 
-const { streamResearch, streamVision, streamChat, testKey, MODELS, DEFAULT_MODEL } = await import('./api')
+const { streamResearch, streamVision, streamChat, testKey, MODELS, DEFAULT_MODEL, parseDuckDuckGoHtml } = await import('./api')
 
 function geminiStream(text) {
   return (async function* stream() {
@@ -294,6 +294,131 @@ describe('streamResearch', () => {
     ))
     expect(events.find(event => event.event === 'chunk')).toBeUndefined()
     expect(events.find(event => event.event === 'error')?.data.code).toBe('tavily_key_missing')
+  })
+})
+
+const DDG_FIXTURE_HTML = `
+<div class="result results_links results_links_deep web-result">
+<div class="links_main links_deep result__body">
+<h2 class="result__title">
+<a rel="nofollow" class="result__a" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fdolar&amp;rut=abc">Dolar kuru <b>bugün</b> ne kadar?</a>
+</h2>
+<a class="result__snippet" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fdolar&amp;rut=abc">Dolar bug&#252;n 41,50 TL &amp; y&#252;kselişte.</a>
+</div>
+</div>
+<div class="result results_links results_links_deep web-result">
+<div class="links_main links_deep result__body">
+<h2 class="result__title">
+<a rel="nofollow" class="result__a" href="https://example.com/altin">Altın fiyatları</a>
+</h2>
+</div>
+</div>`
+
+describe('parseDuckDuckGoHtml', () => {
+  it('decodes redirect URLs, titles and snippets', () => {
+    expect(parseDuckDuckGoHtml(DDG_FIXTURE_HTML)).toEqual([
+      {
+        title: 'Dolar kuru bugün ne kadar?',
+        url: 'https://example.com/dolar',
+        content: 'Dolar bugün 41,50 TL & yükselişte.',
+        score: null,
+      },
+      {
+        title: 'Altın fiyatları',
+        url: 'https://example.com/altin',
+        content: '',
+        score: null,
+      },
+    ])
+  })
+
+  it('returns an empty list for bot-protection or empty pages', () => {
+    expect(parseDuckDuckGoHtml('')).toEqual([])
+    expect(parseDuckDuckGoHtml(null)).toEqual([])
+    expect(parseDuckDuckGoHtml('<html><body>nothing here</body></html>')).toEqual([])
+  })
+})
+
+describe('streamResearch auto mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Baglamli cevap'))
+  })
+
+  function autoSearch(fetchImpl) {
+    global.fetch = fetchImpl
+    return collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugün dolar kuru ne kadar?' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [],
+      undefined,
+      DEFAULT_MODEL,
+      { webContext: { kind: 'search', searchMode: 'auto' } },
+    ))
+  }
+
+  it('answers from DuckDuckGo without touching Tavily', async () => {
+    const events = await autoSearch(vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => DDG_FIXTURE_HTML,
+    }))
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch.mock.calls[0][0]).toContain('html.duckduckgo.com/html/')
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'chunk', data: { text: 'Baglamli cevap' } },
+      expect.objectContaining({ event: 'sources' }),
+    ]))
+    const sources = events.find(event => event.event === 'sources').data.sources
+    expect(sources.map(source => source.url)).toEqual([
+      'https://example.com/dolar',
+      'https://example.com/altin',
+    ])
+    const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(finalPrompt).toContain('Dolar kuru bugün ne kadar?')
+  })
+
+  it('falls back to plain chat when DuckDuckGo returns nothing', async () => {
+    const events = await autoSearch(vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => '<html><body>nothing here</body></html>',
+    }))
+
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(events.find(event => event.event === 'sources')).toBeUndefined()
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'chunk', data: { text: 'Baglamli cevap' } },
+    ]))
+    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(contents).toBe('bugün dolar kuru ne kadar?')
+  })
+
+  it('falls back to plain chat when DuckDuckGo fails', async () => {
+    const events = await autoSearch(vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(contents).toBe('bugün dolar kuru ne kadar?')
+  })
+
+  it('keeps the Tavily key requirement for explicit search', async () => {
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugün dolar kuru ne kadar?' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [],
+      undefined,
+      DEFAULT_MODEL,
+      { webContext: { kind: 'search', searchMode: 'explicit' } },
+    ))
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        event: 'error',
+        data: expect.objectContaining({ code: 'tavily_key_missing' }),
+      }),
+    ])
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 })
 
@@ -677,8 +802,8 @@ describe('streamChat fallback', () => {
     }))
   })
 
-  it('reports a 404 as model_unavailable and does not retry it as a network failure', async () => {
-    mocks.generateContentStreamMock.mockRejectedValueOnce(
+  it('falls back through lite models when the requested model is unavailable', async () => {
+    mocks.generateContentStreamMock.mockRejectedValue(
       Object.assign(new Error('NOT_FOUND: models/gemini-3.6-flash is not found'), { status: 404 })
     )
 
@@ -690,7 +815,12 @@ describe('streamChat fallback', () => {
       'gemini-3.6-flash',
     ))
 
-    expect(events).toContainEqual(expect.objectContaining({
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+    ])
+    expect(events.at(-1)).toEqual(expect.objectContaining({
       event: 'error',
       data: expect.objectContaining({ code: 'model_unavailable' }),
     }))
@@ -698,8 +828,8 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
-  it('reports a 503 as service_unavailable and does not call the non-stream fallback', async () => {
-    mocks.generateContentStreamMock.mockRejectedValueOnce(
+  it('falls back through lite models on a 503 without calling the non-stream fallback', async () => {
+    mocks.generateContentStreamMock.mockRejectedValue(
       Object.assign(new Error('UNAVAILABLE: The model is overloaded'), { status: 503 })
     )
 
@@ -711,11 +841,64 @@ describe('streamChat fallback', () => {
       'gemini-3.6-flash',
     ))
 
-    expect(events).toContainEqual(expect.objectContaining({
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+    ])
+    expect(events.at(-1)).toEqual(expect.objectContaining({
       event: 'error',
       data: expect.objectContaining({ code: 'service_unavailable' }),
     }))
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to gemini-3.5-flash-lite when the requested model hits quota', async () => {
+    mocks.generateContentStreamMock
+      .mockRejectedValueOnce(Object.assign(new Error('quota exceeded for gemini-3.8-flash'), { status: 429 }))
+      .mockResolvedValueOnce(geminiStream('Lite answer'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-quota-key-aaaaaaaa' }],
+      undefined,
+      'gemini-3.8-flash',
+    ))
+
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
+    ])
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'Lite answer' } })
+    expect(events).toContainEqual({
+      event: 'model_resolved',
+      data: { provider: 'gemini', requestedModel: 'gemini-3.8-flash', resolvedModel: 'gemini-3.5-flash-lite' },
+    })
+    expect(events.some(event => event.event === 'error')).toBe(false)
+  })
+
+  it('tries the other lite model when the lightest lite model hits quota', async () => {
+    mocks.generateContentStreamMock.mockRejectedValue(
+      Object.assign(new Error('quota exceeded'), { status: 429 })
+    )
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'question' }],
+      {},
+      [{ id: 'g1', key: 'AIza-lite-key-aaaaaaaa' }],
+      undefined,
+      'gemini-3.1-flash-lite',
+    ))
+
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
+    ])
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      event: 'error',
+      data: expect.objectContaining({ code: 'quota_exceeded' }),
+    }))
   })
 
   it.each([
@@ -790,13 +973,84 @@ describe('streamChat fallback', () => {
   })
 })
 
+describe('cross-provider Gemini fallback', () => {
+  const ollamaKeys = [{ id: 'o1', key: 'ollama-key' }]
+  const geminiFallbackKeys = [{ id: 'g1', key: 'gemini-key' }]
+  const ollamaErrorResponse = (status, message) => ({
+    ok: false,
+    status,
+    json: async () => ({ error: { message, code: status } }),
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('falls back to gemini-3.5-flash-lite when Ollama hits quota', async () => {
+    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(429, 'rate limit'))
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Gemini lite answer'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'selam' }],
+      { fallbackGeminiKeys: geminiFallbackKeys },
+      ollamaKeys,
+      undefined,
+      'gpt-oss:120b',
+      'ollama',
+    ))
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.5-flash-lite',
+    ])
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'Gemini lite answer' } })
+    expect(events).toContainEqual({
+      event: 'model_resolved',
+      data: { provider: 'gemini', requestedModel: 'gpt-oss:120b', resolvedModel: 'gemini-3.5-flash-lite' },
+    })
+    expect(events.some(event => event.event === 'error')).toBe(false)
+  })
+
+  it('keeps the remote error when no Gemini fallback keys are available', async () => {
+    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(429, 'rate limit'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'selam' }],
+      {},
+      ollamaKeys,
+      undefined,
+      'gpt-oss:120b',
+      'ollama',
+    ))
+
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'rate_limited' } })
+    expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back on authentication errors even with Gemini keys present', async () => {
+    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(401, 'unauthorized'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'selam' }],
+      { fallbackGeminiKeys: geminiFallbackKeys },
+      ollamaKeys,
+      undefined,
+      'gpt-oss:120b',
+      'ollama',
+    ))
+
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'api_key_invalid' } })
+    expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('model selection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 8 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 9 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
@@ -805,6 +1059,7 @@ describe('model selection', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
+      'thinkingmachines/inkling:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ])
