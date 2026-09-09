@@ -13,7 +13,6 @@ const headerProps = {
   onImport: vi.fn(),
   onSettings: vi.fn(),
   onStats: vi.fn(),
-  onShortcuts: vi.fn(),
 }
 
 const sessions = [
@@ -98,16 +97,34 @@ describe('session management UI', () => {
     expect(screen.getByRole('button', { name: 'Rename chat' })).not.toHaveFocus()
   })
 
-  it('shows Import Chat immediately above Export Chat in the header menu', () => {
+  it('shows Import immediately above Export in the header menu', () => {
     render(<AppHeader {...headerProps} activeSessionTitle="Current chat" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'More options' }))
     const menuItems = screen.getAllByRole('menuitem').map(item => item.textContent)
-    const importIndex = menuItems.indexOf('Import Chat')
-    const exportIndex = menuItems.indexOf('Export Chat')
+    const importIndex = menuItems.indexOf('Import')
+    const exportIndex = menuItems.indexOf('Export')
 
     expect(importIndex).toBeGreaterThanOrEqual(0)
     expect(exportIndex).toBe(importIndex + 1)
+  })
+
+  it('exposes markdown export and chat copy as header buttons', () => {
+    const onExportMarkdown = vi.fn()
+    const onCopyChat = vi.fn()
+    render(
+      <AppHeader
+        {...headerProps}
+        activeSessionTitle="Current chat"
+        onExportMarkdown={onExportMarkdown}
+        onCopyChat={onCopyChat}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('header-export-markdown'))
+    fireEvent.click(screen.getByTestId('header-copy-chat'))
+    expect(onExportMarkdown).toHaveBeenCalledTimes(1)
+    expect(onCopyChat).toHaveBeenCalledTimes(1)
   })
 
   it('groups sessions, orders them by recency, and exposes sibling row actions', async () => {
