@@ -16,6 +16,7 @@ const GEMINI_STREAM_IDLE_TIMEOUT_MS = 120000
 const GEMINI_REASONING_MODELS = new Set([
   'gemini-3.6-flash',
   'gemini-3.7-flash',
+  'gemini-3.8-flash',
 ])
 const TAVILY_TIMEOUT_MS = 15000
 const TAVILY_EXTRACT_TIMEOUT_MS = 30000
