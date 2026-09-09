@@ -8,6 +8,8 @@ const MIME_BY_EXTENSION = Object.freeze({
   pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
   json: 'application/json', xml: 'application/xml', html: 'text/html', htm: 'text/html',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
 })
 
 const TEXT_MIME_TYPES = new Set([
@@ -18,6 +20,8 @@ const TEXT_MIME_TYPES = new Set([
 const BINARY_MIME_TYPES = new Set([
   'image/png', 'image/jpeg', 'image/webp', 'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
 ])
 
 export class AttachmentValidationError extends Error {
@@ -58,6 +62,14 @@ function hasValidSignature(bytes, mimeType) {
     return bytesStartWith(bytes, [0x50, 0x4b, 0x03, 0x04])
       || bytesStartWith(bytes, [0x50, 0x4b, 0x05, 0x06])
       || bytesStartWith(bytes, [0x50, 0x4b, 0x07, 0x08])
+  }
+  if (mimeType.includes('spreadsheetml.sheet')) {
+    return bytesStartWith(bytes, [0x50, 0x4b, 0x03, 0x04])
+      || bytesStartWith(bytes, [0x50, 0x4b, 0x05, 0x06])
+      || bytesStartWith(bytes, [0x50, 0x4b, 0x07, 0x08])
+  }
+  if (mimeType === 'application/vnd.ms-excel') {
+    return bytesStartWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
   }
   return true
 }
@@ -224,6 +236,26 @@ export async function processAttachmentFile(file) {
       modelText = await structuredHtmlText(result.value)
     } catch {
       throw new AttachmentValidationError('attachment_invalid', 'The DOCX file is invalid or corrupted.')
+    }
+  } else if (
+    mimeType.includes('spreadsheetml.sheet')
+    || mimeType === 'application/vnd.ms-excel'
+  ) {
+    kind = 'text'
+    try {
+      const { default: XLSX } = await import('xlsx')
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const sections = []
+      for (const sheetName of workbook.SheetNames || []) {
+        const sheet = workbook.Sheets[sheetName]
+        if (!sheet) continue
+        const csv = XLSX.utils.sheet_to_csv(sheet).trim()
+        if (!csv) continue
+        sections.push(`--- SHEET: ${sheetName} ---\n${csv}`)
+      }
+      modelText = normalizePlainText(sections.join('\n\n'))
+    } catch {
+      throw new AttachmentValidationError('attachment_invalid', 'The spreadsheet file is invalid or corrupted.')
     }
   } else if (mimeType.startsWith('image/')) kind = 'image'
   else if (mimeType === 'application/pdf') kind = 'pdf'

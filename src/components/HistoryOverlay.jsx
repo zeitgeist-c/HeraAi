@@ -22,6 +22,7 @@ function HistoryOverlay({
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [titleDraft, setTitleDraft] = useState('')
   const [titleError, setTitleError] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const editInputRef = useRef(null)
   const renameTriggerRefs = useRef(new Map())
   const lastEditedSessionIdRef = useRef(null)
@@ -33,8 +34,12 @@ function HistoryOverlay({
   const bulkDeleteWasOpenRef = useRef(false)
 
   const sortedSessions = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
-  const starredSessions = sortedSessions.filter((session) => session.isStarred)
-  const otherSessions = sortedSessions.filter((session) => !session.isStarred)
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase('tr')
+  const filteredSessions = normalizedQuery
+    ? sortedSessions.filter(session => (session.title || '').toLocaleLowerCase('tr').includes(normalizedQuery))
+    : sortedSessions
+  const starredSessions = filteredSessions.filter((session) => session.isStarred)
+  const otherSessions = filteredSessions.filter((session) => !session.isStarred)
   const unstarredCount = otherSessions.length
 
   useEffect(() => {
@@ -260,6 +265,16 @@ function HistoryOverlay({
           </button>
         </div>
       </header>
+
+      <div className="px-3 pb-2 pt-1">
+        <input
+          data-testid="history-search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={t('chat.history_search_placeholder')}
+          className="h-9 w-full rounded-xl border border-input bg-background/60 px-3 text-xs"
+        />
+      </div>
 
       <div className="flex-1 overflow-y-auto p-3">
         {sessions.length === 0 && (

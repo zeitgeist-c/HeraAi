@@ -153,6 +153,28 @@ describe('session management UI', () => {
     expect(onToggleStar).toHaveBeenCalledWith('star-new')
   })
 
+  it('filters sessions by title through the history search box', () => {
+    render(
+      <HistoryOverlay
+        sessions={sessions}
+        activeSessionId="star-new"
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleStar={vi.fn()}
+        onRequestBulkDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Other old')).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('history-search'), { target: { value: 'star' } })
+    expect(screen.queryByText('Other old')).not.toBeInTheDocument()
+    expect(screen.queryByText('Other new')).not.toBeInTheDocument()
+    expect(screen.getByText('Star old')).toBeInTheDocument()
+    expect(screen.getByText('Star new')).toBeInTheDocument()
+  })
+
   it('keeps focus on the next row control when history renaming is saved by blur', async () => {
     const onRename = vi.fn()
     render(

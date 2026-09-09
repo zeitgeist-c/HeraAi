@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { exportSessions, importSessions } from './importExport.js'
+import { exportSessions, exportSessionMarkdown, importSessions, sessionToMarkdown } from './importExport.js'
 
 const readBlob = blob => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -184,5 +184,42 @@ describe('session import and export', () => {
       updatedAt: 200,
       messages: [{ role: 'user', content: 'Internal prompt', displayContent: '' }],
     }])
+  })
+
+  it('converts a session to markdown with display content and attachment names', () => {
+    const markdown = sessionToMarkdown({
+      title: 'Deneme Sohbeti',
+      messages: [
+        { role: 'user', content: 'Internal prompt', displayContent: 'Görünen soru' },
+        {
+          role: 'model',
+          content: 'Cevap metni',
+          attachments: [{ name: 'tablo.xlsx' }],
+        },
+        { role: 'user', content: '', attachments: [] },
+      ],
+    })
+
+    expect(markdown).toContain('# Deneme Sohbeti')
+    expect(markdown).toContain('Görünen soru')
+    expect(markdown).not.toContain('Internal prompt')
+    expect(markdown).toContain('Cevap metni')
+    expect(markdown).toContain('tablo.xlsx')
+  })
+
+  it('downloads the active session as a markdown file', async () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hera-md')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    exportSessionMarkdown({
+      title: 'Deneme Sohbeti',
+      messages: [{ role: 'user', content: 'Merhaba' }],
+    })
+
+    const blob = createObjectURL.mock.calls[0][0]
+    expect(blob.type).toBe('text/markdown')
+    expect(await readBlob(blob)).toContain('Merhaba')
+    expect(click).toHaveBeenCalled()
   })
 })

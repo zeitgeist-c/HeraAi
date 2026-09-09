@@ -1239,12 +1239,28 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "HeraAi'a Gönder",
     contexts: ['selection'],
   });
+  chrome.contextMenus.create({
+    id: 'heraai-page',
+    title: "Sayfayı HeraAi'ye Gönder",
+    contexts: ['page'],
+  });
 });
 
 // Preserve the selected-text context-menu flow.
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'heraai-send' && info.selectionText) {
     chrome.storage.local.set({ selectedText: info.selectionText }, () => {
+      if (tab?.windowId && chrome.sidePanel?.open) {
+        chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {
+          // Writing to storage is enough for the side panel to pick up later.
+        });
+      } else {
+        openHeraTab().catch((error) => console.error(error));
+      }
+    });
+  }
+  if (info.menuItemId === 'heraai-page' && info.pageUrl) {
+    chrome.storage.local.set({ pendingPageUrl: info.pageUrl }, () => {
       if (tab?.windowId && chrome.sidePanel?.open) {
         chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {
           // Writing to storage is enough for the side panel to pick up later.

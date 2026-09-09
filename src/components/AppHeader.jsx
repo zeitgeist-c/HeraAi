@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BarChart3,
+  Copy,
   Download,
+  FileText,
   History,
   Keyboard,
   Menu,
@@ -23,6 +25,8 @@ function AppHeader({
   onHistory,
   onClear,
   onExport,
+  onExportMarkdown,
+  onCopyChat,
   onImport,
   onSettings,
   onStats,
@@ -110,6 +114,8 @@ function AppHeader({
 
   const menuItems = [
     { label: t('chat.tooltips.export'), icon: Download, action: onExport },
+    { label: t('chat.tooltips.export_markdown'), icon: FileText, action: onExportMarkdown },
+    { label: t('chat.tooltips.copy_chat'), icon: Copy, action: onCopyChat },
     { label: t('chat.tooltips.statistics'), icon: BarChart3, action: onStats },
     { label: t('chat.tooltips.shortcuts'), icon: Keyboard, action: onShortcuts },
     { label: t('chat.tooltips.settings'), icon: Settings, action: onSettings },
