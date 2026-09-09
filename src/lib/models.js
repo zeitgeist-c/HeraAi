@@ -31,7 +31,7 @@ export const MODEL_CATALOG = Object.freeze([
     key: `${PROVIDERS.OPENROUTER}:openrouter/free`,
     provider: PROVIDERS.OPENROUTER,
     modelId: 'openrouter/free',
-    label: 'OpenRouter Free',
+    label: 'Free',
     capabilities: {
       supportsImage: true,
       supportsPdf: false,
@@ -42,7 +42,7 @@ export const MODEL_CATALOG = Object.freeze([
     key: `${PROVIDERS.OPENROUTER}:thinkingmachines/inkling:free`,
     provider: PROVIDERS.OPENROUTER,
     modelId: 'thinkingmachines/inkling:free',
-    label: 'Inkling (free)',
+    label: 'Inkling',
     capabilities: {
       supportsImage: true,
       supportsPdf: false,

@@ -23,8 +23,8 @@ const modelLabels = {
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.7-flash': 'Gemini 3.7 Flash',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
-  'openrouter/free': 'OpenRouter Free',
-  'thinkingmachines/inkling:free': 'Inkling (free)',
+  'openrouter/free': 'Free',
+  'thinkingmachines/inkling:free': 'Inkling',
   'gpt-oss:120b': 'GPT-OSS 120B',
   'nemotron-3-ultra': 'Nemotron 3 Ultra',
 }
@@ -85,11 +85,11 @@ describe('ChatMessage copy actions', () => {
         provider: 'openrouter',
         resolvedModel: 'meta-llama/llama-4-scout:free',
       }}
-      modelLabels={{ ...modelLabels, 'openrouter/free': 'OpenRouter Free' }}
+      modelLabels={{ ...modelLabels, 'openrouter/free': 'Free' }}
     />)
 
     expect(screen.getByTestId('message-model')).toHaveTextContent(
-      'OpenRouter Free → meta-llama/llama-4-scout:free',
+      'Free → meta-llama/llama-4-scout:free',
     )
   })
 

@@ -246,7 +246,7 @@
         "model_providers": {
             "gemini": "Google Gemini",
             "openrouter": "OpenRouter",
-            "ollama": "Ollama (No Image Support)"
+            "ollama": "Ollama 🚫📷"
         },
         "model_labels": {
             "gpt_oss_120b": "GPT-OSS 120B (Fast)",
@@ -284,7 +284,7 @@
             "attachment_empty": "The file contains no readable text.",
             "attachment_missing": "The original attachment is no longer available. Attach it again.",
             "pdf_requires_gemini": "PDF attachments are supported only with a Gemini model. Select Gemini and retry.",
-            "image_not_supported": "The selected model accepts text only. Choose Gemini or OpenRouter Free for images.",
+            "image_not_supported": "The selected model accepts text only. Choose Gemini or the Free model for images.",
             "url_invalid": "Enter a valid HTTP or HTTPS URL.",
             "url_private": "Local, private-network, or credential-bearing URLs cannot be read.",
             "url_limit_exceeded": "You can read at most 10 public URLs in one request.",
