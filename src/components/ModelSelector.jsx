@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Gauge, Turtle, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
@@ -17,10 +17,12 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
 
   const [open, setOpen] = useState(false)
   const selectedProvider = normalizedModels.find(model => model.modelId === selectedModel)?.provider
-  const [userCollapsed, setUserCollapsed] = useState(() => [...providerOrder])
+  const [userCollapsed, setUserCollapsed] = useState(() => (
+    providerOrder.filter(provider => provider !== selectedProvider)
+  ))
   const rootRef = useRef(null)
 
-  const isCollapsed = (provider) => provider !== selectedProvider && userCollapsed.includes(provider)
+  const isCollapsed = (provider) => userCollapsed.includes(provider)
 
   useEffect(() => {
     if (!open) return undefined
@@ -71,7 +73,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
         <div
           role="listbox"
           aria-label={t('chat.tooltips.model_selector')}
-          className="absolute bottom-full left-0 z-50 mb-1.5 max-h-64 w-56 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/10"
+          className="absolute bottom-full left-0 z-50 mb-1.5 max-h-56 w-48 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10"
         >
           {groupedModels.map(group => {
             const collapsed = isCollapsed(group.provider)
@@ -84,7 +86,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                   aria-expanded={!collapsed}
                   aria-controls={`${headingId}-models`}
                   onClick={() => toggleProvider(group.provider)}
-                  className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-secondary/60"
+                  className="flex w-full items-center justify-between gap-1.5 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-secondary/60"
                 >
                   <span className="truncate text-[11px] font-semibold text-muted-foreground">
                     {t(`chat.model_providers.${group.provider}`)}
@@ -92,9 +94,10 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                   <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${collapsed ? '-rotate-90' : ''}`} />
                 </button>
                 {!collapsed && (
-                  <div id={`${headingId}-models`} role="group" aria-labelledby={headingId} className="pb-1">
+                  <div id={`${headingId}-models`} role="group" aria-labelledby={headingId} className="pb-0.5">
                     {group.models.map(model => {
                       const isSelected = model.modelId === selectedModel
+                      const SpeedIcon = model.speed === 'fast' ? Zap : model.speed === 'medium' ? Gauge : model.speed === 'slow' ? Turtle : null
                       return (
                         <button
                           key={model.key || model.modelId}
@@ -103,12 +106,13 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                           aria-selected={isSelected}
                           data-model-id={model.modelId}
                           onClick={() => chooseModel(model.modelId)}
-                          className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60 ${isSelected ? 'font-semibold text-primary' : 'text-foreground'}`}
+                          className={`flex min-h-8 w-full items-center justify-between gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60 ${isSelected ? 'font-semibold text-primary' : 'text-foreground'}`}
                         >
                           <span className="min-w-0 flex-1 truncate">
                             {model.label || modelLabels[model.modelId] || model.modelId}
                           </span>
-                          {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
+                          {SpeedIcon && <SpeedIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+                          {isSelected && <Check className="h-4 w-4 shrink-0" />}
                         </button>
                       )
                     })}

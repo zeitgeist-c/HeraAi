@@ -72,13 +72,13 @@ describe('OpenRouter provider adapter', () => {
 
   it('sends the selected OpenRouter model instead of the router', async () => {
     global.fetch.mockResolvedValue(streamResponse([
-      'data: {"model":"thinkingmachines/inkling:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
+      'data: {"model":"nvidia/nemotron-3-ultra-550b-a55b:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-ultra-550b-a55b:free'))
 
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(body.model).toBe('thinkingmachines/inkling:free')
+    expect(body.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
     expect(events).toEqual(expect.arrayContaining([
       { event: 'chunk', data: { text: 'hi' } },
     ]))
@@ -92,13 +92,13 @@ describe('OpenRouter provider adapter', () => {
         'data: {"model":"meta-llama/free","choices":[{"delta":{"content":"ok"}}]}\n\n',
       ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-ultra-550b-a55b:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('thinkingmachines/inkling:free')
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
     expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
     expect(events).toEqual(expect.arrayContaining([
-      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'thinkingmachines/inkling:free', resolvedModel: 'openrouter/free' } },
+      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'nvidia/nemotron-3-ultra-550b-a55b:free', resolvedModel: 'openrouter/free' } },
       { event: 'chunk', data: { text: 'ok' } },
     ]))
     expect(events.find(event => event.event === 'error')).toBeUndefined()
@@ -111,7 +111,7 @@ describe('OpenRouter provider adapter', () => {
         'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
       ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-ultra-550b-a55b:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
     expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
@@ -124,7 +124,7 @@ describe('OpenRouter provider adapter', () => {
       'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":429,"message":"rate limit"}}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'thinkingmachines/inkling:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-ultra-550b-a55b:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')

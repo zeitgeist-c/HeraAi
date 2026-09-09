@@ -395,7 +395,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     const panelId = `provider-panel-${provider}`
 
     return (
-      <section key={provider} className="overflow-hidden rounded-xl border border-border/75 bg-background/35">
+      <section key={provider} className={`overflow-hidden rounded-xl border bg-background/35 transition-colors ${isExpanded ? 'border-primary/30 shadow-sm shadow-primary/10' : 'border-border/75'}`}>
         <button
           id={headingId}
           type="button"
@@ -447,8 +447,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="flex rounded-xl border border-border/60 bg-secondary/55 p-1">
+      <div className="mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col gap-3 overflow-y-auto p-3 pb-8">
+        <div className="flex shrink-0 rounded-xl border border-border/60 bg-secondary/55 p-1">
           <button
             type="button"
             onClick={() => setActiveTab('api')}
@@ -465,7 +465,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           </button>
         </div>
 
-        <div className="hera-section-card min-h-[300px] p-3.5">
+        <div className="hera-section-card min-h-[300px] shrink-0 p-3.5">
           {activeTab === 'api' && (
             <div className="hera-fade-in flex flex-col gap-4">
               <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-amber-700 dark:text-amber-300">
@@ -593,7 +593,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         <button
           type="button"
           onClick={handleSave}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
+          className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
         >
           <Save className="h-4 w-4" />
           {t('setup.api.save_btn')}

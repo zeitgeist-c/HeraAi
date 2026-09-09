@@ -7,20 +7,16 @@
             "ai": "Artificial Intelligence"
         },
         "api": {
-            "keys_management": "API Keys Management",
             "active": "Active",
             "add_placeholder": "Add new API Key (AIzaSy...)",
             "add_btn": "Add",
             "description": "Add multiple keys. Select the active one via radio button.",
             "save_btn": "Save and Continue",
             "saved_success": "Settings saved successfully!",
-            "provider": "AI Provider",
-            "provider_info": "Google Gemini (gemini-3.1-flash-lite) runs directly in the extension",
-            "security_note": "API keys are stored in your browser and sent directly to the selected provider."
+            "provider": "AI Provider"
         },
         "keys": {
             "title": "API Keys",
-            "keys_tab": "Keys",
             "gemini_section": "Gemini API Keys",
             "openrouter_section": "OpenRouter API Keys",
             "ollama_section": "Ollama (No Image Support) API Keys",
@@ -66,32 +62,21 @@
             "test_billing_required": "This model requires billing or project access.",
             "test_permission_denied": "This API key does not have permission to use the selected model.",
             "test_unknown": "Test failed",
-            "test_usage_warning": "Key tests send a small real request and may use a small amount of quota or search credit.",
-            "test_all_progress": "Testing {{done}}/{{total}}"
+            "test_usage_warning": "Key tests send a small real request and may use a small amount of quota or search credit."
         },
         "general": {
             "theme_title": "Appearance Theme",
             "theme_system": "System Default",
             "theme_light": "Light Theme",
             "theme_dark": "Dark Theme",
-            "startup_title": "Startup Behavior",
-            "startup_resume": "Resume Last Chat",
-            "startup_new": "Start New Chat Every Time",
             "language_title": "Language",
             "accent_color": "Accent Color",
             "custom_accent_color": "Custom accent color",
             "sources_title": "Show Sources",
             "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged.",
-            "dictation_title": "Gemini Dictation",
-            "dictation_description": "Record up to 60 seconds and append the Gemini transcript to the message draft.",
-            "read_aloud_title": "Gemini Read Aloud (Preview)",
-            "read_aloud_description": "Add read and stop controls to completed AI responses using the Kore voice.",
             "voice_api_notice": "Voice features use your Gemini API key and may incur API usage. Audio is processed in memory and is not saved."
         },
         "ai": {
-            "temp_title": "Creativity Level (Temperature)",
-            "temp_precise": "Precise (Fewer Hallucinations)",
-            "temp_creative": "Creative (Story-like)",
             "system_prompt_title": "System Prompt (Role)",
             "system_prompt_placeholder": "Example: You are a senior software architect. Always explain the code clearly and give concise answers."
         }
@@ -118,12 +103,9 @@
             "attach_title": "Attach a file",
             "attach_description": "Image, PDF, document, or text"
         },
-        "error_prefix": "Error:",
-        "history_cleared": "Chat history cleared.",
         "screenshot_blocked": "Screenshot crop cannot be used on this page type. Please navigate to a normal web page.",
         "screenshot_no_tab": "Could not find active tab.",
         "file_error": "An error occurred while loading the file.",
-        "clear_url_context": "Clear pages",
         "history_title": "Chat History",
         "history_search_placeholder": "Search chats…",
         "chat_copied": "Chat copied",
@@ -137,9 +119,9 @@
         "session_title": {
             "input_label": "Chat name",
             "empty_error": "Chat name cannot be empty.",
-            "updated": "Chat name updated.",
+            "updated": "Chat updated.",
             "renamed": "Chat renamed.",
-            "save_error": "Chat name could not be saved."
+            "save_error": "Chat could not be saved."
         },
         "history_groups": {
             "starred": "Starred",
@@ -178,7 +160,6 @@
             "copied": "Copied!",
             "copy_failed": "Could not copy. Check clipboard permission.",
             "summarize": "Summarize active page",
-            "read_page": "Read this page",
             "screenshot": "Crop Screenshot",
             "screenshot_hint": "Draw an area on the page to crop.",
             "edit": "Edit",
@@ -186,10 +167,7 @@
             "crop_cancel": "Cancel",
             "voice_input": "Voice Input",
             "stop_recording": "Stop Recording",
-            "web_search": "Web Search",
             "statistics": "Stats",
-            "enable_research": "Web Research",
-            "disable_research": "Disable Web Research",
             "export": "Export",
             "export_markdown": "Markdown",
             "copy_chat": "Copy Chat",
@@ -215,11 +193,6 @@
             "description": "Choose a model for this retry only",
             "default": "Default"
         },
-        "extension_error": "Extension context not found. Please refresh.",
-        "reading_page": "Reading page content...",
-        "page_empty": "Could not extract text from the page.",
-        "summarize_prompt": "Please summarize the following web page content in detail:",
-        "summarize_action": "Summarize this page",
         "prompts": {
             "summarize": "Summarize",
             "summarize_files": "Summarize the attached files accurately. Refer to each file by name.",
@@ -228,12 +201,11 @@
             "translate": "Translate",
             "explain": "Explain",
             "code": "Explain Code",
-            "ocr": "Extract only the visible text from the attached image or images. Do not add explanations, summaries, translations, interpretations, or any text that is not visible. Preserve headings, paragraphs, lists, line order, and reading order as closely as possible. Mark every unreadable section as [unreadable]. If there is more than one image, process them in attachment order and separate the results with the headings Image 1, Image 2, and so on."
+            "ocr": "Extract only the visible text from the attached image or images. Do not add explanations, summaries, translations, interpretations, or any text that is not visible. Preserve headings, paragraphs, lists, line order, and reading order as closely as possible. Mark every unreadable section as [unreadable]. If there is more than one image, process them in attachment order and separate the results with the headings Image 1, Image 2 and so on."
         },
         "exported": "Chat history exported!",
         "imported": "Chat history imported!",
         "import_error": "Failed to import",
-        "voice_started": "Voice input started...",
         "voice_error": "Voice input is not supported in this browser",
         "voice_empty": "No intelligible speech was detected.",
         "voice_permission_denied": "Microphone permission was not granted.",
@@ -244,13 +216,13 @@
         "all_keys_cooldown": "All API keys are waiting after rate limits. Earliest retry: {{time}}",
         "model_used": "Model used",
         "model_providers": {
-            "gemini": "Google Gemini",
+            "gemini": "Gemini",
             "openrouter": "OpenRouter",
             "ollama": "Ollama 🚫📷"
         },
         "model_labels": {
-            "gpt_oss_120b": "GPT-OSS 120B (Fast)",
-            "nemotron_3_ultra": "Nemotron 3 Ultra (Slow)"
+            "gpt_oss_120b": "GPT-OSS 120B",
+            "nemotron_3_ultra": "Nemotron 3 Ultra"
         },
         "sources_label": "Sources",
         "status": {
@@ -291,9 +263,7 @@
             "url_retrieval_failed": "The supplied public pages could not all be retrieved reliably.",
             "already_running": "Another response is already running. Stop it before starting a new one.",
             "invalid_request": "The response request was incomplete. Please retry.",
-            "generation_start_failed": "The background response process could not start.",
-            "generation_failed": "The AI response could not be generated.",
-            "storage_failed": "The message could not be saved locally. Free some extension storage and retry."
+            "generation_failed": "The AI response could not be generated."
         },
         "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",
