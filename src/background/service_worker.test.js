@@ -543,6 +543,10 @@ describe('background generation coordinator', () => {
       keys: [{ id: 'or1', key: 'openrouter-secret', isPrimary: true }],
       allInCooldown: false,
     });
+    keyManagerMocks.resolveKeysForRequest.mockResolvedValueOnce({
+      keys: [{ id: 'g1', key: 'gemini-secret' }],
+      allInCooldown: false,
+    });
     const mock = createChromeMock({ initialStorage: { sessions: [] } });
     const listener = await loadWorker(mock);
 
@@ -552,11 +556,13 @@ describe('background generation coordinator', () => {
     }));
 
     expect(response.ok).toBe(true);
-    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenCalledTimes(1);
-    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenCalledWith('openrouter');
+    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenCalledTimes(2);
+    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenNthCalledWith(1, 'openrouter');
+    expect(keyManagerMocks.resolveKeysForRequest).toHaveBeenNthCalledWith(2, 'gemini');
     expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0]).toMatchObject({
       provider: 'openrouter',
       providerKeys: [{ id: 'or1', key: 'openrouter-secret', isPrimary: true }],
+      fallbackGeminiKeys: [{ id: 'g1', key: 'gemini-secret' }],
       tavilyKeys: [],
     });
     expect(JSON.stringify(mock.storage)).not.toContain('openrouter-secret');

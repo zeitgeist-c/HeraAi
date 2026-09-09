@@ -127,6 +127,7 @@
         "history_title": "Sohbet Geçmişi",
         "history_search_placeholder": "Sohbet ara…",
         "chat_copied": "Sohbet kopyalandı",
+        "model_fallback_notice": "{{from}} yanıt veremedi, {{to}} ile devam edildi.",
         "search_messages_placeholder": "Sohbet içinde ara…",
         "search_no_results": "Sonuç yok",
         "search_prev": "Önceki sonuç",

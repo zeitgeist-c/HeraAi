@@ -675,6 +675,11 @@ async function handleGenerationStart(message) {
       };
     }
 
+    let geminiFallbackResolution = { keys: [] };
+    if (provider !== 'gemini') {
+      geminiFallbackResolution = await resolveKeysForRequest('gemini');
+    }
+
     let tavilyResolution = { keys: [], allInCooldown: false };
     if (runningGeneration.mode === 'web') {
       tavilyResolution = await resolveKeysForRequest('tavily');
@@ -707,6 +712,7 @@ async function handleGenerationStart(message) {
       webContext: message.webContext || { kind: 'none', urls: [] },
       provider,
       providerKeys: providerResolution.keys || [],
+      fallbackGeminiKeys: geminiFallbackResolution.keys || [],
       tavilyKeys: tavilyResolution.keys || [],
       model: runningGeneration.model,
       mode: runningGeneration.mode,

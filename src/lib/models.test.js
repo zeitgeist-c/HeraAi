@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODEL,
   MODEL_CATALOG,
+  describeModelFallback,
   getProviderForModel,
   resolveModelSelection,
 } from './models.js'
 
 describe('provider-aware model catalog', () => {
-  it('contains five Gemini models, OpenRouter Free, and two Ollama Cloud models', () => {
-    expect(MODEL_CATALOG).toHaveLength(8)
+  it('contains five Gemini models, two OpenRouter models, and two Ollama Cloud models', () => {
+    expect(MODEL_CATALOG).toHaveLength(9)
     expect(MODEL_CATALOG.map(model => [model.provider, model.modelId])).toEqual([
       ['gemini', 'gemini-3.1-flash-lite'],
       ['gemini', 'gemini-3.5-flash-lite'],
@@ -17,6 +18,7 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.7-flash'],
       ['gemini', 'gemini-3.8-flash'],
       ['openrouter', 'openrouter/free'],
+      ['openrouter', 'thinkingmachines/inkling:free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-ultra'],
     ])
@@ -49,5 +51,18 @@ describe('provider-aware model catalog', () => {
       provider: 'ollama',
       modelId: 'nemotron-3-ultra',
     })
+  })
+
+  it('describes a model fallback with display labels', () => {
+    expect(describeModelFallback('gemini-3.8-flash', 'gemini-3.5-flash-lite', {
+      'gemini-3.8-flash': 'Gemini 3.8 Flash',
+      'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+    })).toEqual({ from: 'Gemini 3.8 Flash', to: 'Gemini 3.5 Flash Lite' })
+  })
+
+  it('returns null when no fallback happened', () => {
+    expect(describeModelFallback('gemini-3.8-flash', 'gemini-3.8-flash', {})).toBeNull()
+    expect(describeModelFallback('gemini-3.8-flash', null, {})).toBeNull()
+    expect(describeModelFallback('gemini-3.8-flash', '', {})).toBeNull()
   })
 })

@@ -39,6 +39,17 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
+    key: `${PROVIDERS.OPENROUTER}:thinkingmachines/inkling:free`,
+    provider: PROVIDERS.OPENROUTER,
+    modelId: 'thinkingmachines/inkling:free',
+    label: 'Inkling (free)',
+    capabilities: {
+      supportsImage: true,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+  {
     key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
     provider: PROVIDERS.OLLAMA,
     modelId: 'gpt-oss:120b',
@@ -80,6 +91,14 @@ export function getModelDescriptor(modelId, provider = null) {
 
 export function getProviderForModel(modelId, fallback = DEFAULT_PROVIDER) {
   return getModelDescriptor(modelId)?.provider || fallback
+}
+
+export function describeModelFallback(modelId, resolvedModelId, labels = {}) {
+  if (typeof resolvedModelId !== 'string' || !resolvedModelId || resolvedModelId === modelId) {
+    return null
+  }
+  const labelFor = id => labels?.[id] || MODEL_LABELS[id] || id
+  return { from: labelFor(modelId), to: labelFor(resolvedModelId) }
 }
 
 export function isRetiredModelId(modelId) {

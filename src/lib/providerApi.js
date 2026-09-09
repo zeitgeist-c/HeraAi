@@ -7,6 +7,15 @@ export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
 const REQUEST_TIMEOUT_MS = 120_000
 const STREAM_IDLE_TIMEOUT_MS = 120_000
 
+// Any named OpenRouter model automatically falls back to the free router
+// when the model itself is at fault, so newly added models need no extra wiring.
+const OPENROUTER_ROUTER_FALLBACKABLE = new Set([
+  'model_unavailable',
+  'rate_limited',
+  'quota_exceeded',
+  'service_unavailable',
+])
+
 function createAbortError() {
   const error = new Error('Request aborted')
   error.name = 'AbortError'
@@ -210,7 +219,7 @@ function parseSseEvent(rawEvent) {
   return dataLines.join('\n').trim()
 }
 
-async function* streamOpenRouterRequest(messages, options, key, signal, fallbackImage) {
+async function* streamOpenRouterRequest(messages, options, key, signal, fallbackImage, modelId) {
   const request = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -219,7 +228,7 @@ async function* streamOpenRouterRequest(messages, options, key, signal, fallback
       'X-OpenRouter-Title': 'HeraAi',
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: modelId || OPENROUTER_MODEL,
       messages: toOpenRouterMessages(messages, options.systemInstruction, fallbackImage),
       stream: true,
     }),
@@ -248,7 +257,7 @@ async function* streamOpenRouterRequest(messages, options, key, signal, fallback
       }
       if (data.model && data.model !== resolvedModel) {
         resolvedModel = data.model
-        yield { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: OPENROUTER_MODEL, resolvedModel } }
+        yield { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: modelId || OPENROUTER_MODEL, resolvedModel } }
       }
       const choice = data.choices?.[0]
       if (choice?.finish_reason === 'error') throw createProviderError('generation_failed', 'OpenRouter stream failed')
@@ -335,15 +344,20 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
 
   const requestedModel = provider === 'ollama'
     ? (String(model || '').trim() || OLLAMA_CLOUD_MODEL)
-    : OPENROUTER_MODEL
+    : (String(model || '').trim() || OPENROUTER_MODEL)
+  const modelAttempts = provider === 'openrouter' && requestedModel !== OPENROUTER_MODEL
+    ? [requestedModel, OPENROUTER_MODEL]
+    : [requestedModel]
   let lastError = createProviderError('generation_failed', 'Generation failed')
-  for (const entry of entries) {
+  for (const attemptModel of modelAttempts) {
+    let attemptHadContent = false
+    for (const entry of entries) {
     let hasContent = false
     let pendingModelEvent = null
     try {
       const stream = provider === 'openrouter'
-        ? streamOpenRouterRequest(messages, options, entry.key.trim(), signal, fallbackImage)
-        : streamOllamaRequest(messages, options, entry.key.trim(), signal, fallbackImage, requestedModel)
+        ? streamOpenRouterRequest(messages, options, entry.key.trim(), signal, fallbackImage, attemptModel)
+        : streamOllamaRequest(messages, options, entry.key.trim(), signal, fallbackImage, attemptModel)
       for await (const event of stream) {
         if (event.event === 'model_resolved') {
           if (hasContent) yield event
@@ -353,6 +367,7 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
         if (event.event === 'chunk' && event.data?.text) {
           if (!hasContent) {
             hasContent = true
+            attemptHadContent = true
             if (pendingModelEvent) yield pendingModelEvent
             yield { event: 'key_status', data: { provider, keyId: entry.id, status: 'success' } }
           }
@@ -377,6 +392,9 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
       ].includes(lastError.code)
       if (hasContent || !retryableKeyFailure) break
     }
+  }
+    if (attemptHadContent || !OPENROUTER_ROUTER_FALLBACKABLE.has(lastError.code) || provider !== 'openrouter' || attemptModel === OPENROUTER_MODEL) break
+    yield { event: 'model_resolved', data: { provider: 'openrouter', requestedModel, resolvedModel: OPENROUTER_MODEL } }
   }
 
   yield { event: 'error', data: { code: lastError.code || 'generation_failed' } }

@@ -347,16 +347,33 @@ function normalizeTextMessages(messages) {
   return normalized
 }
 
-async function* streamGeminiWithFallback(keys, createStreamRequest, createFallbackRequest, signal, modelId) {
-  const entries = validKeys(keys)
-  if (entries.length === 0) {
-    yield { event: 'error', data: { code: 'api_key_missing', message: 'Gemini API key gerekli. Ayarlardan bir Gemini anahtari ekleyin.' } }
-    return
-  }
+const GEMINI_LITE_FALLBACK_MODELS = Object.freeze([
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+])
+const GEMINI_MODEL_FALLBACKABLE = new Set([
+  'quota_exceeded',
+  'cooldown',
+  'service_unavailable',
+  'model_unavailable',
+])
+const GEMINI_NON_RETRYABLE_FAILURE = new Set([
+  'invalid_request',
+  'safety',
+  'generation_failed',
+])
 
-  let lastError = null
-  let lastClassification = 'generation_failed'
-  const requestTimeoutMs = getGeminiRequestTimeoutMs(modelId)
+function resolveGeminiFallbackChain(modelId) {
+  const chain = [modelId]
+  for (const candidate of GEMINI_LITE_FALLBACK_MODELS) {
+    if (!chain.includes(candidate)) chain.push(candidate)
+  }
+  return chain
+}
+
+async function* attemptGeminiModel(entries, createStreamRequest, createFallbackRequest, signal, attemptModelId) {
+  const requestTimeoutMs = getGeminiRequestTimeoutMs(attemptModelId)
+  let lastFailure = null
 
   for (const entry of entries) {
     let hasStartedStreaming = false
@@ -397,15 +414,19 @@ async function* streamGeminiWithFallback(keys, createStreamRequest, createFallba
         error.name = 'EmptyResponseError'
         throw error
       }
-      return
+      return { ok: true }
     } catch (err) {
       streamRequest?.abortRequest()
       streamRequest?.cleanup()
       streamRequest = null
       if (err.name === 'AbortError' && signal?.aborted) throw err
       if (err.name === 'EmptyResponseError') {
-        yield { event: 'error', data: { code: 'empty_response', message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.' } }
-        return
+        return {
+          ok: false,
+          classification: 'empty_response',
+          code: 'empty_response',
+          message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.',
+        }
       }
       let resolvedError = err
       let status = classifyGeminiError(resolvedError)
@@ -427,52 +448,116 @@ async function* streamGeminiWithFallback(keys, createStreamRequest, createFallba
           }
           yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: 'success' } }
           yield { event: 'chunk', data: { text: fallbackText } }
-          return
+          return { ok: true }
         } catch (fallbackError) {
           if (fallbackError.name === 'AbortError' && signal?.aborted) throw fallbackError
           if (fallbackError.name === 'EmptyResponseError') {
-            yield { event: 'error', data: { code: 'empty_response', message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.' } }
-            return
+            return {
+              ok: false,
+              classification: 'empty_response',
+              code: 'empty_response',
+              message: 'Gemini bos bir yanit dondurdu. Lutfen yeniden deneyin.',
+            }
           }
           resolvedError = fallbackError
           status = classifyGeminiError(resolvedError)
         }
       }
 
-      lastError = resolvedError
-      lastClassification = status
+      lastFailure = { error: resolvedError, classification: status }
       const keyStatus = geminiKeyStatus(status)
       if (keyStatus) {
         yield { event: 'key_status', data: { provider: 'gemini', keyId: entry.id, status: keyStatus } }
       }
 
-      const nonRetryableFailure = [
-        'model_unavailable',
-        'invalid_request',
-        'safety',
-        'generation_failed',
-      ].includes(status)
-      if (hasStartedStreaming || nonRetryableFailure) {
-        logGeminiFailure(modelId, status, resolvedError)
-        yield {
-          event: 'error',
-          data: {
-            code: geminiErrorCode(status),
-            message: 'Gemini yaniti olusturulamadi.',
-          },
+      if (hasStartedStreaming || GEMINI_NON_RETRYABLE_FAILURE.has(status)) {
+        logGeminiFailure(attemptModelId, status, resolvedError)
+        return {
+          ok: false,
+          classification: status,
+          code: geminiErrorCode(status),
+          message: 'Gemini yaniti olusturulamadi.',
         }
-        return
       }
+      if (status === 'model_unavailable') {
+        logGeminiFailure(attemptModelId, status, resolvedError)
+        return { ok: false, classification: status, error: resolvedError }
+      }
+      logGeminiFailure(attemptModelId, status, resolvedError)
     } finally {
       streamRequest?.cleanup()
     }
+  }
+
+  return {
+    ok: false,
+    classification: lastFailure?.classification || null,
+    error: lastFailure?.error || null,
+    retryKeysExhausted: true,
+  }
+}
+
+async function* streamGeminiWithFallback(keys, createRequestsForModel, signal, modelId) {
+  const entries = validKeys(keys)
+  if (entries.length === 0) {
+    yield { event: 'error', data: { code: 'api_key_missing', message: 'Gemini API key gerekli. Ayarlardan bir Gemini anahtari ekleyin.' } }
+    return
+  }
+
+  const chain = resolveGeminiFallbackChain(modelId)
+  let lastClassification = 'generation_failed'
+  let lastError = null
+  let lastAttemptModel = modelId
+
+  for (const attemptModelId of chain) {
+    lastAttemptModel = attemptModelId
+    const { createStreamRequest, createFallbackRequest } = createRequestsForModel(attemptModelId)
+    const outcome = yield* attemptGeminiModel(
+      entries,
+      createStreamRequest,
+      createFallbackRequest,
+      signal,
+      attemptModelId,
+    )
+    if (outcome.ok) {
+      if (attemptModelId !== modelId) {
+        yield {
+          event: 'model_resolved',
+          data: { provider: 'gemini', requestedModel: modelId, resolvedModel: attemptModelId },
+        }
+      }
+      return
+    }
+    if (outcome.code) {
+      logGeminiFailure(attemptModelId, outcome.classification || 'generation_failed', outcome.error)
+      yield {
+        event: 'error',
+        data: {
+          code: outcome.code,
+          message: outcome.message || 'Gemini yaniti olusturulamadi.',
+        },
+      }
+      return
+    }
+    if (!outcome.classification || !GEMINI_MODEL_FALLBACKABLE.has(outcome.classification)) {
+      const code = geminiErrorCode(outcome.classification || 'generation_failed')
+      const message = outcome.classification === 'network'
+        ? 'Gemini ile baglanti kurulamadi. Internet baglantinizi ve tarayici konsolunu kontrol edin.'
+        : 'Tum Gemini anahtarlari denendi ancak yanit alinamadi.'
+      logGeminiFailure(attemptModelId, outcome.classification || 'generation_failed', outcome.error)
+      yield { event: 'error', data: { code, message } }
+      return
+    }
+    lastClassification = outcome.classification
+    lastError = outcome.error || null
+    console.warn(`Gemini ${attemptModelId} unavailable (${lastClassification}); falling back to a lighter model`)
   }
 
   const code = geminiErrorCode(lastClassification)
   const message = lastClassification === 'network'
     ? 'Gemini ile baglanti kurulamadi. Internet baglantinizi ve tarayici konsolunu kontrol edin.'
     : 'Tum Gemini anahtarlari denendi ancak yanit alinamadi.'
-  logGeminiFailure(modelId, lastClassification, lastError)
+  logGeminiFailure(lastAttemptModel, lastClassification, lastError)
   yield { event: 'error', data: { code, message } }
 }
 
@@ -492,12 +577,14 @@ async function* streamGeminiChat(messages, options = {}, geminiKeys = [], signal
 
   yield* streamGeminiWithFallback(
     geminiKeys,
-    (genAI, requestSignal) => genAI.models.generateContentStream(
-      createGeminiRequestParameters(messages, options, requestSignal, modelId)
-    ),
-    (genAI, requestSignal) => genAI.models.generateContent(
-      createGeminiRequestParameters(messages, options, requestSignal, modelId)
-    ),
+    attemptModel => ({
+      createStreamRequest: (genAI, requestSignal) => genAI.models.generateContentStream(
+        createGeminiRequestParameters(messages, options, requestSignal, attemptModel)
+      ),
+      createFallbackRequest: (genAI, requestSignal) => genAI.models.generateContent(
+        createGeminiRequestParameters(messages, options, requestSignal, attemptModel)
+      ),
+    }),
     signal,
     modelId,
   )
@@ -508,15 +595,59 @@ async function* streamGeminiVision(messages, image, options = {}, geminiKeys = [
 
   yield* streamGeminiWithFallback(
     geminiKeys,
-    (genAI, requestSignal) => genAI.models.generateContentStream(
-      createGeminiRequestParameters(messages, options, requestSignal, modelId, image)
-    ),
-    (genAI, requestSignal) => genAI.models.generateContent(
-      createGeminiRequestParameters(messages, options, requestSignal, modelId, image)
-    ),
+    attemptModel => ({
+      createStreamRequest: (genAI, requestSignal) => genAI.models.generateContentStream(
+        createGeminiRequestParameters(messages, options, requestSignal, attemptModel, image)
+      ),
+      createFallbackRequest: (genAI, requestSignal) => genAI.models.generateContent(
+        createGeminiRequestParameters(messages, options, requestSignal, attemptModel, image)
+      ),
+    }),
     signal,
     modelId,
   )
+}
+
+const REMOTE_GEMINI_FALLBACKABLE = new Set([
+  'rate_limited',
+  'quota_exceeded',
+  'service_unavailable',
+  'timeout',
+  'image_not_supported',
+  'pdf_requires_gemini',
+])
+const REMOTE_GEMINI_FALLBACK_ENTRY_MODEL = 'gemini-3.5-flash-lite'
+
+function remoteFallbackGeminiKeys(options) {
+  const keys = Array.isArray(options?.fallbackGeminiKeys) ? options.fallbackGeminiKeys : []
+  return keys.filter(entry => entry?.key?.trim())
+}
+
+async function* streamRemoteWithGeminiFallback(providerId, messages, options, providerKeys, signal, fallbackImage, modelId) {
+  const fallbackKeys = remoteFallbackGeminiKeys(options)
+  if (fallbackKeys.length === 0) {
+    yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, fallbackImage, modelId)
+    return
+  }
+  let terminalError = null
+  for await (const event of streamRemoteProvider(providerId, messages, options, providerKeys, signal, fallbackImage, modelId)) {
+    if (event?.event === 'error') {
+      terminalError = event.data
+      break
+    }
+    yield event
+  }
+  if (!terminalError) return
+  if (!REMOTE_GEMINI_FALLBACKABLE.has(terminalError?.code)) {
+    yield { event: 'error', data: terminalError }
+    return
+  }
+  console.warn(`${providerId} failed (${terminalError.code}); falling back to Gemini lite`)
+  yield {
+    event: 'model_resolved',
+    data: { provider: 'gemini', requestedModel: modelId, resolvedModel: REMOTE_GEMINI_FALLBACK_ENTRY_MODEL },
+  }
+  yield* streamGeminiChat(messages, options, fallbackKeys, signal, REMOTE_GEMINI_FALLBACK_ENTRY_MODEL)
 }
 
 export async function* streamChat(messages, options = {}, providerKeys = [], signal, model, provider) {
@@ -526,7 +657,7 @@ export async function* streamChat(messages, options = {}, providerKeys = [], sig
     yield* streamGeminiChat(messages, options, providerKeys, signal, modelId)
     return
   }
-  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, null, modelId)
+  yield* streamRemoteWithGeminiFallback(providerId, messages, options, providerKeys, signal, null, modelId)
 }
 
 export async function* streamVision(messages, image, options = {}, providerKeys = [], signal, model, provider) {
@@ -536,7 +667,7 @@ export async function* streamVision(messages, image, options = {}, providerKeys 
     yield* streamGeminiVision(messages, image, options, providerKeys, signal, modelId)
     return
   }
-  yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, image, modelId)
+  yield* streamRemoteWithGeminiFallback(providerId, messages, options, providerKeys, signal, image, modelId)
 }
 
 async function searchTavily(question, tavilyKeys, signal) {
@@ -617,6 +748,86 @@ async function searchTavily(question, tavilyKeys, signal) {
   }
 
   return { error: lastError || new Error('Tavily search failed') }
+}
+
+const DDG_TIMEOUT_MS = 15000
+const DDG_MAX_RESULTS = 8
+
+function decodeHtmlEntities(text) {
+  return String(text || '')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+function resolveDuckDuckGoUrl(href) {
+  const raw = String(href || '').replace(/&amp;/g, '&').trim()
+  if (!raw) return null
+  const redirect = raw.match(/[?&]uddg=([^&]+)/)
+  if (redirect) {
+    try {
+      const decoded = decodeURIComponent(redirect[1])
+      if (/^https?:\/\//i.test(decoded)) return decoded
+    } catch {
+      return null
+    }
+    return null
+  }
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (raw.startsWith('//')) return `https:${raw}`
+  return null
+}
+
+export function parseDuckDuckGoHtml(html) {
+  const results = []
+  if (typeof html !== 'string' || !html) return results
+  const anchorPattern = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+  let match
+  while ((match = anchorPattern.exec(html)) !== null && results.length < DDG_MAX_RESULTS) {
+    const url = resolveDuckDuckGoUrl(match[1])
+    const title = decodeHtmlEntities(match[2].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+    if (!url || !title) continue
+    const afterAnchor = html.slice(match.index + match[0].length)
+    const nextResult = afterAnchor.search(/result__title/i)
+    const window = nextResult >= 0 ? afterAnchor.slice(0, nextResult) : afterAnchor
+    const snippetMatch = window.match(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i)
+    const snippet = snippetMatch
+      ? decodeHtmlEntities(snippetMatch[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+      : ''
+    results.push({ title, url, content: snippet, score: null })
+  }
+  return results
+}
+
+async function searchDuckDuckGo(question, signal) {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, DDG_TIMEOUT_MS)
+  const abortHandler = () => controller.abort()
+  signal?.addEventListener('abort', abortHandler, { once: true })
+  try {
+    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(question)}`, {
+      headers: { Accept: 'text/html' },
+      signal: controller.signal,
+    })
+    if (!response.ok) return { error: new Error(`DuckDuckGo HTTP ${response.status}`) }
+    const html = await response.text()
+    if (/anomaly-modal/i.test(html)) return { error: new Error('DuckDuckGo bot korumasi') }
+    return { results: parseDuckDuckGoHtml(html) }
+  } catch (err) {
+    if (signal?.aborted) throw createAbortError()
+    return { error: timedOut || err?.name === 'AbortError' ? createTimeoutError() : err }
+  } finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortHandler)
+  }
 }
 
 function truncateText(text, maxLength) {
@@ -940,6 +1151,48 @@ export async function* streamResearch(
   const lastUserMessage = [...conversationMessages].reverse().find(message => message.role === 'user')
   const question = lastUserMessage?.content || ''
 
+  const queryResult = await generateResearchQuery(conversationMessages, question)
+  for (const keyStatus of queryResult.keyStatuses) {
+    yield { event: 'key_status', data: keyStatus }
+  }
+
+  async function* answerWithResults(results) {
+    const messages = conversationMessages.length > 0
+      ? [
+          ...conversationMessages.slice(0, -1),
+          {
+            ...conversationMessages[conversationMessages.length - 1],
+            content: buildResearchPrompt(question, queryResult.query, queryResult.context, results),
+          },
+        ]
+      : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, results) }]
+    for await (const evt of streamChat(messages, options, providerKeys, signal, model, provider)) {
+      yield evt
+      if (evt.event === 'error') return
+    }
+    yield {
+      event: 'sources',
+      data: {
+        sources: results.map((result, index) => ({
+          index: index + 1,
+          title: result.title,
+          url: result.url,
+        })),
+      },
+    }
+  }
+
+  if (options?.webContext?.searchMode === 'auto') {
+    const duckResult = await searchDuckDuckGo(queryResult.query, signal)
+    if (duckResult.results && duckResult.results.length > 0) {
+      yield* answerWithResults(duckResult.results)
+      return
+    }
+    yield* streamChat(conversationMessages, options, providerKeys, signal, model, provider)
+    return
+  }
+
+  let searchResult = null
   const entries = validKeys(tavilyKeys)
   if (entries.length === 0) {
     yield {
@@ -951,13 +1204,6 @@ export async function* streamResearch(
     }
     return
   }
-
-  const queryResult = await generateResearchQuery(conversationMessages, question)
-  for (const keyStatus of queryResult.keyStatuses) {
-    yield { event: 'key_status', data: keyStatus }
-  }
-
-  let searchResult = null
   for (const entry of entries) {
     searchResult = await searchTavily(queryResult.query, [entry], signal)
     if (searchResult.keyStatus) {
@@ -984,29 +1230,7 @@ export async function* streamResearch(
     return
   }
 
-  const messages = conversationMessages.length > 0
-    ? [
-        ...conversationMessages.slice(0, -1),
-        {
-          ...conversationMessages[conversationMessages.length - 1],
-          content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results),
-        },
-      ]
-    : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }]
-  for await (const evt of streamChat(messages, options, providerKeys, signal, model, provider)) {
-    yield evt
-    if (evt.event === 'error') return
-  }
-  yield {
-    event: 'sources',
-    data: {
-      sources: searchResult.results.map((result, index) => ({
-        index: index + 1,
-        title: result.title,
-        url: result.url,
-      })),
-    },
-  }
+  yield* answerWithResults(searchResult.results)
 }
 
 export async function testKey(provider, key, _model = DEFAULT_MODEL) {
