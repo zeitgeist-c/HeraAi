@@ -12,7 +12,7 @@ const retryModels = [
   'gemini-3.7-flash',
   'gemini-3.8-flash',
   'openrouter/free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
   'gpt-oss:120b',
   'nemotron-3-ultra',
 ]
@@ -24,7 +24,7 @@ const modelLabels = {
   'gemini-3.7-flash': 'Gemini 3.7 Flash',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
   'openrouter/free': 'Free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free': 'Nemotron 3 Ultra',
+  'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super',
   'gpt-oss:120b': 'GPT-OSS 120B',
   'nemotron-3-ultra': 'Nemotron 3 Ultra',
 }
@@ -174,13 +174,13 @@ describe('ChatMessage copy actions', () => {
     expect(screen.queryByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i })).not.toBeInTheDocument()
   })
 
-  it('marks duplicate retry labels with their provider', () => {
+  it('shows the provider on every retry row', () => {
     render(
       <ChatMessage
         message={{ id: 7, role: 'model', content: 'An answer' }}
         onRetry={vi.fn()}
         retryModels={[
-          { key: 'openrouter:nemotron', modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free', provider: 'openrouter', label: 'Nemotron 3 Ultra' },
+          { key: 'openrouter:nemotron', modelId: 'nvidia/nemotron-3-super-120b-a12b:free', provider: 'openrouter', label: 'Nemotron 3 Super' },
           { key: 'ollama:nemotron', modelId: 'nemotron-3-ultra', provider: 'ollama', label: 'Nemotron 3 Ultra' },
           { key: 'openrouter:free', modelId: 'openrouter/free', provider: 'openrouter', label: 'Free' },
         ]}
@@ -197,7 +197,7 @@ describe('ChatMessage copy actions', () => {
     expect(nemotronRows[0]).toHaveTextContent('OpenRouter')
     expect(nemotronRows[1]).toHaveTextContent(/Ollama/)
     const freeRow = retryDialog.querySelector('[data-retry-model="openrouter/free"]')
-    expect(freeRow).not.toHaveTextContent('OpenRouter')
+    expect(freeRow).toHaveTextContent('OpenRouter')
   })
 
   it('closes the retry model menu with Escape and restores trigger focus', () => {

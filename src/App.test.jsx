@@ -2884,7 +2884,7 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ]);
@@ -2900,7 +2900,7 @@ describe('HeraAi App', () => {
     const speedIcons = (id) => listbox.querySelector(`[data-model-id="${id}"]`).querySelector('svg');
     expect(speedIcons('gpt-oss:120b').classList.contains('lucide-zap')).toBe(true);
     expect(speedIcons('nemotron-3-ultra').classList.contains('lucide-turtle')).toBe(true);
-    expect(speedIcons('nvidia/nemotron-3-ultra-550b-a55b:free').classList.contains('lucide-turtle')).toBe(true);
+    expect(speedIcons('nvidia/nemotron-3-super-120b-a12b:free').classList.contains('lucide-gauge')).toBe(true);
     expect(speedIcons('openrouter/free').classList.contains('lucide-gauge')).toBe(true);
     expect(speedIcons('gemini-3.1-flash-lite').classList.contains('lucide-zap')).toBe(true);
     expect(speedIcons('gemini-3.5-flash-lite').classList.contains('lucide-zap')).toBe(true);
@@ -3091,7 +3091,7 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'openrouter/free',
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ]);
@@ -3180,7 +3180,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old image answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: /Nemotron 3 Ultra.*Ollama/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,

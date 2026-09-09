@@ -41,11 +41,11 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-ultra-550b-a55b:free`,
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-super-120b-a12b:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-    label: 'Nemotron 3 Ultra',
-    speed: 'slow',
+    modelId: 'nvidia/nemotron-3-super-120b-a12b:free',
+    label: 'Nemotron 3 Super',
+    speed: 'medium',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
