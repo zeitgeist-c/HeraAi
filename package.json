@@ -1,7 +1,7 @@
 {
   "name": "heraai",
   "private": true,
-  "version": "1.7.6",
+  "version": "1.7.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,7 +26,8 @@
     "react-i18next": "^16.5.4",
     "react-markdown": "^10.1.0",
     "rehype-sanitize": "^6.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.33",

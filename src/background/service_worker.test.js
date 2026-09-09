@@ -283,6 +283,32 @@ describe('background service worker browser compatibility', () => {
     });
   });
 
+  it('creates a page context-menu item on installation', async () => {
+    const mock = createChromeMock({ withSidePanel: true });
+    await loadWorker(mock);
+    const installedHandler = mock.chrome.runtime.onInstalled.addListener.mock.calls[0][0];
+    installedHandler();
+    expect(mock.chrome.contextMenus.create).toHaveBeenCalledWith({
+      id: 'heraai-page',
+      title: "Sayfayı HeraAi'ye Gönder",
+      contexts: ['page'],
+    });
+  });
+
+  it('stores the page URL for page context-menu actions', async () => {
+    const mock = createChromeMock({ withSidePanel: false });
+    await loadWorker(mock);
+    const contextHandler = mock.contextMenuListener.mock.calls[0][0];
+    contextHandler({ menuItemId: 'heraai-page', pageUrl: 'https://example.com/yazi' }, {});
+    expect(mock.chrome.storage.local.set).toHaveBeenCalledWith(
+      { pendingPageUrl: 'https://example.com/yazi' },
+      expect.any(Function),
+    );
+    expect(mock.createTab).toHaveBeenCalledWith({
+      url: 'chrome-extension://test/index.html',
+    });
+  });
+
   it('continues forwarding crop completion and cancellation without holding the response channel open', async () => {
     const mock = createChromeMock();
     const listener = await loadWorker(mock);

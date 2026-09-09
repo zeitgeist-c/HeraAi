@@ -18,7 +18,7 @@ export function LoadingFallback() {
 
 createRoot(document.getElementById('root')).render(
   <>
-    <Toaster position="bottom-right" />
+    <Toaster position="top-center" />
     <ErrorBoundary>
       <Suspense fallback={<LoadingFallback />}>
         <App />

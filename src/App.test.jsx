@@ -629,6 +629,50 @@ describe('HeraAi App', () => {
     expect(screen.queryByText(/pasted-image-/)).not.toBeInTheDocument();
   });
 
+  it('pastes clipboard text into the composer via the paste button', async () => {
+    const readText = vi.fn().mockResolvedValue('https://example.com/pasted-link');
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { readText }, configurable: true });
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+      const pasteButton = document.querySelector('svg.lucide-clipboard-paste')?.closest('button');
+      expect(pasteButton).toBeInTheDocument();
+      fireEvent.click(pasteButton);
+
+      await waitFor(() => expect(document.querySelector('textarea')).toHaveValue('https://example.com/pasted-link'));
+      expect(readText).toHaveBeenCalled();
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else delete navigator.clipboard;
+    }
+  });
+
+  it('adds the current page URL to the composer via the page button', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const pageButton = document.querySelector('svg.lucide-link-2')?.closest('button');
+    expect(pageButton).toBeInTheDocument();
+    fireEvent.click(pageButton);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toHaveValue('https://example.com/article'));
+    expect(global.chrome.tabs.query).toHaveBeenCalledWith({ active: true, currentWindow: true });
+  });
+
+  it('leaves the composer empty when the current page URL cannot be read', async () => {
+    global.chrome.tabs.query.mockResolvedValueOnce([{ id: 2 }]);
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const pageButton = document.querySelector('svg.lucide-link-2')?.closest('button');
+    fireEvent.click(pageButton);
+
+    await waitFor(() => expect(global.chrome.tabs.query).toHaveBeenCalled());
+    expect(document.querySelector('textarea')).toHaveValue('');
+  });
+
   it('shows the user message and thinking state before API key resolution finishes', async () => {
     let releaseKeyLookup;
     global.chrome.storage.local.get.mockImplementation((keys, callback) => {
@@ -1633,6 +1677,35 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(input.value).toBe('Existing text\nContext menu text'));
     expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('appends the page URL sent from the page context menu', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea') || screen.getByRole('textbox');
+
+    triggerStorageChange({
+      pendingPageUrl: {
+        newValue: 'https://example.com/yazi',
+      },
+    });
+
+    await waitFor(() => expect(input.value).toBe('https://example.com/yazi'));
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('appends a quick prompt template to the composer', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('quick-prompt-summarize'));
+
+    await waitFor(() => expect(document.querySelector('textarea')).toHaveValue(
+      'Summarize the content below as bullet points:',
+    ));
   });
 
   it('should keep following new assistant content when the chat is already near the bottom', async () => {

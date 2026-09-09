@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, ClipboardPaste, Link2, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -39,12 +39,14 @@ import {
   migrateLegacySessionAttachments,
   putAttachment,
 } from './lib/attachmentStore'
-import { exportSessions, importSessions } from './lib/importExport'
+import { exportSessions, exportSessionMarkdown, importSessions, sessionToMarkdown } from './lib/importExport'
+import { QUICK_PROMPTS, resolveQuickPrompt } from './lib/quickPrompts'
 import {
   extractPublicUrls,
   isUrlOnlyText,
   listPublicUrls,
   MAX_PUBLIC_URLS,
+  normalizePublicUrl,
   removePublicUrlFromText,
 } from './lib/urlContext'
 import {
@@ -540,6 +542,16 @@ function App() {
       mountedRef.current = false
     }
   }, [])
+
+  useEffect(() => {
+    focusComposer()
+    const handleWindowFocus = () => {
+      if (showSettings || showHistory || showStats || showShortcuts) return
+      focusComposer()
+    }
+    window.addEventListener('focus', handleWindowFocus)
+    return () => window.removeEventListener('focus', handleWindowFocus)
+  }, [focusComposer, showSettings, showHistory, showStats, showShortcuts])
 
   const syncScrollControls = useCallback(() => {
     const element = scrollRef.current
@@ -2049,6 +2061,12 @@ function App() {
       if (result.selectedText) {
         setInput(previous => appendToInputValue(previous, result.selectedText))
         void chrome.storage.local.remove(['selectedText'])
+        focusComposer()
+      }
+      if (result.pendingPageUrl) {
+        setInput(previous => appendToInputValue(previous, result.pendingPageUrl))
+        void chrome.storage.local.remove(['pendingPageUrl'])
+        focusComposer()
       }
 
       let generation = result.activeGeneration || null
@@ -2170,6 +2188,12 @@ function App() {
       if (changes.selectedText?.newValue) {
         setInput(previous => appendToInputValue(previous, changes.selectedText.newValue))
         void chrome.storage.local.remove(['selectedText'])
+        focusComposer()
+      }
+      if (changes.pendingPageUrl?.newValue) {
+        setInput(previous => appendToInputValue(previous, changes.pendingPageUrl.newValue))
+        void chrome.storage.local.remove(['pendingPageUrl'])
+        focusComposer()
       }
       if (!initializationComplete) {
         if (changes.sessions) {
@@ -2280,7 +2304,7 @@ function App() {
       }
       chrome.storage.onChanged.removeListener(storageListener)
     }
-  }, [applyTheme, enqueueStorageWrite, persistAuthoritativeSessionRepair, setGenerating, stopAssistantDisplayQueue])
+  }, [applyTheme, enqueueStorageWrite, focusComposer, persistAuthoritativeSessionRepair, setGenerating, stopAssistantDisplayQueue])
 
   useLayoutEffect(() => {
     const container = scrollRef.current
@@ -2804,6 +2828,31 @@ function App() {
     exportSessions(sessions)
     toast.success(t('chat.exported'))
   }, [sessions, t])
+
+  const handleExportMarkdown = useCallback(() => {
+    const session = sessionsRef.current.find(item => item?.id === activeSessionIdRef.current)
+    if (!session || (session.messages || []).length === 0) {
+      toast.error(t('chat.no_history'))
+      return
+    }
+    exportSessionMarkdown(session)
+    toast.success(t('chat.exported'))
+  }, [t])
+
+  const handleCopyChat = useCallback(async () => {
+    const session = sessionsRef.current.find(item => item?.id === activeSessionIdRef.current)
+    if (!session || (session.messages || []).length === 0) {
+      toast.error(t('chat.no_history'))
+      return
+    }
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable')
+      await navigator.clipboard.writeText(sessionToMarkdown(session))
+      toast.success(t('chat.tooltips.copied'))
+    } catch {
+      toast.error(t('chat.tooltips.copy_failed'))
+    }
+  }, [t])
 
   const handleImport = useCallback(async (e) => {
     const file = e.target.files?.[0]
@@ -3858,6 +3907,43 @@ function App() {
     await processAttachmentFiles(pastedImages, { append: true })
   }, [focusComposer, processAttachmentFiles])
 
+  const handlePasteFromClipboard = useCallback(async () => {
+    if (isGeneratingRef.current || dictationPhaseRef.current !== 'idle') return
+    try {
+      const text = await navigator.clipboard?.readText()
+      if (typeof text !== 'string' || !text) {
+        toast.error(t('chat.paste_failed'))
+        return
+      }
+      setInput(previous => appendToInputValue(previous, text))
+      window.requestAnimationFrame(() => focusComposer())
+    } catch {
+      toast.error(t('chat.paste_failed'))
+    }
+  }, [focusComposer, t])
+
+  const handleAddCurrentPage = useCallback(async () => {
+    if (isGeneratingRef.current || dictationPhaseRef.current !== 'idle') return
+    try {
+      const queryTabs = typeof chrome !== 'undefined' ? chrome.tabs?.query : null
+      if (typeof queryTabs !== 'function') {
+        throw Object.assign(new Error('Tabs API is unavailable'), { code: 'url_invalid' })
+      }
+      const tabs = await queryTabs.call(chrome.tabs, { active: true, currentWindow: true })
+      const url = tabs?.[0]?.url
+      if (!url) {
+        throw Object.assign(new Error('No page URL'), { code: 'url_invalid' })
+      }
+      const normalized = normalizePublicUrl(url)
+      setInput(previous => appendToInputValue(previous, normalized))
+      window.requestAnimationFrame(() => focusComposer())
+    } catch (error) {
+      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+        defaultValue: error?.message || t('chat.connection_error'),
+      }))
+    }
+  }, [focusComposer, t])
+
   const hasDraggedFiles = useCallback(dataTransfer => (
     Array.from(dataTransfer?.types || []).includes('Files')
   ), [])
@@ -4131,6 +4217,8 @@ function App() {
         onHistory={() => setShowHistory(true)}
         onClear={requestBulkDelete}
         onExport={handleExport}
+        onExportMarkdown={handleExportMarkdown}
+        onCopyChat={handleCopyChat}
         onImport={handleImport}
         onSettings={() => setShowSettings(true)}
         onStats={() => setShowStats(true)}
@@ -4271,8 +4359,27 @@ function App() {
             </div>
           )}
 
+          {!isGenerating && dictationPhase === 'idle' && !showSettings && (
+            <div className="flex gap-1.5 overflow-x-auto px-3 pb-1 pt-2">
+              {QUICK_PROMPTS.map(prompt => (
+                <button
+                  key={prompt.id}
+                  type="button"
+                  data-testid={`quick-prompt-${prompt.id}`}
+                  onClick={() => {
+                    setInput(previous => appendToInputValue(previous, resolveQuickPrompt(prompt, i18n.language)))
+                    focusComposer()
+                  }}
+                  className="shrink-0 rounded-full border border-border/70 bg-secondary/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {t(prompt.labelKey)}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={composerInputRef}
+            autoFocus
             value={typeof input === 'string' ? input : ''}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -4289,7 +4396,7 @@ function App() {
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 className="hidden"
-                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.csv,.json,.xml,.html,.htm,.md"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,.docx,.xlsx,.xls,.txt,.csv,.json,.xml,.html,.htm,.md"
                 multiple
               />
               <button
@@ -4430,6 +4537,26 @@ function App() {
               >
                 <Lightbulb className="h-4 w-4" />
               </button>
+              <button
+                type="button"
+                title={t('chat.tooltips.paste_input')}
+                aria-label={t('chat.tooltips.paste_input')}
+                onClick={handlePasteFromClipboard}
+                disabled={isGenerating || dictationPhase !== 'idle'}
+                className={getQuickActionClass()}
+              >
+                <ClipboardPaste className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t('chat.tooltips.add_current_page')}
+                aria-label={t('chat.tooltips.add_current_page')}
+                onClick={handleAddCurrentPage}
+                disabled={isGenerating || dictationPhase !== 'idle'}
+                className={getQuickActionClass()}
+              >
+                <Link2 className="h-4 w-4" />
+              </button>
             </div>
 
             <button
@@ -4455,8 +4582,8 @@ function App() {
             modelLabels={localizedModelLabels}
             onModelChange={handleModelChange}
           />
-          <p className="min-w-0 flex-1 truncate text-right text-[11px] leading-none text-muted-foreground/55" title={t('chat.powered_by')}>
-            {t('chat.powered_by')}
+          <p data-testid="composer-disclaimer" className="min-w-0 flex-1 text-right text-[11px] leading-tight text-muted-foreground/55" title={t('chat.ai_disclaimer')}>
+            {t('chat.ai_disclaimer')}
           </p>
         </div>
       </div>
