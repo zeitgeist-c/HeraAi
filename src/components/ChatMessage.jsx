@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { useTranslation } from 'react-i18next'
-import toast from 'react-hot-toast'
+import { notifyError, notifySuccess } from '../lib/notify'
 
 import { getMessageDisplayContent } from '../lib/messageDisplay'
 
@@ -16,10 +16,10 @@ async function copyText(text, { onSuccess, successMessage, errorMessage }) {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable')
     await navigator.clipboard.writeText(text)
     onSuccess()
-    toast.success(successMessage)
+    notifySuccess(successMessage)
   } catch (error) {
     console.error('Clipboard copy failed', error)
-    toast.error(errorMessage)
+    notifyError(errorMessage)
   }
 }
 

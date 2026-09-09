@@ -2339,7 +2339,7 @@ describe('HeraAi App', () => {
       'globe',
       'scan-text',
       'languages',
-      'file-text',
+      'text-align-start',
       'lightbulb',
     ];
     const composer = document.querySelector('textarea').closest('.hera-surface');
@@ -3035,7 +3035,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /PDF attachments are supported only|PDF ekleri yalnızca/i,
-    )));
+    ), expect.any(Object)));
     expect(api.streamChat).not.toHaveBeenCalled();
     expect(api.streamVision).not.toHaveBeenCalled();
     expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
@@ -3073,7 +3073,7 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,
-    )));
+    ), expect.any(Object)));
     expect(api.streamChat).not.toHaveBeenCalled();
     expect(api.streamVision).not.toHaveBeenCalled();
     expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (

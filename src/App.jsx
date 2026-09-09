@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, TextAlignStart, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
+import { notifyError, notifySuccess } from './lib/notify'
 
 import { useTranslation } from 'react-i18next'
 
@@ -1013,7 +1013,7 @@ function App() {
       ? nextTitle.trim().slice(0, SESSION_TITLE_MAX_LENGTH)
       : ''
     if (!normalizedTitle) {
-      toast.error(t('chat.session_title.empty_error', {
+      notifyError(t('chat.session_title.empty_error', {
         defaultValue: 'Chat name cannot be empty.',
       }))
       return false
@@ -1030,12 +1030,12 @@ function App() {
       isTitleCustom: true,
     }).then((saved) => {
       if (saved) {
-        toast.success(t('chat.session_title.renamed', {
+        notifySuccess(t('chat.session_title.renamed', {
           defaultValue: 'Chat renamed.',
         }))
       }
     }).catch(() => {
-      toast.error(t('chat.session_title.save_error', {
+      notifyError(t('chat.session_title.save_error', {
         defaultValue: 'Chat name could not be saved.',
       }))
     })
@@ -1048,7 +1048,7 @@ function App() {
     void updateSessionMetadata(sessionId, {
       isStarred: currentSession.isStarred !== true,
     }).catch(() => {
-      toast.error(t('chat.bulk_delete.save_error', {
+      notifyError(t('chat.bulk_delete.save_error', {
         defaultValue: 'Chat could not be updated.',
       }))
     })
@@ -1471,11 +1471,11 @@ function App() {
 
         const isVisibleAtCommit = generation.sessionId === activeSessionIdRef.current
         if (effectiveGenerationStatus === 'error' && isVisibleAtCommit) {
-          toast.error(t(`chat.generation_errors.${generation.errorCode || 'generation_failed'}`, {
+          notifyError(t(`chat.generation_errors.${generation.errorCode || 'generation_failed'}`, {
             defaultValue: t('chat.connection_error'),
           }))
         } else if (effectiveGenerationStatus === 'interrupted' && isVisibleAtCommit) {
-          toast.error(t('chat.status.interrupted'))
+          notifyError(t('chat.status.interrupted'))
         }
 
         if (finalizationRetryRef.current.jobId === generation.jobId) {
@@ -1518,7 +1518,7 @@ function App() {
             timerId: null,
           }
           setGenerating(false)
-          toast.error(t('chat.connection_error'))
+          notifyError(t('chat.connection_error'))
           return
         }
 
@@ -1722,7 +1722,7 @@ function App() {
       } else if (message?.type === 'DONE' || message?.type === 'CANCEL_DONE') {
         handleGenerationState(message.activeGeneration || message.generation || message)
       } else if (message?.type === 'START_REJECTED') {
-        toast.error(t(`chat.generation_errors.${message.errorCode || 'already_running'}`, {
+        notifyError(t(`chat.generation_errors.${message.errorCode || 'already_running'}`, {
           defaultValue: t('chat.connection_error'),
         }))
       }
@@ -1816,7 +1816,7 @@ function App() {
                   ])
                   return [...previous, ref]
                 } catch (error) {
-                  toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`))
+                  notifyError(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`))
                   void deleteAttachment(ref.id).catch(cleanupError => {
                     console.error('Rejected screenshot cleanup failed', cleanupError)
                   })
@@ -1826,7 +1826,7 @@ function App() {
             }
           } catch (err) {
             console.error("Screenshot error", err);
-            toast.error(t('chat.file_error'))
+            notifyError(t('chat.file_error'))
           } finally {
             setGenerating(Boolean(activeGenerationRef.current?.jobId));
             cropProcessingRef.current = false;
@@ -2549,7 +2549,7 @@ function App() {
           console.error('Generation cancellation reconciliation failed', reconciliationError)
           if (mountedRef.current && activeGenerationRef.current?.jobId === generation.jobId) {
             setGenerating(true)
-            toast.error(t('chat.connection_error'))
+            notifyError(t('chat.connection_error'))
           }
         }
       } finally {
@@ -2629,7 +2629,7 @@ function App() {
       if (activeGenerationRef.current?.sessionId === id) {
         await cancelActiveGeneration('session_deleted')
         if (activeGenerationRef.current?.jobId) {
-          toast.error(t('chat.bulk_delete.cancel_failed', {
+          notifyError(t('chat.bulk_delete.cancel_failed', {
             defaultValue: 'The response could not be stopped, so the chat was not deleted.',
           }))
           return
@@ -2703,7 +2703,7 @@ function App() {
       void cleanupOrphanAttachments(result.nextSessions).catch(error => console.error('Attachment cleanup failed', error))
     } catch (error) {
       console.error('Chat deletion failed', error)
-      toast.error(t('chat.bulk_delete.error', {
+      notifyError(t('chat.bulk_delete.error', {
         defaultValue: 'Chat could not be deleted.',
       }))
     }
@@ -2712,7 +2712,7 @@ function App() {
   const requestBulkDelete = useCallback(() => {
     const unstarredCount = sessionsRef.current.filter(session => session?.isStarred !== true).length
     if (unstarredCount === 0) {
-      toast(t('chat.bulk_delete.none', {
+      notifySuccess(t('chat.bulk_delete.none', {
         defaultValue: 'There are no unstarred chats to delete.',
       }))
       return
@@ -2743,7 +2743,7 @@ function App() {
       ) {
         await cancelActiveGeneration('clear_history')
         if (activeGenerationRef.current?.jobId) {
-          toast.error(t('chat.bulk_delete.cancel_failed', {
+          notifyError(t('chat.bulk_delete.cancel_failed', {
             defaultValue: 'The response could not be stopped, so the chats were not deleted.',
           }))
           return
@@ -2846,13 +2846,13 @@ function App() {
       }
 
       setShowBulkDeleteConfirm(false)
-      toast.success(t('chat.bulk_delete.success', {
+      notifySuccess(t('chat.bulk_delete.success', {
         count: result.deletedCount,
         defaultValue: `${result.deletedCount} unstarred chats deleted.`,
       }))
     } catch (error) {
       console.error('Bulk chat deletion failed', error)
-      toast.error(t('chat.bulk_delete.error', {
+      notifyError(t('chat.bulk_delete.error', {
         defaultValue: 'Chats could not be deleted.',
       }))
     } finally {
@@ -2862,35 +2862,35 @@ function App() {
 
   const handleExport = useCallback(() => {
     if (sessions.length === 0) {
-      toast.error(t('chat.no_history'))
+      notifyError(t('chat.no_history'))
       return
     }
     exportSessions(sessions)
-    toast.success(t('chat.exported'))
+    notifySuccess(t('chat.exported'))
   }, [sessions, t])
 
   const handleExportMarkdown = useCallback(() => {
     const session = sessionsRef.current.find(item => item?.id === activeSessionIdRef.current)
     if (!session || (session.messages || []).length === 0) {
-      toast.error(t('chat.no_history'))
+      notifyError(t('chat.no_history'))
       return
     }
     exportSessionMarkdown(session)
-    toast.success(t('chat.exported'))
+    notifySuccess(t('chat.exported'))
   }, [t])
 
   const handleCopyChat = useCallback(async () => {
     const session = sessionsRef.current.find(item => item?.id === activeSessionIdRef.current)
     if (!session || (session.messages || []).length === 0) {
-      toast.error(t('chat.no_history'))
+      notifyError(t('chat.no_history'))
       return
     }
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable')
       await navigator.clipboard.writeText(sessionToMarkdown(session))
-      toast.success(t('chat.tooltips.copied'))
+      notifySuccess(t('chat.chat_copied'))
     } catch {
-      toast.error(t('chat.tooltips.copy_failed'))
+      notifyError(t('chat.tooltips.copy_failed'))
     }
   }, [t])
 
@@ -2901,7 +2901,7 @@ function App() {
     try {
       await cancelActiveGeneration('import')
       if (activeGenerationRef.current?.jobId) {
-        toast.error(t('chat.connection_error'))
+        notifyError(t('chat.connection_error'))
         e.target.value = ''
         return
       }
@@ -2941,9 +2941,9 @@ function App() {
       setMessages(messagesRef.current)
       setAttachments([])
       stickToBottomOnNextRender()
-      toast.success(t('chat.imported'))
+      notifySuccess(t('chat.imported'))
     } catch (err) {
-      toast.error(err.message || t('chat.import_error'))
+      notifyError(err.message || t('chat.import_error'))
     }
     e.target.value = ''
   }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
@@ -3008,13 +3008,13 @@ function App() {
     const speechText = normalizeMarkdownForSpeech(message.content, t('chat.code_block_skipped'))
     if (!speechText) return
     if (speechText.length > TTS_MAX_CHARS) {
-      toast.error(t('chat.speech_too_long'))
+      notifyError(t('chat.speech_too_long'))
       return
     }
 
     const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext
     if (!AudioContextClass) {
-      toast.error(t('chat.speech_failed'))
+      notifyError(t('chat.speech_failed'))
       return
     }
     if (!speechContextRef.current || speechContextRef.current.state === 'closed') {
@@ -3024,7 +3024,7 @@ function App() {
 
     const resolution = await resolveKeysForRequest('gemini')
     if (!resolution.keys.length) {
-      toast.error(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
+      notifyError(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
       return
     }
 
@@ -3051,7 +3051,7 @@ function App() {
     } catch (error) {
       if (error?.name !== 'AbortError') {
         console.error('Gemini speech generation failed', error)
-        toast.error(t('chat.speech_failed'))
+        notifyError(t('chat.speech_failed'))
       }
     } finally {
       if (epoch === speechEpochRef.current) {
@@ -3099,7 +3099,7 @@ function App() {
       })
       if (controller.signal.aborted) return
       if (!transcript) {
-        toast.error(t('chat.voice_empty'))
+        notifyError(t('chat.voice_empty'))
         return
       }
       setInput(current => appendToInputValue(current, transcript))
@@ -3108,7 +3108,7 @@ function App() {
     } catch (error) {
       if (error?.name !== 'AbortError') {
         console.error('Gemini dictation failed', error)
-        toast.error(t('chat.voice_failed'))
+        notifyError(t('chat.voice_failed'))
       }
     } finally {
       if (dictationAbortRef.current === controller) dictationAbortRef.current = null
@@ -3187,12 +3187,12 @@ function App() {
   const startDictation = useCallback(async () => {
     if (isGenerating || dictationPhaseRef.current !== 'idle') return
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      toast.error(t('chat.voice_error'))
+      notifyError(t('chat.voice_error'))
       return
     }
     const resolution = await resolveKeysForRequest('gemini')
     if (!resolution.keys.length) {
-      toast.error(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
+      notifyError(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
       return
     }
     stopSpeech()
@@ -3202,7 +3202,7 @@ function App() {
     if (!await requestMicrophonePermission()) {
       if (startEpoch !== dictationStartEpochRef.current) return
       resetDictation()
-      toast.error(t('chat.voice_permission_denied'))
+      notifyError(t('chat.voice_permission_denied'))
       return
     }
     if (startEpoch !== dictationStartEpochRef.current) return
@@ -3233,7 +3233,7 @@ function App() {
         else resetDictation()
       }
       recorder.onerror = () => {
-        toast.error(t('chat.voice_failed'))
+        notifyError(t('chat.voice_failed'))
         resetDictation()
       }
       recorder.start()
@@ -3249,7 +3249,7 @@ function App() {
       console.error('Microphone recording failed', error)
       releaseDictationStream()
       resetDictation()
-      toast.error(error?.name === 'NotAllowedError' ? t('chat.voice_permission_denied') : t('chat.voice_error'))
+      notifyError(error?.name === 'NotAllowedError' ? t('chat.voice_permission_denied') : t('chat.voice_error'))
     }
   }, [isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, stopSpeech, t])
 
@@ -3310,7 +3310,7 @@ function App() {
       && existingContextUrls.length > 0
     if (!userText && draftAttachments.length === 0) return
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
-      toast.error(t('chat.generation_errors.already_running', {
+      notifyError(t('chat.generation_errors.already_running', {
         defaultValue: t('chat.connection_error'),
       }))
       return
@@ -3347,7 +3347,7 @@ function App() {
         explicitUrls = []
         mode = 'chat'
       } else {
-        toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+        notifyError(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
           defaultValue: error?.message || t('chat.connection_error'),
         }))
         return
@@ -3370,26 +3370,26 @@ function App() {
       requestProvider !== 'gemini'
       && sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
     ) {
-      toast.error(t('chat.generation_errors.pdf_requires_gemini'))
+      notifyError(t('chat.generation_errors.pdf_requires_gemini'))
       return
     }
     if (
       MODEL_CAPABILITIES[requestModel]?.supportsImage === false
       && sourceAttachments.some(attachment => attachment?.mimeType?.startsWith('image/'))
     ) {
-      toast.error(t('chat.generation_errors.image_not_supported'))
+      notifyError(t('chat.generation_errors.image_not_supported'))
       return
     }
     try {
       validateAttachmentGroup([], sourceAttachments)
     } catch (error) {
-      toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
+      notifyError(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
         defaultValue: error?.message || t('chat.file_error'),
       }))
       return
     }
     if (!retryUserMessage && requestUrls.length > MAX_PUBLIC_URLS) {
-      toast.error(t('chat.generation_errors.url_limit_exceeded'))
+      notifyError(t('chat.generation_errors.url_limit_exceeded'))
       return
     }
     const modeRequestUrls = mode === 'web' ? requestUrls : []
@@ -3587,7 +3587,7 @@ function App() {
         setGenerating(false)
       }
       if (activeSessionIdRef.current === requestSessionId) {
-        toast.error(t(`chat.generation_errors.${errorCode}`, {
+        notifyError(t(`chat.generation_errors.${errorCode}`, {
           defaultValue: t('chat.connection_error'),
         }))
       }
@@ -3678,7 +3678,7 @@ function App() {
         console.error('Generation start reconciliation failed', reconciliationError)
         if (mountedRef.current && activeGenerationRef.current?.jobId === jobId) {
           setGenerating(true)
-          toast.error(t('chat.connection_error'))
+          notifyError(t('chat.connection_error'))
         }
       }
     }
@@ -3727,7 +3727,7 @@ function App() {
           totalTextChars = nextTextChars
         } catch (error) {
           console.error('File processing error', error)
-          toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
+          notifyError(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
             defaultValue: error?.message || t('chat.file_error'),
           }))
         }
@@ -3814,7 +3814,7 @@ function App() {
       const targetWindow = windows.find(w => w.type === 'normal')
       
       if (!targetWindow) {
-        toast.error(t('chat.screenshot_no_tab'));
+        notifyError(t('chat.screenshot_no_tab'));
         return;
       }
 
@@ -3826,7 +3826,7 @@ function App() {
       ) return
 
       if (!tab || !tab.id) {
-        toast.error(t('chat.screenshot_no_tab'));
+        notifyError(t('chat.screenshot_no_tab'));
         return;
       }
 
@@ -3834,7 +3834,7 @@ function App() {
       const blocked = url.startsWith('chrome://') || url.startsWith('about:') ||
         url.startsWith('edge://') || url === '';
       if (blocked) {
-        toast.error(t('chat.screenshot_blocked'));
+        notifyError(t('chat.screenshot_blocked'));
         return;
       }
 
@@ -3879,7 +3879,7 @@ function App() {
       cropOperation.phase = 'active'
       setIsCropActive(true)
       void updateStats('screenshot')
-      toast(t('chat.tooltips.screenshot_hint'));
+      notifySuccess(t('chat.tooltips.screenshot_hint'));
     } catch (e) {
       if (
         cropOperation.cancelRequested
@@ -3890,9 +3890,9 @@ function App() {
       console.error('Initiate screenshot error', e);
       const msg = e?.message || '';
       if (msg.includes('Cannot access') || msg.includes('chrome://')) {
-        toast.error(t('chat.screenshot_blocked'));
+        notifyError(t('chat.screenshot_blocked'));
       } else {
-        toast.error(t('chat.file_error'));
+        notifyError(t('chat.file_error'));
       }
     } finally {
       cropTogglePendingRef.current = false
@@ -3974,7 +3974,7 @@ function App() {
       setInput(previous => appendToInputValue(previous, normalized))
       window.requestAnimationFrame(() => focusComposer())
     } catch (error) {
-      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+      notifyError(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
         defaultValue: error?.message || t('chat.connection_error'),
       }))
     }
@@ -4028,7 +4028,7 @@ function App() {
   const cancelStream = useCallback(() => {
     if (activeGenerationRef.current?.jobId) {
       void cancelActiveGeneration('user')
-      toast.success(t('chat.cancelled'))
+      notifySuccess(t('chat.cancelled'))
     }
   }, [cancelActiveGeneration, t])
 
@@ -4548,7 +4548,7 @@ function App() {
                 disabled={isGenerating || dictationPhase !== 'idle'}
                 className={getQuickActionClass(activeMode === 'summarize')}
               >
-                <FileText className="h-4 w-4" />
+                <TextAlignStart className="h-4 w-4" />
               </button>
               <button
                 type="button"

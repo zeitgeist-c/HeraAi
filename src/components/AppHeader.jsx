@@ -308,7 +308,7 @@ function AppHeader({
             <div
               role="menu"
               aria-label={t('chat.tooltips.more')}
-              className="hera-menu absolute right-0 top-10 w-56 overflow-hidden rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/10"
+              className="hera-menu absolute right-0 top-10 w-44 overflow-hidden rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/10"
             >
               <button
                 type="button"

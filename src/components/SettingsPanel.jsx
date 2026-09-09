@@ -13,7 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import toast from 'react-hot-toast'
+import { notifyError, notifySuccess } from '../lib/notify'
 import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
@@ -124,12 +124,12 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     }
     const rawKey = rawKeys[provider] || ''
     if (!rawKey.trim()) {
-      toast.error(t('setup.keys.empty_error'))
+      notifyError(t('setup.keys.empty_error'))
       return
     }
     try {
       await addKey(provider, rawKey)
-      toast.success(t('setup.keys.add_success'))
+      notifySuccess(t('setup.keys.add_success'))
       if (provider === 'gemini') setNewGeminiKey('')
       else if (provider === 'tavily') setNewTavilyKey('')
       else if (provider === 'openrouter') setNewOpenRouterKey('')
@@ -137,16 +137,16 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       await refreshKeys(provider)
     } catch (err) {
       if (err.message === 'key_duplicate_error') {
-        toast.error(t('setup.keys.duplicate_error'))
+        notifyError(t('setup.keys.duplicate_error'))
       } else {
-        toast.error(t('setup.keys.add_failed'))
+        notifyError(t('setup.keys.add_failed'))
       }
     }
   }
 
   const handleRemoveKey = async (provider, id) => {
     await removeKey(provider, id)
-    toast.success(t('setup.keys.delete_success'))
+    notifySuccess(t('setup.keys.delete_success'))
     await refreshKeys(provider)
   }
 
@@ -188,19 +188,19 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     try {
       const rawKey = await getRawKey(provider, id)
       if (!rawKey) {
-        toast.error(t('setup.keys.test_failed'))
+        notifyError(t('setup.keys.test_failed'))
         return
       }
       const result = await testKey(provider, rawKey, currentModel)
       await applyTestResult(provider, id, result)
       await refreshKeys(provider)
       if (result.success) {
-        toast.success(t('setup.keys.test_success'))
+        notifySuccess(t('setup.keys.test_success'))
       } else {
-        toast.error(friendlyTestMessage(t, result.errorType))
+        notifyError(friendlyTestMessage(t, result.errorType))
       }
     } catch {
-      toast.error(t('setup.keys.test_failed'))
+      notifyError(t('setup.keys.test_failed'))
     } finally {
       setTestingKeyId(null)
     }
@@ -244,7 +244,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
 
     chrome.storage.local.set(newConfig, () => {
       onSave(newConfig)
-      toast.success(t('setup.api.saved_success'))
+      notifySuccess(t('setup.api.saved_success'))
     })
   }
 
