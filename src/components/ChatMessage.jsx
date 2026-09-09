@@ -115,6 +115,11 @@ const ChatMessage = ({
         : model)
     : []
   const hasRetryModelChoices = availableRetryModels.length > 0
+  const retryLabelCounts = availableRetryModels.reduce((counts, model) => {
+    const label = model.label || modelLabels[model.modelId] || model.modelId
+    counts[label] = (counts[label] || 0) + 1
+    return counts
+  }, {})
   const requestedModelLabel = typeof message.model === 'string' && message.model
     ? (modelLabels[message.model] || message.model)
     : ''
@@ -254,6 +259,8 @@ const ChatMessage = ({
           {availableRetryModels.map((model) => {
             const modelId = model.modelId
             const isCurrentModel = modelId === currentModel
+            const rowLabel = model.label || modelLabels[modelId] || modelId
+            const showProvider = retryLabelCounts[rowLabel] > 1 && Boolean(model.provider)
             return (
               <button
                 key={model.key || modelId}
@@ -276,8 +283,13 @@ const ChatMessage = ({
                   {isCurrentModel && <Check className="h-2.5 w-2.5" />}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {model.label || modelLabels[modelId] || modelId}
+                  {rowLabel}
                 </span>
+                {showProvider && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {t(`chat.model_providers.${model.provider}`)}
+                  </span>
+                )}
                 {isCurrentModel && (
                   <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
                     {t('chat.retry_model.default')}

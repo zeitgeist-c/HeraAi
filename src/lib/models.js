@@ -9,11 +9,12 @@ export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
 export const DEFAULT_OLLAMA_MODEL = 'nemotron-3-ultra'
 export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud'])
 
-const geminiModel = (modelId, label) => ({
+const geminiModel = (modelId, label, speed) => ({
   key: `${PROVIDERS.GEMINI}:${modelId}`,
   provider: PROVIDERS.GEMINI,
   modelId,
   label,
+  ...(speed ? { speed } : {}),
   capabilities: {
     supportsImage: true,
     supportsPdf: true,
@@ -22,16 +23,17 @@ const geminiModel = (modelId, label) => ({
 })
 
 export const MODEL_CATALOG = Object.freeze([
-  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'),
-  geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'),
-  geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash'),
-  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash'),
-  geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash'),
+  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', 'fast'),
+  geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite', 'fast'),
+  geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash', 'medium'),
+  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'slow'),
+  geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'slow'),
   {
     key: `${PROVIDERS.OPENROUTER}:openrouter/free`,
     provider: PROVIDERS.OPENROUTER,
     modelId: 'openrouter/free',
     label: 'Free',
+    speed: 'medium',
     capabilities: {
       supportsImage: true,
       supportsPdf: false,
@@ -39,12 +41,13 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:thinkingmachines/inkling:free`,
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-ultra-550b-a55b:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'thinkingmachines/inkling:free',
-    label: 'Inkling',
+    modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+    label: 'Nemotron 3 Ultra',
+    speed: 'slow',
     capabilities: {
-      supportsImage: true,
+      supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
     },
@@ -55,6 +58,7 @@ export const MODEL_CATALOG = Object.freeze([
     modelId: 'gpt-oss:120b',
     label: 'GPT-OSS 120B',
     labelKey: 'chat.model_labels.gpt_oss_120b',
+    speed: 'fast',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -67,6 +71,7 @@ export const MODEL_CATALOG = Object.freeze([
     modelId: 'nemotron-3-ultra',
     label: 'Nemotron 3 Ultra',
     labelKey: 'chat.model_labels.nemotron_3_ultra',
+    speed: 'slow',
     capabilities: {
       supportsImage: false,
       supportsPdf: false,

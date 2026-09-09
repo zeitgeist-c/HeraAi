@@ -18,10 +18,26 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.7-flash'],
       ['gemini', 'gemini-3.8-flash'],
       ['openrouter', 'openrouter/free'],
-      ['openrouter', 'thinkingmachines/inkling:free'],
+      ['openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-ultra'],
     ])
+  })
+
+  it('marks model speeds for the selector icons', () => {
+    expect(Object.fromEntries(
+      MODEL_CATALOG.map(model => [model.modelId, model.speed || null]),
+    )).toEqual({
+      'gemini-3.1-flash-lite': 'fast',
+      'gemini-3.5-flash-lite': 'fast',
+      'gemini-3.6-flash': 'medium',
+      'gemini-3.7-flash': 'slow',
+      'gemini-3.8-flash': 'slow',
+      'openrouter/free': 'medium',
+      'nvidia/nemotron-3-ultra-550b-a55b:free': 'slow',
+      'gpt-oss:120b': 'fast',
+      'nemotron-3-ultra': 'slow',
+    })
   })
 
   it('migrates provider-less legacy selections to Gemini', () => {
@@ -35,8 +51,9 @@ describe('provider-aware model catalog', () => {
     })
   })
 
-  it('declares PDF as Gemini-only and marks the text-only Ollama models accurately', () => {
+  it('declares PDF as Gemini-only and marks text-only models accurately', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ])
