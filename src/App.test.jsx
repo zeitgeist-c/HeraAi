@@ -36,6 +36,7 @@ vi.mock('./lib/api', () => ({
     'gemini-3.5-flash-lite',
     'gemini-3.6-flash',
     'gemini-3.7-flash',
+    'gemini-3.8-flash',
   ],
   DEFAULT_MODEL: 'gemini-3.1-flash-lite',
 }));
@@ -2032,10 +2033,11 @@ describe('HeraAi App', () => {
     ]);
   });
 
-  it('routes public URLs through exact-page context and keeps them active for follow-ups', async () => {
+  it('routes public URLs per request and reuses them only when explicitly requested', async () => {
     api.streamResearch
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Page summary' } }]))
-      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Page follow-up' } }]));
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Independent follow-up' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Previous page follow-up' } }]));
 
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2054,8 +2056,13 @@ describe('HeraAi App', () => {
 
     fireEvent.change(input, { target: { value: 'What is the main conclusion?' } });
     fireEvent.click(getSendButton());
-    expect(await screen.findByText('Page follow-up')).toBeInTheDocument();
-    expect(api.streamResearch.mock.calls[1][5].webContext.urls).toEqual(['https://example.com/article']);
+    expect(await screen.findByText('Independent follow-up')).toBeInTheDocument();
+    expect(api.streamResearch.mock.calls[1][5].webContext.urls).toEqual([]);
+
+    fireEvent.change(input, { target: { value: 'Önceki linkteki ana sonucu kontrol et' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Previous page follow-up')).toBeInTheDocument();
+    expect(api.streamResearch.mock.calls[2][5].webContext.urls).toEqual(['https://example.com/article']);
   });
 
   it('shows individual draft URL removal controls and preserves the remaining prompt', async () => {
@@ -2079,10 +2086,11 @@ describe('HeraAi App', () => {
     expect(screen.getAllByRole('button', { name: /Remove link|Bağlantıyı kaldır/i })).toHaveLength(1);
   });
 
-  it('clears draft file chips after send while retaining the file for a vision follow-up', async () => {
+  it('does not retain a previous image for an independent vision follow-up', async () => {
     api.streamVision
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'First file answer' } }]))
-      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'File follow-up answer' } }]));
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'File follow-up answer' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Previous image answer' } }]));
     render(<App />);
     await waitFor(() => expect(document.querySelector('input[type="file"][accept*="image"]')).toBeInTheDocument());
 
@@ -2102,16 +2110,32 @@ describe('HeraAi App', () => {
     expect(within(composer).queryByText('context.png')).not.toBeInTheDocument();
     expect(screen.getAllByText('context.png')).toHaveLength(1);
 
-    fireEvent.change(input, { target: { value: 'What detail did I miss?' } });
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File([validImageBytes('image/png', 'second-context')], 'second-context.png', { type: 'image/png' })],
+      },
+    });
+    await waitFor(() => expect(within(composer).getByText('second-context.png')).toBeInTheDocument());
+    fireEvent.change(input, { target: { value: 'Inspect this second file' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('File follow-up answer')).toBeInTheDocument();
     expect(api.streamVision).toHaveBeenCalledTimes(2);
     const followUpMessage = api.streamVision.mock.calls[1][0].at(-1);
     expect(followUpMessage.attachments).toEqual([
+      expect.objectContaining({ name: 'second-context.png', mimeType: 'image/png' }),
+    ]);
+    expect(followUpMessage.attachments).not.toEqual([
       expect.objectContaining({ name: 'context.png', mimeType: 'image/png' }),
     ]);
-    expect(followUpMessage.displayAttachmentIds).toEqual([]);
     expect(screen.getAllByText('context.png')).toHaveLength(1);
+
+    fireEvent.change(input, { target: { value: 'Önceki görseldeki ayrıntıyı açıkla' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Previous image answer')).toBeInTheDocument();
+    expect(api.streamVision).toHaveBeenCalledTimes(3);
+    expect(api.streamVision.mock.calls[2][0].at(-1).attachments).toEqual([
+      expect.objectContaining({ name: 'second-context.png', mimeType: 'image/png' }),
+    ]);
   });
 
   it('accepts dropped files across the chat panel and appends them to the draft', async () => {
@@ -2729,6 +2753,7 @@ describe('HeraAi App', () => {
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'gemini-3.8-flash',
       'openrouter/free',
       'gpt-oss:120b',
       'nemotron-3-ultra',
@@ -2875,6 +2900,7 @@ describe('HeraAi App', () => {
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'gemini-3.8-flash',
       'openrouter/free',
       'gpt-oss:120b',
       'nemotron-3-ultra',

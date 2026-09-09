@@ -59,6 +59,11 @@ import { resolveKeysForRequest } from './lib/keyManager'
 import { generateSpeech, transcribeAudio } from './lib/voiceApi'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
 import {
+  requestsPreviousImage,
+  requestsPreviousWebSource,
+  selectRequestContext,
+} from './lib/contextSelection'
+import {
   hasRetiredModelProvenance,
   sanitizeRetiredModelMessages,
   sanitizeRetiredModelSessions,
@@ -87,10 +92,6 @@ const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const DICTATION_MAX_DURATION_MS = 200000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
-function mergeUniqueStrings(existing = [], additions = []) {
-  return Array.from(new Set([...(existing || []), ...(additions || [])].filter(Boolean)))
-}
-
 function mergeAttachmentRefs(existing = [], additions = []) {
   const refs = new Map()
   for (const attachment of [...(existing || []), ...(additions || [])]) {
@@ -3205,11 +3206,20 @@ function App() {
     const requestSessionId = activeSessionIdRef.current
     const requestSession = sessionsRef.current.find(session => session?.id === requestSessionId)
     const activeContextAttachments = activeAttachmentRefs(requestSession)
+    const existingContextUrls = Array.isArray(requestSession?.activeWebUrls)
+      ? requestSession.activeWebUrls
+      : []
     const draftAttachmentIds = attachments.map(attachment => attachment?.id).filter(Boolean)
-    const sourceAttachments = retryUserMessage
+    const draftAttachments = retryUserMessage
       ? (Array.isArray(retryUserMessage.attachments) ? retryUserMessage.attachments : [])
-      : mergeAttachmentRefs(activeContextAttachments, attachments)
-    if (!userText && sourceAttachments.length === 0) return
+      : attachments
+    const canReusePreviousImage = !retryUserMessage
+      && requestsPreviousImage(userText)
+      && activeContextAttachments.length > 0
+    const canReusePreviousWeb = !retryUserMessage
+      && requestsPreviousWebSource(userText)
+      && existingContextUrls.length > 0
+    if (!userText && draftAttachments.length === 0) return
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
       toast.error(t('chat.generation_errors.already_running', {
         defaultValue: t('chat.connection_error'),
@@ -3218,17 +3228,10 @@ function App() {
     }
     if (isGeneratingRef.current) return
 
-    try {
-      validateAttachmentGroup([], sourceAttachments)
-    } catch (error) {
-      toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
-        defaultValue: error?.message || t('chat.file_error'),
-      }))
-      return
-    }
-
     const supportedModes = new Set(['chat', 'vision', 'web'])
-    const automaticMode = enableResearch ? 'web' : (sourceAttachments.length > 0 ? 'vision' : 'chat')
+    const automaticMode = (enableResearch || canReusePreviousWeb)
+      ? 'web'
+      : (draftAttachments.length > 0 || canReusePreviousImage ? 'vision' : 'chat')
     const mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
       : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
@@ -3236,6 +3239,33 @@ function App() {
       ? actionOptions.modelOverride
       : selectedModel
     const requestProvider = getProviderForModel(requestModel, selectedProvider)
+
+    let explicitUrls = []
+    try {
+      explicitUrls = mode === 'web'
+        ? (retryUserMessage && Array.isArray(retryUserMessage.webUrls)
+            ? retryUserMessage.webUrls
+            : extractPublicUrls(userText))
+        : []
+    } catch (error) {
+      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
+        defaultValue: error?.message || t('chat.connection_error'),
+      }))
+      return
+    }
+    const contextSelection = retryUserMessage
+      ? { attachments: draftAttachments, urls: explicitUrls }
+      : selectRequestContext({
+          text: userText,
+          draftAttachments,
+          previousAttachments: activeContextAttachments,
+          explicitUrls,
+          previousUrls: existingContextUrls,
+          includePreviousWeb: mode === 'web',
+        })
+    const sourceAttachments = contextSelection.attachments
+    const requestUrls = contextSelection.urls
+    if (!userText && sourceAttachments.length === 0) return
     if (
       requestProvider !== 'gemini'
       && sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
@@ -3250,40 +3280,30 @@ function App() {
       toast.error(t('chat.generation_errors.image_not_supported'))
       return
     }
-
-    let explicitUrls = []
     try {
-      explicitUrls = mode === 'web' ? extractPublicUrls(userText) : []
+      validateAttachmentGroup([], sourceAttachments)
     } catch (error) {
-      toast.error(t(`chat.generation_errors.${error?.code || 'url_invalid'}`, {
-        defaultValue: error?.message || t('chat.connection_error'),
+      toast.error(t(`chat.generation_errors.${error?.code || 'attachment_invalid'}`, {
+        defaultValue: error?.message || t('chat.file_error'),
       }))
       return
     }
-    const existingContextUrls = Array.isArray(requestSession?.activeWebUrls)
-      ? requestSession.activeWebUrls
-      : []
-    const mergedContextUrls = mergeUniqueStrings(existingContextUrls, explicitUrls)
-    if (!retryUserMessage && mergedContextUrls.length > MAX_PUBLIC_URLS) {
+    if (!retryUserMessage && requestUrls.length > MAX_PUBLIC_URLS) {
       toast.error(t('chat.generation_errors.url_limit_exceeded'))
       return
     }
-    const requestUrls = mode === 'web'
-      ? (retryUserMessage && Array.isArray(retryUserMessage.webUrls)
-          ? retryUserMessage.webUrls
-          : mergedContextUrls)
-      : []
+    const modeRequestUrls = mode === 'web' ? requestUrls : []
     const webContext = {
       kind: mode === 'web' ? (requestUrls.length > 0 ? 'url' : 'search') : 'none',
       urls: requestUrls,
     }
     let requestText = userText
     let displayContent = actionOptions?.displayContent
-    if (requestUrls.length > 0 && isUrlOnlyText(userText, requestUrls)) {
+    if (modeRequestUrls.length > 0 && isUrlOnlyText(userText, modeRequestUrls)) {
       requestText = t('chat.prompts.summarize_urls')
       displayContent = userText
     } else if (!requestText && sourceAttachments.length > 0) {
-      requestText = requestUrls.length > 0
+      requestText = modeRequestUrls.length > 0
         ? t('chat.prompts.summarize_context')
         : t('chat.prompts.summarize_files')
       displayContent = ''
@@ -3301,10 +3321,10 @@ function App() {
     const attachmentIds = messageAttachments.map(attachment => attachment.id).filter(Boolean)
     const nextActiveAttachmentIds = retryUserMessage
       ? (requestSession?.activeAttachmentIds || [])
-      : attachmentIds
+      : (attachmentIds.length > 0 ? attachmentIds : (requestSession?.activeAttachmentIds || []))
     const nextActiveWebUrls = retryUserMessage
       ? existingContextUrls
-      : mergedContextUrls
+      : (modeRequestUrls.length > 0 ? modeRequestUrls : existingContextUrls)
     const displayAttachmentIds = retryUserMessage
       ? (Array.isArray(retryUserMessage.displayAttachmentIds)
           ? retryUserMessage.displayAttachmentIds
@@ -3313,7 +3333,7 @@ function App() {
     const displayWebUrls = retryUserMessage
       ? (Array.isArray(retryUserMessage.displayWebUrls)
           ? retryUserMessage.displayWebUrls
-          : requestUrls)
+           : modeRequestUrls)
       : explicitUrls
 
     updateStats(mode === 'web' ? ['message', 'search'] : 'message')

@@ -10,6 +10,7 @@ const retryModels = [
   'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
   'gemini-3.7-flash',
+  'gemini-3.8-flash',
 ]
 
 const modelLabels = {
@@ -17,6 +18,7 @@ const modelLabels = {
   'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
   'gemini-3.6-flash': 'Gemini 3.6 Flash',
   'gemini-3.7-flash': 'Gemini 3.7 Flash',
+  'gemini-3.8-flash': 'Gemini 3.8 Flash',
 }
 
 describe('ChatMessage copy actions', () => {

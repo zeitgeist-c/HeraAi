@@ -721,6 +721,7 @@ describe('streamChat fallback', () => {
   it.each([
     'gemini-3.6-flash',
     'gemini-3.7-flash',
+    'gemini-3.8-flash',
   ])('reports the %s 120-second startup deadline as timeout without a second request', async model => {
     vi.useFakeTimers()
     try {
@@ -795,13 +796,14 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 7 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 8 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
+      'gemini-3.8-flash',
       'openrouter/free',
       'gpt-oss:120b',
       'nemotron-3-ultra',

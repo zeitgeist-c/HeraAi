@@ -8,13 +8,14 @@ import {
 } from './models.js'
 
 describe('provider-aware model catalog', () => {
-  it('contains four Gemini models, OpenRouter Free, and two Ollama Cloud models', () => {
-    expect(MODEL_CATALOG).toHaveLength(7)
+  it('contains five Gemini models, OpenRouter Free, and two Ollama Cloud models', () => {
+    expect(MODEL_CATALOG).toHaveLength(8)
     expect(MODEL_CATALOG.map(model => [model.provider, model.modelId])).toEqual([
       ['gemini', 'gemini-3.1-flash-lite'],
       ['gemini', 'gemini-3.5-flash-lite'],
       ['gemini', 'gemini-3.6-flash'],
       ['gemini', 'gemini-3.7-flash'],
+      ['gemini', 'gemini-3.8-flash'],
       ['openrouter', 'openrouter/free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-ultra'],
