@@ -98,7 +98,7 @@
     },
     "chat": {
         "placeholder": "HeraAi'a istediğini sor...",
-        "ai_disclaimer": "Yapay zeka hata yapabilir. Önemli bilgileri kontrol edin.",
+        "ai_disclaimer": "Yapay zeka hata yapabilir.\nÖnemli bilgileri kontrol edin.",
         "you": "Sen",
         "gemini": "HeraAi",
         "assistant_label": "AI asistanı",
@@ -123,16 +123,13 @@
         "screenshot_blocked": "Bu sayfada ekran kırpma kullanılamaz. Lütfen normal bir web sayfasına gidin.",
         "screenshot_no_tab": "Aktif sekme bulunamadı.",
         "file_error": "Dosya yüklenirken bir hata oluştu.",
-        "paste_failed": "Pano okunamadı. Ctrl+V ile deneyin.",
-        "quick_prompts": {
-            "summarize_label": "Özetle",
-            "proofread_label": "Düzelt",
-            "tabulate_label": "Tablo Yap",
-            "translate_en_label": "EN Çevir"
-        },
         "clear_url_context": "Sayfaları temizle",
         "history_title": "Sohbet Geçmişi",
         "history_search_placeholder": "Sohbet ara…",
+        "search_messages_placeholder": "Sohbet içinde ara…",
+        "search_no_results": "Sonuç yok",
+        "search_prev": "Önceki sonuç",
+        "search_next": "Sonraki sonuç",
         "no_history": "Henüz sohbet geçmişi yok.",
         "new_chat": "Yeni Sohbet",
         "session_title": {
@@ -163,6 +160,7 @@
         "tooltips": {
             "new_chat": "Yeni Sohbet Başlat",
             "history": "Sohbet Geçmişini Gör",
+            "search_messages": "Sohbette Ara",
             "clear_chat": "Sohbeti Temizle",
             "delete_session": "Sohbeti sil",
             "rename_session": "Sohbeti yeniden adlandır",
@@ -170,7 +168,6 @@
             "unstar_session": "Yıldızı kaldır",
             "settings": "Ayarlar - API Anahtarı Değiştir",
             "attach_file": "Dosya Ekle",
-            "paste_input": "Panodan Yapıştır",
             "add_current_page": "Bulunduğun Sayfayı Ekle",
             "remove_attachment": "Eki kaldır",
             "remove_link": "Bağlantıyı kaldır",

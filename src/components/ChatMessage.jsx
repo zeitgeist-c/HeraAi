@@ -84,6 +84,8 @@ const ChatMessage = ({
   speechDisabled = false,
   speechStatus = 'idle',
   onToggleSpeech,
+  searchMatch = false,
+  searchCurrent = false,
 }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
@@ -291,8 +293,14 @@ const ChatMessage = ({
 
   if (!isBot) {
     return (
-      <article data-testid="user-message" className="group flex w-full justify-end">
-        <div className="max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm">
+      <article
+        data-testid="user-message"
+        {...(message.id ? { id: `chat-msg-${message.id}` } : {})}
+        {...(searchMatch ? { 'data-search-match': 'true' } : {})}
+        {...(searchCurrent ? { 'data-search-current': 'true' } : {})}
+        className="group flex w-full justify-end"
+      >
+        <div className={`max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm${searchCurrent ? ' ring-2 ring-primary/70' : searchMatch ? ' ring-1 ring-primary/30' : ''}`}>
           {visibleContent && (
             <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
               {visibleContent}
@@ -366,7 +374,13 @@ const ChatMessage = ({
   }
 
   return (
-    <article data-testid="assistant-message" className="group w-full min-w-0 py-1">
+    <article
+      data-testid="assistant-message"
+      {...(message.id ? { id: `chat-msg-${message.id}` } : {})}
+      {...(searchMatch ? { 'data-search-match': 'true' } : {})}
+      {...(searchCurrent ? { 'data-search-current': 'true' } : {})}
+      className={`group w-full min-w-0 py-1${searchCurrent ? ' rounded-xl ring-2 ring-primary/70' : searchMatch ? ' rounded-xl ring-1 ring-primary/30' : ''}`}
+    >
       {isPending && !message.content ? (
         <div className="min-h-16 space-y-2 rounded-xl py-2">
           <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-muted-foreground/15" />
@@ -515,7 +529,9 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.modelLabels === nextProps.modelLabels &&
     prevProps.onEdit === nextProps.onEdit &&
     prevProps.onRetry === nextProps.onRetry &&
-    prevProps.onToggleSpeech === nextProps.onToggleSpeech
+    prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
+    prevProps.searchMatch === nextProps.searchMatch &&
+    prevProps.searchCurrent === nextProps.searchCurrent
   )
 }
 

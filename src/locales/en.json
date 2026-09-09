@@ -98,7 +98,7 @@
     },
     "chat": {
         "placeholder": "Ask HeraAi anything...",
-        "ai_disclaimer": "AI can make mistakes. Please double-check important info.",
+        "ai_disclaimer": "AI can make mistakes.\nPlease double-check important info.",
         "you": "You",
         "gemini": "HeraAi",
         "assistant_label": "AI assistant",
@@ -123,16 +123,13 @@
         "screenshot_blocked": "Screenshot crop cannot be used on this page type. Please navigate to a normal web page.",
         "screenshot_no_tab": "Could not find active tab.",
         "file_error": "An error occurred while loading the file.",
-        "paste_failed": "Clipboard unreadable. Try Ctrl+V.",
-        "quick_prompts": {
-            "summarize_label": "Summarize",
-            "proofread_label": "Proofread",
-            "tabulate_label": "Tabulate",
-            "translate_en_label": "To EN"
-        },
         "clear_url_context": "Clear pages",
         "history_title": "Chat History",
         "history_search_placeholder": "Search chats…",
+        "search_messages_placeholder": "Search in chat…",
+        "search_no_results": "No results",
+        "search_prev": "Previous result",
+        "search_next": "Next result",
         "no_history": "No chat history found.",
         "new_chat": "New Chat",
         "session_title": {
@@ -163,6 +160,7 @@
         "tooltips": {
             "new_chat": "Start New Chat",
             "history": "View Chat History",
+            "search_messages": "Search in chat",
             "clear_chat": "Clear Chat",
             "delete_session": "Delete chat",
             "rename_session": "Rename chat",
@@ -170,7 +168,6 @@
             "unstar_session": "Remove star",
             "settings": "Settings - Switch API Key",
             "attach_file": "Attach File",
-            "paste_input": "Paste from clipboard",
             "add_current_page": "Add current page",
             "remove_attachment": "Remove attachment",
             "remove_link": "Remove link",
