@@ -175,6 +175,35 @@ describe('session management UI', () => {
     expect(screen.getByText('Star new')).toBeInTheDocument()
   })
 
+  it('finds sessions by message content as well as title', () => {
+    const contentSessions = [
+      { id: 's1', title: 'Tatil', updatedAt: 100, isStarred: false },
+      {
+        id: 's2',
+        title: 'Alışveriş',
+        updatedAt: 200,
+        isStarred: false,
+        messages: [{ id: 'm1', role: 'user', content: 'Ankara gezi planı yap' }],
+      },
+    ]
+    render(
+      <HistoryOverlay
+        sessions={contentSessions}
+        activeSessionId="s1"
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleStar={vi.fn()}
+        onRequestBulkDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    fireEvent.change(screen.getByTestId('history-search'), { target: { value: 'ankara' } })
+    expect(screen.queryByText('Tatil')).not.toBeInTheDocument()
+    expect(screen.getByText('Alışveriş')).toBeInTheDocument()
+  })
+
   it('keeps focus on the next row control when history renaming is saved by blur', async () => {
     const onRename = vi.fn()
     render(

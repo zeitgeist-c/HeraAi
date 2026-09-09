@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BarChart3,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   FileText,
@@ -9,10 +11,12 @@ import {
   Menu,
   MessageSquarePlus,
   Pencil,
+  Search,
   Settings,
   Sparkles,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -31,6 +35,14 @@ function AppHeader({
   onSettings,
   onStats,
   onShortcuts,
+  searchOpen = false,
+  searchQuery = '',
+  searchCounterText = '',
+  onToggleSearch,
+  onSearchQueryChange,
+  onSearchPrev,
+  onSearchNext,
+  onCloseSearch,
 }) {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -123,7 +135,7 @@ function AppHeader({
 
   return (
     <header className="relative z-30 flex h-12 shrink-0 items-center justify-between border-b border-border/70 bg-background/80 px-3 backdrop-blur-xl">
-      <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
+      <div className={`min-w-0 items-center gap-2 pr-2 ${searchOpen ? 'hidden' : 'flex flex-1'}`}>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-sm shadow-primary/25">
           <Sparkles className="h-4 w-4" />
         </div>
@@ -185,7 +197,75 @@ function AppHeader({
         </div>
       </div>
 
+      {searchOpen && (
+        <div className="mx-1 flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-primary/25 bg-secondary/50 px-2">
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <input
+            data-testid="chat-search-input"
+            value={searchQuery}
+            onChange={(e) => onSearchQueryChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                if (e.shiftKey) onSearchPrev?.()
+                else onSearchNext?.()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                onCloseSearch?.()
+              }
+            }}
+            placeholder={t('chat.search_messages_placeholder')}
+            autoFocus
+            className="h-8 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/70"
+          />
+          <span data-testid="chat-search-count" className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+            {searchCounterText}
+          </span>
+          <button
+            type="button"
+            data-testid="chat-search-prev"
+            title={t('chat.search_prev')}
+            aria-label={t('chat.search_prev')}
+            onClick={onSearchPrev}
+            className="hera-icon-button h-6 w-6"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            data-testid="chat-search-next"
+            title={t('chat.search_next')}
+            aria-label={t('chat.search_next')}
+            onClick={onSearchNext}
+            className="hera-icon-button h-6 w-6"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            data-testid="chat-search-close"
+            title={t('chat.tooltips.close')}
+            aria-label={t('chat.tooltips.close')}
+            onClick={onCloseSearch}
+            className="hera-icon-button h-6 w-6"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       <div className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          data-testid="chat-search-toggle"
+          title={t('chat.tooltips.search_messages')}
+          aria-label={t('chat.tooltips.search_messages')}
+          aria-pressed={searchOpen}
+          onClick={onToggleSearch}
+          className={`hera-icon-button ${searchOpen ? 'bg-primary/10 text-primary' : ''}`}
+        >
+          <Search className="h-4 w-4" />
+        </button>
         <button
           type="button"
           title={t('chat.tooltips.new_chat')}

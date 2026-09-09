@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, ClipboardPaste, Link2, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useTranslation } from 'react-i18next'
@@ -40,7 +40,7 @@ import {
   putAttachment,
 } from './lib/attachmentStore'
 import { exportSessions, exportSessionMarkdown, importSessions, sessionToMarkdown } from './lib/importExport'
-import { QUICK_PROMPTS, resolveQuickPrompt } from './lib/quickPrompts'
+import { findChatMatchIds } from './lib/chatSearch'
 import {
   extractPublicUrls,
   isUrlOnlyText,
@@ -438,6 +438,9 @@ function App() {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [chatSearchOpen, setChatSearchOpen] = useState(false)
+  const [chatSearchQuery, setChatSearchQuery] = useState('')
+  const [chatSearchIndex, setChatSearchIndex] = useState(0)
   const [enableResearch, setEnableResearch] = useState(false)
   const [activeMode, setActiveMode] = useState(null)
   const [isCropActive, setIsCropActive] = useState(false)
@@ -552,6 +555,45 @@ function App() {
     window.addEventListener('focus', handleWindowFocus)
     return () => window.removeEventListener('focus', handleWindowFocus)
   }, [focusComposer, showSettings, showHistory, showStats, showShortcuts])
+
+  const chatSearchMatchIds = useMemo(
+    () => findChatMatchIds(messages, chatSearchQuery),
+    [messages, chatSearchQuery],
+  )
+  const clampedChatSearchIndex = chatSearchMatchIds.length === 0
+    ? 0
+    : Math.min(chatSearchIndex, chatSearchMatchIds.length - 1)
+  const currentChatSearchId = chatSearchOpen && chatSearchMatchIds.length > 0
+    ? chatSearchMatchIds[clampedChatSearchIndex]
+    : null
+  const chatSearchCounterText = !chatSearchOpen || !chatSearchQuery.trim()
+    ? ''
+    : chatSearchMatchIds.length === 0
+      ? t('chat.search_no_results')
+      : `${clampedChatSearchIndex + 1}/${chatSearchMatchIds.length}`
+
+  const stepChatSearch = useCallback((delta) => {
+    if (chatSearchMatchIds.length === 0) return
+    setChatSearchIndex(previous => (
+      (previous + delta + chatSearchMatchIds.length) % chatSearchMatchIds.length
+    ))
+  }, [chatSearchMatchIds])
+
+  const closeChatSearch = useCallback(() => {
+    setChatSearchOpen(false)
+    setChatSearchQuery('')
+    setChatSearchIndex(0)
+  }, [])
+
+  useEffect(() => {
+    setChatSearchIndex(0)
+  }, [chatSearchQuery])
+
+  useEffect(() => {
+    if (!chatSearchOpen || !currentChatSearchId) return
+    userPausedAutoScrollRef.current = true
+    document.getElementById(`chat-msg-${currentChatSearchId}`)?.scrollIntoView?.({ block: 'center' })
+  }, [chatSearchOpen, currentChatSearchId])
 
   const syncScrollControls = useCallback(() => {
     const element = scrollRef.current
@@ -3907,21 +3949,6 @@ function App() {
     await processAttachmentFiles(pastedImages, { append: true })
   }, [focusComposer, processAttachmentFiles])
 
-  const handlePasteFromClipboard = useCallback(async () => {
-    if (isGeneratingRef.current || dictationPhaseRef.current !== 'idle') return
-    try {
-      const text = await navigator.clipboard?.readText()
-      if (typeof text !== 'string' || !text) {
-        toast.error(t('chat.paste_failed'))
-        return
-      }
-      setInput(previous => appendToInputValue(previous, text))
-      window.requestAnimationFrame(() => focusComposer())
-    } catch {
-      toast.error(t('chat.paste_failed'))
-    }
-  }, [focusComposer, t])
-
   const handleAddCurrentPage = useCallback(async () => {
     if (isGeneratingRef.current || dictationPhaseRef.current !== 'idle') return
     try {
@@ -4223,6 +4250,20 @@ function App() {
         onSettings={() => setShowSettings(true)}
         onStats={() => setShowStats(true)}
         onShortcuts={() => setShowShortcuts(true)}
+        searchOpen={chatSearchOpen}
+        searchQuery={chatSearchQuery}
+        searchCounterText={chatSearchCounterText}
+        onToggleSearch={() => {
+          if (chatSearchOpen) closeChatSearch()
+          else {
+            setChatSearchIndex(0)
+            setChatSearchOpen(true)
+          }
+        }}
+        onSearchQueryChange={setChatSearchQuery}
+        onSearchPrev={() => stepChatSearch(-1)}
+        onSearchNext={() => stepChatSearch(1)}
+        onCloseSearch={closeChatSearch}
       />
 
       {showSettings && (
@@ -4266,6 +4307,8 @@ function App() {
                 <ChatMessage
                   key={msg.id ?? idx}
                   message={msg}
+                  searchMatch={chatSearchOpen && chatSearchMatchIds.includes(msg.id)}
+                  searchCurrent={msg.id != null && msg.id === currentChatSearchId}
                   onEdit={handleEditMessage}
                   onRetry={handleRetryMessage}
                   retryModels={localizedModelCatalog}
@@ -4359,24 +4402,6 @@ function App() {
             </div>
           )}
 
-          {!isGenerating && dictationPhase === 'idle' && !showSettings && (
-            <div className="flex gap-1.5 overflow-x-auto px-3 pb-1 pt-2">
-              {QUICK_PROMPTS.map(prompt => (
-                <button
-                  key={prompt.id}
-                  type="button"
-                  data-testid={`quick-prompt-${prompt.id}`}
-                  onClick={() => {
-                    setInput(previous => appendToInputValue(previous, resolveQuickPrompt(prompt, i18n.language)))
-                    focusComposer()
-                  }}
-                  className="shrink-0 rounded-full border border-border/70 bg-secondary/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                >
-                  {t(prompt.labelKey)}
-                </button>
-              ))}
-            </div>
-          )}
           <textarea
             ref={composerInputRef}
             autoFocus
@@ -4539,16 +4564,6 @@ function App() {
               </button>
               <button
                 type="button"
-                title={t('chat.tooltips.paste_input')}
-                aria-label={t('chat.tooltips.paste_input')}
-                onClick={handlePasteFromClipboard}
-                disabled={isGenerating || dictationPhase !== 'idle'}
-                className={getQuickActionClass()}
-              >
-                <ClipboardPaste className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
                 title={t('chat.tooltips.add_current_page')}
                 aria-label={t('chat.tooltips.add_current_page')}
                 onClick={handleAddCurrentPage}
@@ -4582,7 +4597,7 @@ function App() {
             modelLabels={localizedModelLabels}
             onModelChange={handleModelChange}
           />
-          <p data-testid="composer-disclaimer" className="min-w-0 flex-1 text-right text-[11px] leading-tight text-muted-foreground/55" title={t('chat.ai_disclaimer')}>
+          <p data-testid="composer-disclaimer" className="min-w-0 flex-1 whitespace-pre-line text-right text-[11px] leading-tight text-muted-foreground/55" title={t('chat.ai_disclaimer')}>
             {t('chat.ai_disclaimer')}
           </p>
         </div>

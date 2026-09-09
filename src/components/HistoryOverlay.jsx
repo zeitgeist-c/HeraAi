@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, History, Loader2, Pencil, Star, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { findChatMatchIds } from '../lib/chatSearch'
+
 const MAX_SESSION_TITLE_LENGTH = 80
 
 function HistoryOverlay({
@@ -36,7 +38,10 @@ function HistoryOverlay({
   const sortedSessions = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase('tr')
   const filteredSessions = normalizedQuery
-    ? sortedSessions.filter(session => (session.title || '').toLocaleLowerCase('tr').includes(normalizedQuery))
+    ? sortedSessions.filter(session => (
+      (session.title || '').toLocaleLowerCase('tr').includes(normalizedQuery)
+      || findChatMatchIds(session.messages, normalizedQuery).length > 0
+    ))
     : sortedSessions
   const starredSessions = filteredSessions.filter((session) => session.isStarred)
   const otherSessions = filteredSessions.filter((session) => !session.isStarred)
