@@ -21,6 +21,7 @@ function ComparisonResponse({
   const comparisonId = variants[0]?.comparisonId ?? null
   const continuedWithBoth = comparisonId != null && isBothResolved(messages, comparisonId)
   const selectedWinner = !continuedWithBoth ? selected : null
+  const resolved = Boolean(selectedWinner || continuedWithBoth)
 
   return (
     <section className="rounded-2xl border border-border/70 bg-secondary/20 p-2" data-testid="comparison-response">
@@ -57,7 +58,7 @@ function ComparisonResponse({
               className={`${activeSlot === slot ? 'block' : 'hidden'} min-w-0 rounded-xl border bg-background p-2 md:block ${message.comparisonSelected ? 'border-primary ring-1 ring-primary/30' : 'border-border/60'}`}
             >
               <div className="mb-1 text-[11px] font-bold text-muted-foreground">{slot.toUpperCase()}</div>
-              <ChatMessage message={message} {...chatMessageProps} />
+              <ChatMessage message={message} concealMeta={!resolved} {...chatMessageProps} />
               {canSelect && (
                 <button
                   type="button"

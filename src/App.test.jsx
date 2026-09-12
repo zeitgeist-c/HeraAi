@@ -2402,6 +2402,20 @@ describe('HeraAi App', () => {
       .toEqual([...buttons].map(button => Array.from(composer.querySelectorAll('button')).indexOf(button)).sort((a, b) => a - b));
   });
 
+  it('renders voice input before the comparison button', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const composer = document.querySelector('textarea').closest('.hera-surface');
+    const buttons = Array.from(composer.querySelectorAll('button'));
+    const micIndex = buttons.findIndex(button => button.querySelector('svg.lucide-mic'));
+    const compareIndex = buttons.findIndex(button => button.querySelector('svg.lucide-columns-2'));
+    expect(micIndex).toBeGreaterThanOrEqual(0);
+    expect(compareIndex).toBeGreaterThanOrEqual(0);
+    expect(micIndex).toBeLessThan(compareIndex);
+  });
+
   it('toggles an active screen selection off with the same crop button', async () => {
     await i18n.changeLanguage('en');
     global.chrome.scripting.executeScript
@@ -2420,7 +2434,7 @@ describe('HeraAi App', () => {
     expect(screen.getByRole('button', { name: /Cancel selection/i })).toHaveAttribute('aria-pressed', 'true');
     expect(global.chrome.scripting.executeScript.mock.calls[0][0].func.name).toBe('injectCropOverlay');
     expect(global.chrome.scripting.executeScript.mock.calls[0][0].target).toEqual({ tabId: 1 });
-    await waitFor(() => expect(currentStorage.stats?.screenshots).toBe(1));
+    await waitFor(() => expect(currentStorage.stats?.lifetime?.tools?.screenshot).toBe(1));
 
     global.chrome.tabs.query.mockResolvedValue([{ id: 99, url: 'https://example.com/another-tab' }]);
     fireEvent.click(cropButton);
@@ -2433,7 +2447,7 @@ describe('HeraAi App', () => {
       args: ['crop-request-1'],
     });
     expect(global.chrome.scripting.executeScript.mock.calls[1][0].func.name).toBe('cancelCropOverlay');
-    expect(currentStorage.stats.screenshots).toBe(1);
+    expect(currentStorage.stats.lifetime.tools.screenshot).toBe(1);
   });
 
   it('honors the second crop-button click while overlay injection is still pending', async () => {
@@ -2899,21 +2913,21 @@ describe('HeraAi App', () => {
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
       .filter(option => option.dataset.modelId === 'openrouter/free')
-      .map(option => option.textContent)).toEqual(['Free']);
+      .map(option => option.textContent)).toEqual(['FreeMediumQ2']);
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-2).map(option => option.textContent)).toEqual([
-      'GPT-OSS 120B',
-      'Nemotron 3 Ultra',
+      'GPT-OSS 120BFastQ3',
+      'Nemotron 3 UltraSlowQ5',
     ]);
-    const speedIcons = (id) => listbox.querySelector(`[data-model-id="${id}"]`).querySelector('svg');
-    expect(speedIcons('gpt-oss:120b').classList.contains('lucide-zap')).toBe(true);
-    expect(speedIcons('nemotron-3-ultra').classList.contains('lucide-turtle')).toBe(true);
-    expect(speedIcons('nvidia/nemotron-3-super-120b-a12b:free').classList.contains('lucide-gauge')).toBe(true);
-    expect(speedIcons('openrouter/free').classList.contains('lucide-gauge')).toBe(true);
-    expect(speedIcons('gemini-3.1-flash-lite').classList.contains('lucide-zap')).toBe(true);
-    expect(speedIcons('gemini-3.5-flash-lite').classList.contains('lucide-zap')).toBe(true);
-    expect(speedIcons('gemini-3.6-flash').classList.contains('lucide-gauge')).toBe(true);
-    expect(speedIcons('gemini-3.7-flash').classList.contains('lucide-turtle')).toBe(true);
-    expect(speedIcons('gemini-3.8-flash').classList.contains('lucide-turtle')).toBe(true);
+    const speedBadge = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
+    expect(speedBadge('gpt-oss:120b')).toContain('Fast');
+    expect(speedBadge('nemotron-3-ultra')).toContain('Slow');
+    expect(speedBadge('nvidia/nemotron-3-super-120b-a12b:free')).toContain('Medium');
+    expect(speedBadge('openrouter/free')).toContain('Medium');
+    expect(speedBadge('gemini-3.1-flash-lite')).toContain('Fast');
+    expect(speedBadge('gemini-3.5-flash-lite')).toContain('Fast');
+    expect(speedBadge('gemini-3.6-flash')).toContain('Medium');
+    expect(speedBadge('gemini-3.7-flash')).toContain('Slow');
+    expect(speedBadge('gemini-3.8-flash')).toContain('Slow');
   });
 
   it('collapses provider groups in the model selector independently', async () => {
@@ -5469,5 +5483,176 @@ describe('HeraAi App', () => {
     });
     expect(retryStart.model).toBe('gemini-3.7-flash');
     expect(retryStart.selectionMode).toBe('manual');
+  });
+
+  it('records one prompt and one search tool usage for a web send', async () => {
+    api.streamResearch.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Research answer' } },
+    ]));
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
+    fireEvent.click(webButton);
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'hello research' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(currentStorage.stats?.lifetime?.prompts).toBe(1));
+    expect(currentStorage.stats.lifetime.tools.search).toBe(1);
+    expect(currentStorage.stats.lifetime.tools.voice).toBe(0);
+  });
+
+  it('records a completed single generation with model outcome and duration', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'hello stats' } });
+    fireEvent.click(getSendButton());
+
+    expect(await screen.findByText('Hello from AI')).toBeInTheDocument();
+    await waitFor(() => expect(currentStorage.stats?.lifetime?.byOutcome?.completed).toBe(1));
+    expect(currentStorage.stats.lifetime.prompts).toBe(1);
+    const rows = Object.values(currentStorage.stats.lifetime.models);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ modelId: 'gemini-3.1-flash-lite', attempts: 1, successes: 1 });
+    expect(rows[0].successDurationMs).toBeGreaterThanOrEqual(0);
+    expect(currentStorage.stats.lifetime.successDurationMs).toBe(rows[0].successDurationMs);
+  });
+
+  it('freezes the displayed duration at presentation end while stats use stream end', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const startedAt = Date.now() - 8000;
+    const streamEndedAt = startedAt + 5000;
+    const runningGeneration = {
+      jobId: 'duration-job',
+      requestId: 'duration-job',
+      sessionId: 'duration-session',
+      userMessageId: 'duration-user',
+      assistantMessageId: 'duration-assistant',
+      status: 'running',
+      revision: 1,
+      content: '',
+      sources: [],
+      model: 'gemini-3.1-flash-lite',
+      provider: 'gemini',
+      startedAt,
+      updatedAt: Date.now(),
+    };
+    const externalSession = {
+      id: 'duration-session',
+      title: 'Duration session',
+      updatedAt: Date.now(),
+      messages: [
+        { id: 'duration-user', role: 'user', content: 'How long did this take?' },
+        {
+          id: 'duration-assistant',
+          role: 'model',
+          content: '',
+          status: 'streaming',
+          sources: [],
+          startedAt,
+          completedAt: null,
+        },
+      ],
+    };
+    const previousSessions = currentStorage.sessions;
+    const previousActiveSessionId = currentStorage.activeSessionId;
+    currentStorage = {
+      ...currentStorage,
+      sessions: [...previousSessions, externalSession],
+      activeSessionId: externalSession.id,
+      activeGeneration: runningGeneration,
+    };
+    triggerStorageChange({
+      sessions: { oldValue: previousSessions, newValue: currentStorage.sessions },
+      activeSessionId: { oldValue: previousActiveSessionId, newValue: externalSession.id },
+      activeGeneration: { oldValue: undefined, newValue: runningGeneration },
+    });
+
+    expect(await screen.findByText('How long did this take?')).toBeInTheDocument();
+
+    const terminalGeneration = {
+      ...runningGeneration,
+      status: 'completed',
+      revision: 2,
+      content: 'Eight seconds of work.',
+      completedAt: streamEndedAt,
+      updatedAt: streamEndedAt,
+    };
+    const emitTime = Date.now();
+    currentStorage.activeGeneration = terminalGeneration;
+    emitRuntimeMessage({ type: 'DONE', activeGeneration: terminalGeneration });
+
+    expect(await screen.findByText('Eight seconds of work.', {}, { timeout: 5000 })).toBeInTheDocument();
+    await waitFor(() => {
+      const persistedSession = currentStorage.sessions.find(session => session.id === externalSession.id);
+      const assistant = persistedSession?.messages?.find(message => message.id === 'duration-assistant');
+      expect(assistant?.status).toBe('done');
+      expect(assistant?.completedAt).toBeGreaterThanOrEqual(emitTime);
+    });
+    await waitFor(() => expect(currentStorage.stats?.lifetime?.byOutcome?.completed).toBe(1));
+    expect(currentStorage.stats.lifetime.successDurationMs).toBe(5000);
+  });
+
+  it('records each comparison variant separately with a single prompt', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
+    const selects = within(dialog).getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
+    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
+
+    let startMessage;
+    await waitFor(() => {
+      startMessage = global.chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
+      expect(startMessage).toBeDefined();
+    });
+    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
+    const doneAt = Date.now();
+    emitRuntimeMessage({
+      type: 'DONE',
+      activeGeneration: {
+        jobId,
+        kind: 'comparison',
+        comparisonId: jobId,
+        sessionId,
+        userMessageId,
+        assistantMessageId,
+        mode: 'chat',
+        status: 'completed',
+        revision: 2,
+        content: '',
+        sources: [],
+        completedAt: doneAt,
+        variants: {
+          a: {
+            variantId: 'a', status: 'completed', content: 'Answer A', sources: [],
+            resolvedModel: null, revision: 2, errorCode: null, completedAt: doneAt,
+            model: 'gemini-3.6-flash', provider: 'gemini',
+          },
+          b: {
+            variantId: 'b', status: 'completed', content: 'Answer B', sources: [],
+            resolvedModel: null, revision: 2, errorCode: null, completedAt: doneAt,
+            model: 'gemini-3.7-flash', provider: 'gemini',
+          },
+        },
+      },
+    });
+
+    expect(await screen.findByText('Answer A')).toBeInTheDocument();
+    await waitFor(() => expect(currentStorage.stats?.lifetime?.byOutcome?.completed).toBe(2));
+    expect(currentStorage.stats.lifetime.prompts).toBe(1);
+    const rows = Object.values(currentStorage.stats.lifetime.models);
+    expect(rows).toHaveLength(2);
+    expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.6-flash', attempts: 1, successes: 1 }));
+    expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.7-flash', attempts: 1, successes: 1 }));
   });
 });

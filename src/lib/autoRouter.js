@@ -173,15 +173,6 @@ export function parseRouterResponse(rawText, candidates = []) {
   return { ok: true, modelKey, reasonCode, error: null }
 }
 
-function candidateProvider(candidate) {
-  if (candidate && typeof candidate === 'object' && typeof candidate.provider === 'string') {
-    return candidate.provider
-  }
-  const key = candidateKeyOf(candidate)
-  if (typeof key === 'string' && key.includes(':')) return key.split(':')[0]
-  return null
-}
-
 function candidateCapability(candidate, capability) {
   if (candidate && typeof candidate === 'object' && candidate.capabilities) {
     return Boolean(candidate.capabilities[capability])
@@ -196,48 +187,108 @@ function candidateSpeed(candidate) {
   return null
 }
 
+const NEED_QUALITY_BAR = Object.freeze({ simple: 0, medium: 3, hard: 4 })
+
+const HARD_NEED_PATTERN = /karşılaştır|karsilastir|analiz|adım adım|adim adim|niçin|nicin|\bneden\b|ispat|türet|tasarla|mimari|artıları ve eksileri|compare|analy[sz]|step by step|\bwhy\b|prove|proof|deriv|design|architect|trade.?off|pros and cons/i
+const MEDIUM_NEED_PATTERN = /\bnasıl\b|\bnasil\b|\bnedir\b|\baçıkla\b|acikla|özetle|ozetle|listele|örnek|ornek|farkı|farki|\bhow\b|\bwhat\b|explain|summar|example|differen/iu
+
+function qualityOf(candidate) {
+  const score = Number(candidate?.routing?.quality)
+  return Number.isFinite(score) && score > 0 ? score : 1
+}
+
+function codingOf(candidate) {
+  const score = Number(candidate?.routing?.coding)
+  return Number.isFinite(score) && score > 0 ? score : 1
+}
+
+function speedRank(candidate) {
+  if (candidateSpeed(candidate) === 'fast') return 0
+  if (candidateSpeed(candidate) === 'slow') return 2
+  return 1
+}
+
+function assessNeed({ body = '' } = {}) {
+  const text = String(body ?? '')
+  if (HARD_NEED_PATTERN.test(text)) return 'hard'
+  if (MEDIUM_NEED_PATTERN.test(text)) return 'medium'
+  if ((text.match(/\?/g) || []).length >= 2) return 'hard'
+  return text.length >= 300 ? 'medium' : 'simple'
+}
+
+function compareScored(a, b, preferStrongest = false) {
+  if (a.speed !== b.speed) return a.speed - b.speed
+  if (preferStrongest && a.quality !== b.quality) return b.quality - a.quality
+  return a.index - b.index
+}
+
+function pickScored(pool, need) {
+  const rows = pool.map((candidate, index) => ({
+    candidate,
+    index,
+    speed: speedRank(candidate),
+    quality: qualityOf(candidate),
+    coding: codingOf(candidate),
+  }))
+  if (rows.length === 0) return null
+  const bar = NEED_QUALITY_BAR[need] ?? 0
+  const preferStrongest = need === 'hard'
+  const meeting = rows.filter(row => row.quality >= bar)
+  if (meeting.length > 0) return [...meeting].sort((a, b) => compareScored(a, b, preferStrongest))[0].candidate
+  return [...rows].sort((a, b) => {
+    const strengthA = a.quality + a.coding
+    const strengthB = b.quality + b.coding
+    if (strengthA !== strengthB) return strengthB - strengthA
+    return compareScored(a, b, true)
+  })[0].candidate
+}
+
+function pickStrongestCoding(pool) {
+  const rows = pool.map((candidate, index) => ({
+    candidate,
+    index,
+    speed: speedRank(candidate),
+    quality: qualityOf(candidate),
+    coding: codingOf(candidate),
+  }))
+  if (rows.length === 0) return null
+  return [...rows].sort((a, b) => {
+    if (a.coding !== b.coding) return b.coding - a.coding
+    return compareScored(a, b, true)
+  })[0].candidate
+}
+
 export function selectLocalFallback({ text = '', mode = 'chat', mimeTypes = [], candidates = [], hasTavilyKeys = false } = {}) {
   const list = (Array.isArray(candidates) ? candidates : []).filter(value => value != null)
   const body = String(text ?? '')
   const mimes = (Array.isArray(mimeTypes) ? mimeTypes : []).filter(value => typeof value === 'string')
   const hasImage = mimes.some(value => value.startsWith('image/'))
   const hasPdf = mimes.includes('application/pdf')
-  const gemini = list.filter(candidate => candidateProvider(candidate) === 'gemini')
+  const isCode = /```/.test(body)
+  const need = isCode ? 'coding' : assessNeed({ body })
+  const generalNeed = need === 'coding' ? 'hard' : need
 
   if (hasImage) {
-    const target = gemini.find(candidate => candidateCapability(candidate, 'supportsImage'))
-      || list.find(candidate => candidateCapability(candidate, 'supportsImage'))
-      || gemini[0]
-      || list[0]
+    const pool = list.filter(candidate => candidateCapability(candidate, 'supportsImage'))
+    const target = need === 'coding' ? pickStrongestCoding(pool) : pickScored(pool, generalNeed)
     if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'vision' }
   }
   if (hasPdf) {
-    const target = gemini.find(candidate => candidateCapability(candidate, 'supportsPdf'))
-      || list.find(candidate => candidateCapability(candidate, 'supportsPdf'))
-      || gemini[0]
-      || list[0]
+    const pool = list.filter(candidate => candidateCapability(candidate, 'supportsPdf'))
+    const target = need === 'coding' ? pickStrongestCoding(pool) : pickScored(pool, generalNeed)
     if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'document' }
   }
   if ((mode === 'web' || mode === 'url') && !hasTavilyKeys) {
-    const target = list.find(candidate => candidateCapability(candidate, 'supportsUrlContext'))
-      || gemini[0]
-      || list[0]
+    const pool = list.filter(candidate => candidateCapability(candidate, 'supportsUrlContext'))
+    const target = need === 'coding' ? pickStrongestCoding(pool) : pickScored(pool, generalNeed)
     if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'web' }
   }
-  const isCode = /```/.test(body)
-  if (isCode || body.length > 1500) {
-    const slow = gemini.filter(candidate => candidateSpeed(candidate) === 'slow')
-    const target = slow[slow.length - 1] || gemini[gemini.length - 1] || list[list.length - 1] || list[0]
-    if (target) {
-      return { modelKey: candidateKeyOf(target), reasonCode: isCode ? 'coding' : 'complex_reasoning' }
-    }
+  if (isCode) {
+    const target = pickStrongestCoding(list)
+    if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'coding' }
   }
-  if (body.length < 300) {
-    const target = list.find(candidate => candidateSpeed(candidate) === 'fast') || gemini[0] || list[0]
-    if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'fast' }
-  }
-  const target = list.find(candidate => candidateSpeed(candidate) === 'medium') || list[0]
-  if (target) return { modelKey: candidateKeyOf(target), reasonCode: 'fast' }
+  const target = pickScored(list, generalNeed)
+  if (target) return { modelKey: candidateKeyOf(target), reasonCode: generalNeed === 'hard' ? 'complex_reasoning' : 'fast' }
   return { modelKey: null, reasonCode: 'fast' }
 }
 

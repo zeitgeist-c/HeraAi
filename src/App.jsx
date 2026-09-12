@@ -10,6 +10,7 @@ import AppHeader from './components/AppHeader'
 import ChatMessage from './components/ChatMessage'
 import HistoryOverlay from './components/HistoryOverlay'
 import StatsPanel from './components/StatsPanel'
+import ChangelogPanel from './components/ChangelogPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
 import ComparisonPanel from './components/ComparisonPanel'
@@ -59,7 +60,7 @@ import {
   isLegacyOcrPromptMessage,
 } from './lib/messageDisplay'
 import i18n from './i18n'
-import { updateStats } from './lib/stats'
+import { recordGenerationResults, recordPromptStarted, recordToolUsage } from './lib/stats'
 import { resolveKeysForRequest } from './lib/keyManager'
 import { TTS_FALLBACK_MODEL, generateSpeech, isTtsFallbackableCode, transcribeAudio } from './lib/voiceApi'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
@@ -480,6 +481,7 @@ function App() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [showChangelog, setShowChangelog] = useState(false)
   const [chatSearchOpen, setChatSearchOpen] = useState(false)
   const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [chatSearchIndex, setChatSearchIndex] = useState(0)
@@ -598,12 +600,12 @@ function App() {
   useEffect(() => {
     focusComposer()
     const handleWindowFocus = () => {
-      if (showSettings || showHistory || showStats) return
+      if (showSettings || showHistory || showStats || showChangelog) return
       focusComposer()
     }
     window.addEventListener('focus', handleWindowFocus)
     return () => window.removeEventListener('focus', handleWindowFocus)
-  }, [focusComposer, showSettings, showHistory, showStats])
+  }, [focusComposer, showSettings, showHistory, showStats, showChangelog])
 
   const chatSearchMatchIds = useMemo(
     () => findChatMatchIds(messages, chatSearchQuery),
@@ -1455,7 +1457,7 @@ function App() {
         if (storedSession) {
           let found = false
           const finalCompletedAt = effectiveGenerationStatus === 'completed'
-            ? (generation.completedAt || Date.now())
+            ? Date.now()
             : null
           let nextMessages = (storedSession.messages || []).map(message => {
             if (message.id !== generation.assistantMessageId || message.role !== 'model') return message
@@ -1512,6 +1514,22 @@ function App() {
           if (effectiveGenerationStatus === 'cancelled' && !finalContent) {
             nextMessages = nextMessages.filter(message => message.id !== generation.assistantMessageId)
           }
+
+          const recordedMessage = nextMessages.find(message => (
+            message.id === generation.assistantMessageId && message.role === 'model'
+          ))
+          const recordStartedAt = Number(recordedMessage?.startedAt ?? generation.startedAt)
+          const streamEndedAt = Number(generation.completedAt)
+          const statsEndedAt = Number.isFinite(streamEndedAt) ? streamEndedAt : finalCompletedAt
+          void recordGenerationResults([{
+            dedupId: generation.jobId,
+            outcome: effectiveGenerationStatus,
+            modelId: generation.resolvedModel || generation.model,
+            provider: generation.provider,
+            durationMs: effectiveGenerationStatus === 'completed' && statsEndedAt != null && Number.isFinite(recordStartedAt)
+              ? Math.max(0, statsEndedAt - recordStartedAt)
+              : null,
+          }])
 
           if (partialPersistTimerRef.current != null) {
             window.clearTimeout(partialPersistTimerRef.current)
@@ -1807,6 +1825,28 @@ function App() {
       if (terminal) {
         if (finalizingGenerationRef.current === generation.jobId) return true
         finalizingGenerationRef.current = generation.jobId
+        void recordGenerationResults(
+          nextMessages
+            .filter(message => (
+              message.comparisonId === comparisonId
+              && message.role === 'model'
+              && ['done', 'error', 'cancelled'].includes(message.status)
+            ))
+            .map(message => {
+              const slot = message.variantId || message.comparisonSlot
+              const startedAt = Number(message.startedAt)
+              const completedAt = Number(message.completedAt)
+              return {
+                dedupId: `${generation.jobId}:${slot}`,
+                outcome: message.status === 'done' ? 'completed' : message.status,
+                modelId: message.resolvedModel || message.model,
+                provider: message.provider,
+                durationMs: message.status === 'done' && Number.isFinite(startedAt) && Number.isFinite(completedAt)
+                  ? Math.max(0, completedAt - startedAt)
+                  : null,
+              }
+            }),
+        )
         void persistSessionMessages(generation.sessionId, nextMessages).then(async () => {
           const response = await sendRuntimeMessage({
             type: 'DONE_ACK',
@@ -3386,7 +3426,7 @@ function App() {
         return
       }
       setInput(current => appendToInputValue(current, transcript))
-      await updateStats('voice')
+      await recordToolUsage('voice')
       window.requestAnimationFrame(() => focusComposer())
     } catch (error) {
       if (error?.name !== 'AbortError') {
@@ -3659,14 +3699,27 @@ function App() {
     let requestProvider = isComparison
       ? comparisonModels[0].provider
       : getProviderForModel(requestModel, selectedProvider)
+    const autoDraftMimes = draftAttachments.map(attachment => attachment?.mimeType).filter(Boolean)
+    const autoReuseMimes = canReusePreviousImage
+      ? activeContextAttachments.map(attachment => attachment?.mimeType).filter(Boolean)
+      : []
+    const autoMimes = [...autoDraftMimes, ...autoReuseMimes]
+    const autoNeedsImage = autoMimes.some(mimeType => typeof mimeType === 'string' && mimeType.startsWith('image/'))
+    const autoNeedsPdf = autoMimes.includes('application/pdf')
+    const autoCandidates = (autoNeedsImage || autoNeedsPdf)
+      ? MODEL_CATALOG.filter(model => (
+        (!autoNeedsImage || model.capabilities?.supportsImage === true)
+        && (!autoNeedsPdf || model.capabilities?.supportsPdf === true)
+      ))
+      : MODEL_CATALOG
     const autoDecision = !isComparison
       && modelSelectionMode === 'auto'
       && !hasModelOverride
       ? selectLocalFallback({
           text: userText,
           mode,
-          mimeTypes: draftAttachments.map(attachment => attachment?.mimeType).filter(Boolean),
-          candidates: MODEL_CATALOG,
+          mimeTypes: autoMimes,
+          candidates: autoCandidates,
         })
       : null
     if (autoDecision?.modelKey) {
@@ -3788,7 +3841,8 @@ function App() {
            : modeRequestUrls)
       : explicitUrls
 
-    updateStats(mode === 'web' ? ['message', 'search'] : 'message')
+    void recordPromptStarted()
+    if (mode === 'web') void recordToolUsage('search')
     const userMessageId = createUniqueMessageId(msgIdCounter)
     const assistantMessageId = createUniqueMessageId(msgIdCounter)
     const requestId = `${Date.now()}-${assistantMessageId}`
@@ -4283,7 +4337,7 @@ function App() {
 
       cropOperation.phase = 'active'
       setIsCropActive(true)
-      void updateStats('screenshot')
+      void recordToolUsage('screenshot')
       notifySuccess(t('chat.tooltips.screenshot_hint'));
     } catch (e) {
       if (
@@ -4602,6 +4656,10 @@ function App() {
     return <StatsPanel onClose={() => setShowStats(false)} />
   }
 
+  if (showChangelog) {
+    return <ChangelogPanel onClose={() => setShowChangelog(false)} />
+  }
+
   const isWelcomeOnly = (
     messages.length === 1 &&
     messages[0]?.role === 'model' &&
@@ -4731,6 +4789,7 @@ function App() {
         onImport={handleImport}
         onSettings={() => setShowSettings(true)}
         onStats={() => setShowStats(true)}
+        onChangelog={() => setShowChangelog(true)}
         searchOpen={chatSearchOpen}
         searchQuery={chatSearchQuery}
         searchCounterText={chatSearchCounterText}
@@ -4942,6 +5001,33 @@ function App() {
               </button>
               <button
                 type="button"
+                title={dictationPhase === 'recording'
+                  ? t('chat.tooltips.stop_recording')
+                  : dictationPhase === 'requesting'
+                    ? t('chat.tooltips.requesting_microphone')
+                    : dictationPhase === 'transcribing'
+                    ? t('chat.tooltips.cancel_transcription')
+                    : t('chat.tooltips.voice_input')}
+                aria-label={dictationPhase === 'recording'
+                  ? t('chat.tooltips.stop_recording')
+                  : dictationPhase === 'requesting'
+                    ? t('chat.tooltips.requesting_microphone')
+                    : dictationPhase === 'transcribing'
+                    ? t('chat.tooltips.cancel_transcription')
+                    : t('chat.tooltips.voice_input')}
+                aria-pressed={dictationPhase !== 'idle'}
+                onClick={handleDictationToggle}
+                disabled={isGenerating}
+                className={getQuickActionClass(dictationPhase !== 'idle')}
+              >
+                {['requesting', 'transcribing'].includes(dictationPhase)
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : dictationPhase === 'recording'
+                    ? <Square className="h-3.5 w-3.5 fill-current" />
+                    : <Mic className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
                 title={t('chat.comparison.open')}
                 aria-label={t('chat.comparison.open')}
                 onClick={openComparisonPanel}
@@ -4949,33 +5035,6 @@ function App() {
                 className={getQuickActionClass(showComparison)}
               >
                 <Columns2 className="h-4 w-4" />
-              </button>
-              <button
-                  type="button"
-                  title={dictationPhase === 'recording'
-                    ? t('chat.tooltips.stop_recording')
-                    : dictationPhase === 'requesting'
-                      ? t('chat.tooltips.requesting_microphone')
-                      : dictationPhase === 'transcribing'
-                      ? t('chat.tooltips.cancel_transcription')
-                      : t('chat.tooltips.voice_input')}
-                  aria-label={dictationPhase === 'recording'
-                    ? t('chat.tooltips.stop_recording')
-                    : dictationPhase === 'requesting'
-                      ? t('chat.tooltips.requesting_microphone')
-                      : dictationPhase === 'transcribing'
-                      ? t('chat.tooltips.cancel_transcription')
-                      : t('chat.tooltips.voice_input')}
-                  aria-pressed={dictationPhase !== 'idle'}
-                  onClick={handleDictationToggle}
-                  disabled={isGenerating}
-                  className={getQuickActionClass(dictationPhase !== 'idle')}
-                >
-                  {['requesting', 'transcribing'].includes(dictationPhase)
-                    ? <Loader2 className="h-4 w-4 animate-spin" />
-                    : dictationPhase === 'recording'
-                      ? <Square className="h-3.5 w-3.5 fill-current" />
-                      : <Mic className="h-4 w-4" />}
               </button>
               {dictationPhase === 'recording' && (
                 <span className="shrink-0 px-1 text-[10px] font-medium tabular-nums text-destructive">

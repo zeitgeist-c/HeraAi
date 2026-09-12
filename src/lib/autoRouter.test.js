@@ -27,6 +27,7 @@ const candidates = [
     provider: 'gemini',
     modelId: 'gemini-3.1-flash-lite',
     speed: 'fast',
+    routing: { quality: 1, coding: 1 },
     capabilities: { supportsImage: true, supportsPdf: true, supportsUrlContext: true },
   },
   {
@@ -34,6 +35,7 @@ const candidates = [
     provider: 'gemini',
     modelId: 'gemini-3.6-flash',
     speed: 'medium',
+    routing: { quality: 3, coding: 3 },
     capabilities: { supportsImage: true, supportsPdf: true, supportsUrlContext: true },
   },
   {
@@ -41,6 +43,7 @@ const candidates = [
     provider: 'gemini',
     modelId: 'gemini-3.8-flash',
     speed: 'slow',
+    routing: { quality: 5, coding: 5 },
     capabilities: { supportsImage: true, supportsPdf: true, supportsUrlContext: true },
   },
 ]
@@ -121,13 +124,14 @@ describe('autoRouter contract', () => {
     expect(parseRouterResponse('```json\n{"modelKey":"gemini:gemini-3.6-flash","reasonCode":"fast"}\n```', candidates).ok).toBe(true)
   })
 
-  it('selects local fallbacks by capability, length, and speed', () => {
+  it('selects local fallbacks by capability, need signals, and speed', () => {
     expect(selectLocalFallback({ text: 'hi', mimeTypes: ['image/png'], candidates }).reasonCode).toBe('vision')
     expect(selectLocalFallback({ text: 'hi', mimeTypes: ['application/pdf'], candidates }).reasonCode).toBe('document')
     expect(selectLocalFallback({ text: 'read https://example.com', mode: 'web', candidates, hasTavilyKeys: false }).reasonCode).toBe('web')
     expect(selectLocalFallback({ text: '```js\nconst a = 1\n```', candidates }))
       .toMatchObject({ modelKey: 'gemini:gemini-3.8-flash', reasonCode: 'coding' })
-    expect(selectLocalFallback({ text: 'y'.repeat(1600), candidates }).modelKey).toBe('gemini:gemini-3.8-flash')
+    expect(selectLocalFallback({ text: 'y'.repeat(1600), candidates }))
+      .toMatchObject({ modelKey: 'gemini:gemini-3.6-flash', reasonCode: 'fast' })
     expect(selectLocalFallback({ text: 'short', candidates }).modelKey).toBe('gemini:gemini-3.1-flash-lite')
     expect(selectLocalFallback({ text: 'm'.repeat(500), candidates }).modelKey).toBe('gemini:gemini-3.6-flash')
   })
@@ -276,5 +280,65 @@ describe('classifyWithGemmaRouter', () => {
     expect(fetchImpl.mock.calls[0][0]).toContain(ROUTER_BACKUP_MODEL_ID)
     expect(fetchImpl.mock.calls[0][0]).toContain(encodeURIComponent('test-key-1'))
     expect(result.routerModel).toBe(ROUTER_BACKUP_MODEL_ID)
+  })
+})
+
+describe('local fallback provider fairness and need signals', () => {
+  it('routes coding questions to the strongest coding model across providers', () => {
+    expect(selectLocalFallback({
+      text: '```js\nconst a = 1\n``` bu ne yapar?',
+      candidates: MODEL_CATALOG,
+    })).toMatchObject({
+      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
+      reasonCode: 'coding',
+    })
+  })
+
+  it('routes hard analytical questions to a quality-gated fast model, not Gemini-only', () => {
+    expect(selectLocalFallback({
+      text: 'X ve Y yaklaşımlarını karşılaştır, neden biri daha iyi? Hangisini seçmeliyim?',
+      candidates: MODEL_CATALOG,
+    })).toMatchObject({
+      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
+      reasonCode: 'complex_reasoning',
+    })
+  })
+
+  it('routes medium questions to the fastest quality-gated model across providers', () => {
+    expect(selectLocalFallback({
+      text: 'Fotoğraf makinesi nasıl çalışır? Özetle anlat.',
+      candidates: MODEL_CATALOG,
+    })).toMatchObject({
+      modelKey: 'ollama:gpt-oss:120b',
+      reasonCode: 'fast',
+    })
+  })
+
+  it('keeps simple short questions on the fastest model', () => {
+    expect(selectLocalFallback({
+      text: 'Merhaba, nasılsın?',
+      candidates: MODEL_CATALOG,
+    })).toMatchObject({
+      modelKey: 'gemini:gemini-3.1-flash-lite',
+      reasonCode: 'fast',
+    })
+  })
+
+  it('routes hard image questions to a quality-gated image model', () => {
+    expect(selectLocalFallback({
+      text: 'Bu iki grafiği karşılaştır, neden farklı? Hangisi doğru?',
+      mimeTypes: ['image/png'],
+      candidates: MODEL_CATALOG,
+    })).toMatchObject({
+      modelKey: 'gemini:gemini-3.8-flash',
+      reasonCode: 'vision',
+    })
+  })
+
+  it('does not promote length alone past the medium floor', () => {
+    expect(selectLocalFallback({ text: 'm'.repeat(299), candidates: MODEL_CATALOG }).modelKey)
+      .toBe('gemini:gemini-3.1-flash-lite')
+    expect(selectLocalFallback({ text: 'm'.repeat(1501), candidates: MODEL_CATALOG }))
+      .toMatchObject({ modelKey: 'ollama:gpt-oss:120b', reasonCode: 'fast' })
   })
 })
