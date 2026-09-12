@@ -34,6 +34,8 @@
             "set_primary": "Set as Primary",
             "primary_badge": "Primary",
             "no_keys": "No keys added yet",
+            "new_key_title": "NEW KEY",
+            "summary": "{{total}} keys · {{ready}} ready",
             "test_success": "Key test successful!",
             "test_failed": "Key test failed",
             "add_success": "Key added successfully",

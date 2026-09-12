@@ -2,6 +2,20 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.9.3',
+    date: '2026-09-12',
+    changes: {
+      tr: [
+        'API anahtar kartları: büyük maskeli kart ve gradyan Test düğmesi',
+        'Anahtar sayaç özeti ve birleşik anahtar ekleme kartı',
+      ],
+      en: [
+        'API key cards: large masked card and gradient Test button',
+        'Key count summary and joined key entry card',
+      ],
+    },
+  },
+  {
     version: '1.9.2',
     date: '2026-09-12',
     changes: {
