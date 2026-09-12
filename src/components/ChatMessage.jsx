@@ -1,22 +1,26 @@
-import { memo, useState } from 'react'
-import { Check, Copy, FileText, Image as ImageIcon, Pencil, RefreshCw } from 'lucide-react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
+import { Bot, Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { useTranslation } from 'react-i18next'
-import toast from 'react-hot-toast'
+import { notifyError, notifySuccess } from '../lib/notify'
+
+import { getMessageDisplayContent } from '../lib/messageDisplay'
+import ResponseDuration from './ResponseDuration'
 
 const COPY_TIMEOUT_MS = 2000
+const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
 
 async function copyText(text, { onSuccess, successMessage, errorMessage }) {
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable')
     await navigator.clipboard.writeText(text)
     onSuccess()
-    toast.success(successMessage)
+    notifySuccess(successMessage)
   } catch (error) {
     console.error('Clipboard copy failed', error)
-    toast.error(errorMessage)
+    notifyError(errorMessage)
   }
 }
 
@@ -68,14 +72,84 @@ function CodeBlock({ className, children, ...props }) {
   )
 }
 
-const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
+const ChatMessage = ({
+  message,
+  onEdit,
+  onRetry,
+  retryModels = [],
+  modelLabels = {},
+  currentModel,
+  retryDisabled = false,
+  showSources = false,
+  speechEnabled = false,
+  speechDisabled = false,
+  speechStatus = 'idle',
+  onToggleSpeech,
+  onSelectWinner,
+  searchMatch = false,
+  searchCurrent = false,
+  concealMeta = false,
+}) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
+  const visibleContent = getMessageDisplayContent(message)
   const [copied, setCopied] = useState(false)
+  const [retryMenuOpen, setRetryMenuOpen] = useState(false)
+  const [retryMenuPlacement, setRetryMenuPlacement] = useState('up')
+  const retryMenuId = useId()
+  const retryMenuRef = useRef(null)
+  const retryTriggerRef = useRef(null)
   const sources = Array.isArray(message.sources) ? message.sources : []
+  const messageAttachments = Array.isArray(message.attachments) ? message.attachments : []
+  const displayedAttachments = Array.isArray(message.displayAttachmentIds)
+    ? messageAttachments.filter(attachment => message.displayAttachmentIds.includes(attachment?.id))
+    : messageAttachments
+  const displayedWebUrls = Array.isArray(message.displayWebUrls)
+    ? message.displayWebUrls
+    : (Array.isArray(message.webUrls) ? message.webUrls : [])
+  const isPending = message.status === 'thinking' || message.status === 'streaming'
+  const speechEligible = speechEnabled
+    && Boolean(visibleContent)
+    && !isPending
+    && !['error', 'cancelled', 'cancelled_empty', 'interrupted'].includes(message.status)
+  const availableRetryModels = Array.isArray(retryModels)
+    ? retryModels.map(model => typeof model === 'string'
+        ? { key: model, modelId: model, label: modelLabels[model] || model }
+        : model)
+    : []
+  const hasRetryModelChoices = availableRetryModels.length > 0
+  const concreteModelLabel = typeof message.model === 'string' && message.model
+    ? (modelLabels[message.model] || message.model)
+    : ''
+  const requestedModelLabel = message.selectionMode === 'auto'
+    ? `${t('chat.auto.label')} → ${concreteModelLabel}`
+    : concreteModelLabel
+  const usedModelLabel = message.resolvedModel && message.resolvedModel !== message.model
+    ? `${requestedModelLabel || message.model} → ${modelLabels[message.resolvedModel] || message.resolvedModel}`
+    : requestedModelLabel
+  const autoRouteLabels = message.selectionMode === 'auto'
+    ? [message.routerModel, message.resolvedModel]
+      .filter((modelId, index, list) => (
+        typeof modelId === 'string' && modelId && list.indexOf(modelId) === index
+      ))
+      .map(modelId => modelLabels[modelId] || modelId)
+    : []
+  const autoChainLabel = autoRouteLabels.length > 0
+    ? `${t('chat.auto.label')} → ${autoRouteLabels.join(' → ')}`
+    : ''
+  const showWinnerControl = isBot
+    && message.comparisonId != null
+    && message.selectable !== false
+    && message.comparisonSelected !== true
+    && message.status === 'done'
+    && typeof onSelectWinner === 'function'
+  const isContextExcluded = message.contextExcluded === true
+  const errorMessage = message.errorCode
+    ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
+    : t('chat.status.error')
 
   const handleCopyMessage = () => {
-    copyText(message.content || '', {
+    copyText(visibleContent, {
       onSuccess: () => {
         setCopied(true)
         setTimeout(() => setCopied(false), COPY_TIMEOUT_MS)
@@ -85,50 +159,235 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
     })
   }
 
+  useEffect(() => {
+    if (!retryMenuOpen) return undefined
+
+    const preferredModelButton = retryMenuRef.current?.querySelector('[data-current-model="true"]')
+      || retryMenuRef.current?.querySelector('[data-retry-model]')
+    preferredModelButton?.focus()
+
+    const handleOutsideClick = (event) => {
+      if (retryMenuRef.current?.contains(event.target)) return
+      if (retryTriggerRef.current?.contains(event.target)) return
+      setRetryMenuOpen(false)
+    }
+    const handleFocusChange = (event) => {
+      if (retryMenuRef.current?.contains(event.target)) return
+      if (retryTriggerRef.current?.contains(event.target)) return
+      setRetryMenuOpen(false)
+    }
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') return
+      setRetryMenuOpen(false)
+      retryTriggerRef.current?.focus()
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    document.addEventListener('focusin', handleFocusChange)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick)
+      document.removeEventListener('focusin', handleFocusChange)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [retryMenuOpen])
+
+  const handleRetryTrigger = () => {
+    if (retryDisabled || isPending) return
+    if (!hasRetryModelChoices) {
+      onRetry?.(message)
+      return
+    }
+    if (!retryMenuOpen) {
+      const triggerBounds = retryTriggerRef.current?.getBoundingClientRect()
+      const scrollBounds = retryTriggerRef.current?.closest('main')?.getBoundingClientRect()
+      if (triggerBounds) {
+        const topBoundary = scrollBounds?.top ?? 0
+        const bottomBoundary = scrollBounds?.bottom ?? window.innerHeight
+        const spaceAbove = triggerBounds.top - topBoundary
+        const spaceBelow = bottomBoundary - triggerBounds.bottom
+        setRetryMenuPlacement(
+          spaceAbove >= RETRY_MENU_ESTIMATED_HEIGHT_PX || spaceAbove >= spaceBelow ? 'up' : 'down'
+        )
+      }
+    }
+    setRetryMenuOpen(open => !open)
+  }
+
+  const handleRetryWithModel = (model) => {
+    setRetryMenuOpen(false)
+    onRetry?.(message, model)
+  }
+
+  const renderRetryButton = () => (
+    <button
+      ref={retryTriggerRef}
+      type="button"
+      onClick={handleRetryTrigger}
+      title={hasRetryModelChoices ? t('chat.retry_model.title') : t('chat.tooltips.retry')}
+      aria-label={hasRetryModelChoices ? t('chat.retry_model.title') : t('chat.tooltips.retry')}
+      aria-haspopup={hasRetryModelChoices ? 'dialog' : undefined}
+      aria-expanded={hasRetryModelChoices ? retryMenuOpen : undefined}
+      aria-controls={hasRetryModelChoices ? retryMenuId : undefined}
+      className={`hera-icon-button relative h-7 w-7 ${
+        retryMenuOpen ? 'bg-primary/10 text-primary' : ''
+      }`}
+      disabled={retryDisabled || isPending}
+    >
+      <RefreshCw className="h-3.5 w-3.5" />
+      {hasRetryModelChoices && (
+        <ChevronDown className="absolute bottom-0.5 right-0.5 h-2 w-2 opacity-65" />
+      )}
+    </button>
+  )
+
+  const renderRetryMenu = (alignment) => {
+    if (!retryMenuOpen || !hasRetryModelChoices) return null
+
+    return (
+      <div
+        ref={retryMenuRef}
+        id={retryMenuId}
+        role="dialog"
+        aria-label={t('chat.retry_model.title')}
+        className={`hera-menu absolute z-30 w-[240px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border/80 bg-popover/95 shadow-xl shadow-black/10 backdrop-blur-xl ${
+          alignment === 'right' ? 'right-0' : 'left-0'
+        } ${
+          retryMenuPlacement === 'up' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+        }`}
+      >
+        <div className="border-b border-border/60 bg-primary/[0.055] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-foreground">{t('chat.retry_model.title')}</p>
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{t('chat.retry_model.description')}</p>
+            </div>
+          </div>
+        </div>
+        <div className="space-y-0.5 p-1.5">
+          {availableRetryModels.map((model) => {
+            const modelId = model.modelId
+            const isCurrentModel = modelId === currentModel
+            const rowLabel = model.label || modelLabels[modelId] || modelId
+            const showProvider = Boolean(model.provider)
+            return (
+              <button
+                key={model.key || modelId}
+                type="button"
+                data-retry-model={modelId}
+                data-current-model={isCurrentModel ? 'true' : undefined}
+                onClick={() => handleRetryWithModel(modelId)}
+                disabled={retryDisabled || isPending}
+                className={`flex min-h-9 w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:pointer-events-none disabled:opacity-45 ${
+                  isCurrentModel
+                    ? 'border-primary/20 bg-primary/[0.09] text-foreground'
+                    : 'border-transparent text-foreground hover:border-border/70 hover:bg-secondary/80'
+                }`}
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  isCurrentModel
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border/90 bg-background/70'
+                }`}>
+                  {isCurrentModel && <Check className="h-2.5 w-2.5" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  {rowLabel}
+                </span>
+                {showProvider && (
+                  <span aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground">
+                    {t(`chat.model_providers.${model.provider}`)}
+                  </span>
+                )}
+                {isCurrentModel && (
+                  <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                    {t('chat.retry_model.default')}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   if (!isBot) {
     return (
-      <article className="group flex w-full justify-end">
-        <div className="max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm">
-          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
-            {message.content}
-          </div>
+      <article
+        data-testid="user-message"
+        {...(message.id ? { id: `chat-msg-${message.id}` } : {})}
+        {...(searchMatch ? { 'data-search-match': 'true' } : {})}
+        {...(searchCurrent ? { 'data-search-current': 'true' } : {})}
+        className="group flex w-full justify-end"
+      >
+        <div className={`max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm${searchCurrent ? ' ring-2 ring-primary/70' : searchMatch ? ' ring-1 ring-primary/30' : ''}`}>
+          {visibleContent && (
+            <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
+              {visibleContent}
+            </div>
+          )}
 
-          {message.attachments?.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {message.attachments.map((attachment, index) => (
+          {(displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (
+            <div className={`${visibleContent ? 'mt-2 ' : ''}flex flex-wrap gap-1.5`}>
+              {displayedAttachments.map((attachment, index) => (
                 <div
                   key={`${attachment.name || 'attachment'}-${index}`}
                   className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground"
                 >
-                  {attachment.mimeType.startsWith('image/')
+                  {attachment.mimeType?.startsWith('image/')
                     ? <ImageIcon className="h-3 w-3 shrink-0" />
                     : <FileText className="h-3 w-3 shrink-0" />}
                   <span className="max-w-[150px] truncate">{attachment.name || t('chat.attachment')}</span>
+                  {attachment.availability && attachment.availability !== 'ready' && (
+                    <span className="text-destructive">{t('chat.attachment_unavailable')}</span>
+                  )}
                 </div>
+              ))}
+              {displayedWebUrls.map(url => (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center gap-1.5 rounded-lg border border-primary/20 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground no-underline hover:border-primary/35 hover:text-foreground"
+                >
+                  <Globe className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="max-w-[180px] truncate">{url}</span>
+                </a>
               ))}
             </div>
           )}
 
-          {message.content && (
-            <div className="mt-1.5 flex justify-end gap-0.5">
-              <button
-                type="button"
-                onClick={() => onRetry?.(message)}
-                title={t('chat.tooltips.retry')}
-                aria-label={t('chat.tooltips.retry')}
-                className="hera-icon-button h-7 w-7"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onEdit?.(message.content)}
-                title={t('chat.tooltips.edit')}
-                aria-label={t('chat.tooltips.edit')}
-                className="hera-icon-button h-7 w-7"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+          {(visibleContent || displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (
+            <div className="relative mt-1.5 flex flex-col items-end gap-1.5">
+              <div className="flex justify-end gap-0.5">
+                {visibleContent && (
+                  <button
+                    type="button"
+                    onClick={handleCopyMessage}
+                    title={t('chat.tooltips.copy')}
+                    aria-label={t('chat.tooltips.copy')}
+                    className="hera-icon-button h-7 w-7"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                )}
+                {visibleContent && (
+                  <button
+                    type="button"
+                    onClick={() => onEdit?.(visibleContent)}
+                    title={t('chat.tooltips.edit')}
+                    aria-label={t('chat.tooltips.edit')}
+                    className="hera-icon-button h-7 w-7"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -137,17 +396,26 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
   }
 
   return (
-    <article data-testid="assistant-message" className="group w-full min-w-0 py-1">
+    <article
+      data-testid="assistant-message"
+      {...(message.id ? { id: `chat-msg-${message.id}` } : {})}
+      {...(searchMatch ? { 'data-search-match': 'true' } : {})}
+      {...(searchCurrent ? { 'data-search-current': 'true' } : {})}
+      {...(isContextExcluded ? { 'data-context-excluded': 'true' } : {})}
+      className={`group w-full min-w-0 py-1${searchCurrent ? ' rounded-xl ring-2 ring-primary/70' : searchMatch ? ' rounded-xl ring-1 ring-primary/30' : ''}${isContextExcluded ? ' opacity-60' : ''}`}
+    >
       {isPending && !message.content ? (
         <div className="min-h-16 space-y-2 rounded-xl py-2">
           <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-muted-foreground/15" />
           <div className="h-2.5 w-1/2 animate-pulse rounded-full bg-muted-foreground/15" />
-          <span className="block pt-1 text-[11px] text-muted-foreground">{t('chat.status.thinking')}</span>
+          <span className="block pt-1 text-[11px] text-muted-foreground">
+            {t(message.selectionMode === 'auto' ? 'chat.status.selecting_model' : 'chat.status.thinking')}
+          </span>
         </div>
       ) : (
-        <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
+        <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:whitespace-pre-wrap prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
           {isPending ? (
-            message.content
+            <div className="whitespace-pre-wrap">{message.content}</div>
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -165,7 +433,7 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
                 },
               }}
             >
-              {message.content}
+              {message.content || ''}
             </ReactMarkdown>
           )}
         </div>
@@ -175,10 +443,13 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
         <span className="mt-1 block text-[11px] text-muted-foreground">{t('chat.status.cancelled')}</span>
       )}
       {message.status === 'error' && (
-        <span className="mt-1 block text-[11px] text-destructive">{t('chat.status.error')}</span>
+        <span className="mt-1 block text-[11px] text-destructive">{errorMessage}</span>
+      )}
+      {message.status === 'interrupted' && (
+        <span className="mt-1 block text-[11px] text-amber-500">{t('chat.status.interrupted')}</span>
       )}
 
-      {sources.length > 0 && (
+      {showSources && sources.length > 0 && (
         <div className="mt-3">
           <span className="mb-1.5 block text-[11px] font-semibold text-muted-foreground">{t('chat.sources_label')}</span>
           <div className="flex flex-wrap gap-1.5">
@@ -200,27 +471,83 @@ const ChatMessage = ({ message, onEdit, isPending, onRetry }) => {
         </div>
       )}
 
-      {message.content && (
-        <div className="mt-1.5 flex min-h-8 items-center gap-0.5 border-t border-border/45 pt-1.5">
-          <button
-            type="button"
-            onClick={handleCopyMessage}
-            aria-label={t('chat.tooltips.copy')}
-            className="hera-action-button"
+      {(message.content || message.status === 'interrupted' || message.status === 'error') && (
+        <div className="relative mt-1.5 border-t border-border/45 pt-1.5">
+          <div
+            data-testid="response-action-pill"
+            className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-background/40 py-0.5 pl-1 pr-2"
           >
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-            <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onRetry?.(message)}
-            aria-label={t('chat.tooltips.retry')}
-            className="hera-action-button"
-            disabled={isPending}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            <span>{t('chat.tooltips.retry_short')}</span>
-          </button>
+            <button
+              type="button"
+              onClick={handleCopyMessage}
+              title={t('chat.tooltips.copy')}
+              aria-label={t('chat.tooltips.copy')}
+              className="hera-icon-button h-7 w-7"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+            {speechEligible && (
+              <button
+                type="button"
+                onClick={() => onToggleSpeech?.(message)}
+                disabled={speechDisabled}
+                title={speechStatus === 'playing'
+                  ? t('chat.tooltips.stop_speech')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}
+                aria-label={speechStatus === 'playing'
+                  ? t('chat.tooltips.stop_speech')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}
+                aria-pressed={speechStatus !== 'idle'}
+                className="hera-icon-button h-7 w-7"
+              >
+                {speechStatus === 'loading'
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : speechStatus === 'playing'
+                    ? <Square className="h-3.5 w-3.5 fill-current" />
+                    : <Volume2 className="h-3.5 w-3.5" />}
+              </button>
+            )}
+            {!concealMeta && renderRetryButton()}
+            {showWinnerControl && (
+              <button
+                type="button"
+                onClick={() => onSelectWinner?.(message)}
+                aria-label={t('chat.comparison.continue_with_this')}
+                className="hera-action-button"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>{t('chat.comparison.continue_with_this')}</span>
+              </button>
+            )}
+            {(usedModelLabel || message.startedAt != null) && (
+              <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border/70" />
+            )}
+            <ResponseDuration message={message} />
+            {usedModelLabel && (
+              <span
+                data-testid="message-model"
+                className="inline-flex min-h-6 min-w-0 max-w-full items-center gap-1 rounded-full border border-primary/25 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground"
+                title={`${t('chat.model_used')}: ${usedModelLabel}`}
+              >
+                <Bot className="h-3 w-3 shrink-0 text-primary" />
+                <span className="truncate">{usedModelLabel}</span>
+              </span>
+            )}
+          </div>
+          {autoChainLabel && (
+            <span
+              data-testid="auto-chain"
+              className="mt-1 block max-w-full truncate text-left text-[10px] font-medium text-muted-foreground/70"
+              title={`${t('chat.model_used')}: ${autoChainLabel}`}
+            >
+              {autoChainLabel}
+            </span>
+          )}
+          {renderRetryMenu('left')}
         </div>
       )}
     </article>
@@ -235,10 +562,40 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.id === nextMessage.id &&
     prevMessage.role === nextMessage.role &&
     prevMessage.content === nextMessage.content &&
+    prevMessage.displayContent === nextMessage.displayContent &&
+    prevMessage.model === nextMessage.model &&
+    prevMessage.resolvedModel === nextMessage.resolvedModel &&
+    prevMessage.selectionMode === nextMessage.selectionMode &&
+    prevMessage.selectionReasonCode === nextMessage.selectionReasonCode &&
+    prevMessage.routerModel === nextMessage.routerModel &&
+    prevMessage.comparisonId === nextMessage.comparisonId &&
+    prevMessage.variantId === nextMessage.variantId &&
+    prevMessage.selectable === nextMessage.selectable &&
+    prevMessage.comparisonSelected === nextMessage.comparisonSelected &&
+    prevMessage.contextExcluded === nextMessage.contextExcluded &&
+    prevMessage.startedAt === nextMessage.startedAt &&
+    prevMessage.completedAt === nextMessage.completedAt &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
-    prevProps.isPending === nextProps.isPending &&
-    prevMessage.attachments === nextMessage.attachments
+    prevMessage.attachments === nextMessage.attachments &&
+    prevMessage.displayAttachmentIds === nextMessage.displayAttachmentIds &&
+    prevMessage.webUrls === nextMessage.webUrls &&
+    prevMessage.displayWebUrls === nextMessage.displayWebUrls &&
+    prevProps.currentModel === nextProps.currentModel &&
+    prevProps.retryDisabled === nextProps.retryDisabled &&
+    prevProps.showSources === nextProps.showSources &&
+    prevProps.speechEnabled === nextProps.speechEnabled &&
+    prevProps.speechDisabled === nextProps.speechDisabled &&
+    prevProps.speechStatus === nextProps.speechStatus &&
+    prevProps.retryModels === nextProps.retryModels &&
+    prevProps.modelLabels === nextProps.modelLabels &&
+    prevProps.onEdit === nextProps.onEdit &&
+    prevProps.onRetry === nextProps.onRetry &&
+    prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
+    prevProps.onSelectWinner === nextProps.onSelectWinner &&
+    prevProps.concealMeta === nextProps.concealMeta &&
+    prevProps.searchMatch === nextProps.searchMatch &&
+    prevProps.searchCurrent === nextProps.searchCurrent
   )
 }
 

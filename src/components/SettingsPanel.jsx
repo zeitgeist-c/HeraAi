@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Settings, Save, Sparkles, ArrowLeft, Loader2, Key, Eye, EyeOff, ShieldAlert } from 'lucide-react'
+import {
+  Settings,
+  Save,
+  Sparkles,
+  ArrowLeft,
+  Loader2,
+  Key,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  ChevronDown,
+  ExternalLink,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import toast from 'react-hot-toast'
+import { notifyError, notifySuccess } from '../lib/notify'
 import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
@@ -11,12 +23,22 @@ const AVAILABLE_LANGUAGES = [
   { code: 'en', name: 'English', flag: '🇬🇧' },
 ]
 
+const KEY_PROVIDERS = [
+  { id: 'gemini', keyUrl: 'https://aistudio.google.com/api-keys' },
+  { id: 'openrouter', keyUrl: 'https://openrouter.ai/settings/keys' },
+  { id: 'ollama', keyUrl: 'https://ollama.com/settings/keys' },
+  { id: 'tavily', keyUrl: 'https://app.tavily.com/home' },
+]
+
 function computeStatus(key) {
   const now = Date.now()
   if (key.lastErrorType === 'rate_limited' && key.cooldownUntil && key.cooldownUntil > now) return 'rate_limited'
   if (key.lastErrorType === 'quota_exceeded') return 'quota_exceeded'
   if (key.lastErrorType === 'invalid') return 'invalid'
-  if (key.lastErrorAt && (!key.lastSuccessAt || key.lastErrorAt > key.lastSuccessAt)) return 'invalid'
+  if (['network', 'timeout', 'model_unavailable', 'service_unavailable', 'billing_required', 'permission_denied'].includes(key.lastErrorType)) {
+    return key.lastSuccessAt ? 'success' : 'pending'
+  }
+  if (key.lastErrorAt && (!key.lastSuccessAt || key.lastErrorAt > key.lastSuccessAt)) return 'pending'
   if (key.lastSuccessAt) return 'success'
   return 'pending'
 }
@@ -36,11 +58,15 @@ function friendlyTestMessage(t, errorType) {
     case 'rate_limit': return t('setup.keys.test_rate_limit')
     case 'network': return t('setup.keys.test_network')
     case 'timeout': return t('setup.keys.test_timeout')
+    case 'model_unavailable': return t('setup.keys.test_model_unavailable')
+    case 'service_unavailable': return t('setup.keys.test_service_unavailable')
+    case 'billing_required': return t('setup.keys.test_billing_required')
+    case 'permission_denied': return t('setup.keys.test_permission_denied')
     default: return t('setup.keys.test_unknown')
   }
 }
 
-function SettingsPanel({ onSave, currentConfig, onClose }) {
+function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState('api')
 
@@ -49,15 +75,23 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
 
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
   const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
+  const [showSources, setShowSources] = useState(currentConfig?.showSources === true)
 
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
+  const [openRouterKeys, setOpenRouterKeys] = useState([])
+  const [ollamaKeys, setOllamaKeys] = useState([])
   const [newGeminiKey, setNewGeminiKey] = useState('')
   const [newTavilyKey, setNewTavilyKey] = useState('')
+  const [newOpenRouterKey, setNewOpenRouterKey] = useState('')
+  const [newOllamaKey, setNewOllamaKey] = useState('')
   const [testingKeyId, setTestingKeyId] = useState(null)
   const [testingAllProvider, setTestingAllProvider] = useState(null)
   const [showGeminiInput, setShowGeminiInput] = useState(false)
   const [showTavilyInput, setShowTavilyInput] = useState(false)
+  const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
+  const [showOllamaInput, setShowOllamaInput] = useState(false)
+  const [expandedProviders, setExpandedProviders] = useState(['gemini'])
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -68,39 +102,51 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
     async function load() {
       setGeminiKeys(await getKeys('gemini'))
       setTavilyKeys(await getKeys('tavily'))
+      setOpenRouterKeys(await getKeys('openrouter'))
+      setOllamaKeys(await getKeys('ollama'))
     }
     load()
   }, [])
 
   const refreshKeys = async (provider) => {
     if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
-    else setTavilyKeys(await getKeys('tavily'))
+    else if (provider === 'tavily') setTavilyKeys(await getKeys('tavily'))
+    else if (provider === 'openrouter') setOpenRouterKeys(await getKeys('openrouter'))
+    else if (provider === 'ollama') setOllamaKeys(await getKeys('ollama'))
   }
 
   const handleAddKey = async (provider) => {
-    const rawKey = provider === 'gemini' ? newGeminiKey : newTavilyKey
+    const rawKeys = {
+      gemini: newGeminiKey,
+      tavily: newTavilyKey,
+      openrouter: newOpenRouterKey,
+      ollama: newOllamaKey,
+    }
+    const rawKey = rawKeys[provider] || ''
     if (!rawKey.trim()) {
-      toast.error(t('setup.keys.empty_error'))
+      notifyError(t('setup.keys.empty_error'))
       return
     }
     try {
       await addKey(provider, rawKey)
-      toast.success(t('setup.keys.add_success'))
+      notifySuccess(t('setup.keys.add_success'))
       if (provider === 'gemini') setNewGeminiKey('')
-      else setNewTavilyKey('')
+      else if (provider === 'tavily') setNewTavilyKey('')
+      else if (provider === 'openrouter') setNewOpenRouterKey('')
+      else if (provider === 'ollama') setNewOllamaKey('')
       await refreshKeys(provider)
     } catch (err) {
       if (err.message === 'key_duplicate_error') {
-        toast.error(t('setup.keys.duplicate_error'))
+        notifyError(t('setup.keys.duplicate_error'))
       } else {
-        toast.error(t('setup.keys.add_failed'))
+        notifyError(t('setup.keys.add_failed'))
       }
     }
   }
 
   const handleRemoveKey = async (provider, id) => {
     await removeKey(provider, id)
-    toast.success(t('setup.keys.delete_success'))
+    notifySuccess(t('setup.keys.delete_success'))
     await refreshKeys(provider)
   }
 
@@ -123,7 +169,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         ? 'rate_limited'
         : result.errorType === 'quota'
           ? 'quota_exceeded'
-          : 'invalid'
+          : result.errorType || 'unknown'
       const updates = {
         lastErrorAt: Date.now(),
         lastErrorType: mappedType,
@@ -142,26 +188,31 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
     try {
       const rawKey = await getRawKey(provider, id)
       if (!rawKey) {
-        toast.error(t('setup.keys.test_failed'))
+        notifyError(t('setup.keys.test_failed'))
         return
       }
-      const result = await testKey(provider, rawKey)
+      const result = await testKey(provider, rawKey, currentModel)
       await applyTestResult(provider, id, result)
       await refreshKeys(provider)
       if (result.success) {
-        toast.success(t('setup.keys.test_success'))
+        notifySuccess(t('setup.keys.test_success'))
       } else {
-        toast.error(friendlyTestMessage(t, result.errorType))
+        notifyError(friendlyTestMessage(t, result.errorType))
       }
     } catch {
-      toast.error(t('setup.keys.test_failed'))
+      notifyError(t('setup.keys.test_failed'))
     } finally {
       setTestingKeyId(null)
     }
   }
 
   const handleTestAll = async (provider) => {
-    const keysList = provider === 'gemini' ? geminiKeys : tavilyKeys
+    const keysList = {
+      gemini: geminiKeys,
+      tavily: tavilyKeys,
+      openrouter: openRouterKeys,
+      ollama: ollamaKeys,
+    }[provider] || []
     if (keysList.length === 0) return
     setTestingAllProvider(provider)
     try {
@@ -169,7 +220,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         const rawKey = await getRawKey(provider, key.id)
         if (!rawKey) continue
         try {
-          const result = await testKey(provider, rawKey)
+          const result = await testKey(provider, rawKey, currentModel)
           await applyTestResult(provider, key.id, result)
           await refreshKeys(provider)
         } catch {
@@ -188,11 +239,12 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
       systemInstruction,
       customPrimaryColor,
       language: selectedLanguage,
+      showSources,
     }
 
-    chrome.storage.local.set({ ...newConfig, apiProvider: 'google' }, () => {
+    chrome.storage.local.set(newConfig, () => {
       onSave(newConfig)
-      toast.success(t('setup.api.saved_success'))
+      notifySuccess(t('setup.api.saved_success'))
     })
   }
 
@@ -259,19 +311,30 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
   }
 
   const renderKeySection = (provider) => {
-    const keysList = provider === 'gemini' ? geminiKeys : tavilyKeys
-    const inputValue = provider === 'gemini' ? newGeminiKey : newTavilyKey
-    const setInputValue = provider === 'gemini' ? setNewGeminiKey : setNewTavilyKey
-    const showInput = provider === 'gemini' ? showGeminiInput : showTavilyInput
-    const setShowInput = provider === 'gemini' ? setShowGeminiInput : setShowTavilyInput
+    const providerConfig = KEY_PROVIDERS.find(item => item.id === provider)
+    const providerState = {
+      gemini: [geminiKeys, newGeminiKey, setNewGeminiKey, showGeminiInput, setShowGeminiInput],
+      tavily: [tavilyKeys, newTavilyKey, setNewTavilyKey, showTavilyInput, setShowTavilyInput],
+      openrouter: [openRouterKeys, newOpenRouterKey, setNewOpenRouterKey, showOpenRouterInput, setShowOpenRouterInput],
+      ollama: [ollamaKeys, newOllamaKey, setNewOllamaKey, showOllamaInput, setShowOllamaInput],
+    }[provider]
+    const [keysList, inputValue, setInputValue, showInput, setShowInput] = providerState
     const testingAll = testingAllProvider === provider
 
     return (
       <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Key className="w-4 h-4 text-primary" />
-          {t(`setup.keys.${provider}_section`)}
-        </h3>
+        <a
+          className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+          href={providerConfig.keyUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t(`setup.keys.${provider}_key_link`)}
+          <ExternalLink className="h-3 w-3" />
+        </a>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t('setup.keys.test_usage_warning')}
+        </p>
         <div className="flex gap-2">
           <div className="relative flex-1 min-w-0">
             <input
@@ -320,6 +383,53 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
     )
   }
 
+  const renderProviderCard = (provider) => {
+    const keysList = {
+      gemini: geminiKeys,
+      tavily: tavilyKeys,
+      openrouter: openRouterKeys,
+      ollama: ollamaKeys,
+    }[provider] || []
+    const isExpanded = expandedProviders.includes(provider)
+    const headingId = `provider-heading-${provider}`
+    const panelId = `provider-panel-${provider}`
+
+    return (
+      <section key={provider} className={`overflow-hidden rounded-xl border bg-background/35 transition-colors ${isExpanded ? 'border-primary/30 shadow-sm shadow-primary/10' : 'border-border/75'}`}>
+        <button
+          id={headingId}
+          type="button"
+          onClick={() => setExpandedProviders(current => current.includes(provider) ? current.filter(item => item !== provider) : [...current, provider])}
+          aria-expanded={isExpanded}
+          aria-controls={panelId}
+          className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/45"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Key className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate text-xs font-semibold text-foreground">
+              {t(`setup.keys.${provider}_section`)}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {keysList.length}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </span>
+        </button>
+        <div
+          id={panelId}
+          role="region"
+          aria-labelledby={headingId}
+          hidden={!isExpanded}
+          className="border-t border-border/70 p-3"
+        >
+          {renderKeySection(provider)}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div className="hera-panel flex h-full min-h-screen w-full flex-col bg-background text-foreground">
       <header className="hera-panel-header">
@@ -337,8 +447,8 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="flex rounded-xl border border-border/60 bg-secondary/55 p-1">
+      <div className="mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col gap-3 overflow-y-auto p-3 pb-8">
+        <div className="flex shrink-0 rounded-xl border border-border/60 bg-secondary/55 p-1">
           <button
             type="button"
             onClick={() => setActiveTab('api')}
@@ -355,16 +465,15 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
           </button>
         </div>
 
-        <div className="hera-section-card min-h-[300px] p-3.5">
+        <div className="hera-section-card min-h-[300px] shrink-0 p-3.5">
           {activeTab === 'api' && (
             <div className="hera-fade-in flex flex-col gap-4">
               <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-amber-700 dark:text-amber-300">
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                 <p className="text-[11px] leading-relaxed">{t('setup.keys.security_warning')}</p>
               </div>
-              <div className="flex flex-col gap-6">
-                {renderKeySection('gemini')}
-                {renderKeySection('tavily')}
+              <div className="flex flex-col gap-2">
+                {KEY_PROVIDERS.map(({ id }) => renderProviderCard(id))}
               </div>
             </div>
           )}
@@ -432,11 +541,45 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
                 </select>
               </div>
 
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
+                <div className="min-w-0">
+                  <span className="block text-xs font-semibold text-foreground">
+                    {t('setup.general.sources_title')}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
+                    {t('setup.general.sources_description')}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showSources}
+                  aria-label={t('setup.general.sources_title')}
+                  onClick={() => setShowSources(value => !value)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                    showSources
+                      ? 'border-primary bg-primary'
+                      : 'border-border bg-muted/80'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ${
+                      showSources ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-[11px] leading-relaxed text-muted-foreground">
+                {t('setup.general.voice_api_notice')}
+              </p>
+
               <div className="flex flex-col gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   {t('setup.ai.system_prompt_title')}
                 </label>
                 <textarea
+                  data-testid="system-instruction-input"
                   value={systemInstruction}
                   onChange={(e) => setSystemInstruction(e.target.value)}
                   placeholder={t('setup.ai.system_prompt_placeholder')}
@@ -450,7 +593,7 @@ function SettingsPanel({ onSave, currentConfig, onClose }) {
         <button
           type="button"
           onClick={handleSave}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
+          className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
         >
           <Save className="h-4 w-4" />
           {t('setup.api.save_btn')}

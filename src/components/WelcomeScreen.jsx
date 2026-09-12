@@ -1,7 +1,7 @@
 import { FileUp, Globe2, Scissors, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-function WelcomeScreen({ onCrop, onResearch, onAttach }) {
+function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
   const { t } = useTranslation()
   const actions = [
     {
@@ -14,9 +14,14 @@ function WelcomeScreen({ onCrop, onResearch, onAttach }) {
     {
       id: 'crop',
       icon: Scissors,
-      title: t('chat.welcome_actions.crop_title'),
-      description: t('chat.welcome_actions.crop_description'),
+      title: isCropActive
+        ? t('chat.welcome_actions.crop_cancel_title')
+        : t('chat.welcome_actions.crop_title'),
+      description: isCropActive
+        ? t('chat.welcome_actions.crop_cancel_description')
+        : t('chat.welcome_actions.crop_description'),
       action: onCrop,
+      active: isCropActive,
     },
     {
       id: 'attach',
@@ -42,14 +47,19 @@ function WelcomeScreen({ onCrop, onResearch, onAttach }) {
       </div>
 
       <div className="grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
-        {actions.map(({ id, icon: Icon, title, description, action }) => (
+        {actions.map(({ id, icon: Icon, title, description, action, active = false }) => (
           <button
             key={id}
             type="button"
             onClick={action}
-            className="group flex min-w-0 items-start gap-3 rounded-2xl border border-border/80 bg-card/75 p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card hover:shadow-md active:translate-y-0"
+            aria-pressed={id === 'crop' ? active : undefined}
+            className={`group flex min-w-0 items-start gap-3 rounded-2xl border p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card hover:shadow-md active:translate-y-0 ${
+              active ? 'border-primary/35 bg-primary/[0.08] ring-1 ring-primary/15' : 'border-border/80 bg-card/75'
+            }`}
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors group-hover:bg-primary/10 group-hover:text-primary ${
+              active ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
+            }`}>
               <Icon className="h-4 w-4" />
             </span>
             <span className="min-w-0">
