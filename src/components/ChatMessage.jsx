@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
+import { Bot, Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { notifyError, notifySuccess } from '../lib/notify'
 
 import { getMessageDisplayContent } from '../lib/messageDisplay'
+import ResponseDuration from './ResponseDuration'
 
 const COPY_TIMEOUT_MS = 2000
 const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
@@ -227,7 +228,7 @@ const ChatMessage = ({
       aria-haspopup={hasRetryModelChoices ? 'dialog' : undefined}
       aria-expanded={hasRetryModelChoices ? retryMenuOpen : undefined}
       aria-controls={hasRetryModelChoices ? retryMenuId : undefined}
-      className={`${compact ? 'hera-icon-button relative h-7 w-7' : 'hera-action-button'} ${
+      className={`${compact ? 'hera-icon-button relative h-7 w-7' : 'hera-compact-action relative'} ${
         retryMenuOpen ? 'bg-primary/10 text-primary' : ''
       }`}
       disabled={retryDisabled || isPending}
@@ -380,7 +381,6 @@ const ChatMessage = ({
                     {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
                 )}
-                {renderRetryButton(true)}
                 {visibleContent && (
                   <button
                     type="button"
@@ -393,7 +393,6 @@ const ChatMessage = ({
                   </button>
                 )}
               </div>
-              {renderRetryMenu('right')}
             </div>
           )}
         </div>
@@ -478,75 +477,77 @@ const ChatMessage = ({
       )}
 
       {(message.content || message.status === 'interrupted' || message.status === 'error') && (
-        <div className="relative mt-1.5 flex flex-col items-start gap-1.5 border-t border-border/45 pt-1.5">
-          <div className="flex min-h-8 w-full min-w-0 items-center justify-between gap-2">
-            <div className="flex shrink-0 items-center gap-0.5">
+        <div className="relative mt-1.5 flex gap-1.5 border-t border-border/45 pt-1.5">
+          <div className="flex shrink-0 flex-col items-center gap-0.5" data-testid="response-action-rail">
+            <button
+              type="button"
+              onClick={handleCopyMessage}
+              aria-label={t('chat.tooltips.copy')}
+              className="hera-compact-action"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
+            </button>
+            {speechEligible && (
               <button
                 type="button"
-                onClick={handleCopyMessage}
-                aria-label={t('chat.tooltips.copy')}
+                onClick={() => onToggleSpeech?.(message)}
+                disabled={speechDisabled}
+                aria-label={speechStatus === 'playing'
+                  ? t('chat.tooltips.stop_speech')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}
+                aria-pressed={speechStatus !== 'idle'}
+                className="hera-compact-action"
+              >
+                {speechStatus === 'loading'
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : speechStatus === 'playing'
+                    ? <Square className="h-3.5 w-3.5 fill-current" />
+                    : <Volume2 className="h-3.5 w-3.5" />}
+                <span>{speechStatus === 'playing'
+                  ? t('chat.tooltips.stop')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}</span>
+              </button>
+            )}
+            {renderRetryButton()}
+            {showWinnerControl && (
+              <button
+                type="button"
+                onClick={() => onSelectWinner?.(message)}
+                aria-label={t('chat.comparison.continue_with_this')}
                 className="hera-action-button"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
+                <Check className="h-3.5 w-3.5" />
+                <span>{t('chat.comparison.continue_with_this')}</span>
               </button>
-              {speechEligible && (
-                <button
-                  type="button"
-                  onClick={() => onToggleSpeech?.(message)}
-                  disabled={speechDisabled}
-                  aria-label={speechStatus === 'playing'
-                    ? t('chat.tooltips.stop_speech')
-                    : speechStatus === 'loading'
-                      ? t('chat.tooltips.preparing_speech')
-                      : t('chat.tooltips.read_aloud')}
-                  aria-pressed={speechStatus !== 'idle'}
-                  className="hera-action-button"
-                >
-                  {speechStatus === 'loading'
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : speechStatus === 'playing'
-                      ? <Square className="h-3.5 w-3.5 fill-current" />
-                      : <Volume2 className="h-3.5 w-3.5" />}
-                  <span>{speechStatus === 'playing'
-                    ? t('chat.tooltips.stop')
-                    : speechStatus === 'loading'
-                      ? t('chat.tooltips.preparing_speech')
-                      : t('chat.tooltips.read_aloud')}</span>
-                </button>
-              )}
-              {renderRetryButton()}
-              {showWinnerControl && (
-                <button
-                  type="button"
-                  onClick={() => onSelectWinner?.(message)}
-                  aria-label={t('chat.comparison.continue_with_this')}
-                  className="hera-action-button"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  <span>{t('chat.comparison.continue_with_this')}</span>
-                </button>
-              )}
-            </div>
-            <div className="flex min-w-0 max-w-[46%] flex-col items-end gap-0.5">
-              {autoChainLabel && (
-                <span
-                  data-testid="auto-chain"
-                  className="max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
-                  title={`${t('chat.model_used')}: ${autoChainLabel}`}
-                >
-                  {autoChainLabel}
-                </span>
-              )}
-            {usedModelLabel && (
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col items-end justify-start gap-1 pt-0.5">
+            {autoChainLabel && (
               <span
-                data-testid="message-model"
-                className="min-w-0 max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
-                title={`${t('chat.model_used')}: ${usedModelLabel}`}
+                data-testid="auto-chain"
+                className="max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
+                title={`${t('chat.model_used')}: ${autoChainLabel}`}
               >
-                {usedModelLabel}
+                {autoChainLabel}
               </span>
             )}
+            <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
+              <ResponseDuration message={message} />
+              {usedModelLabel && (
+                <span
+                  data-testid="message-model"
+                  className="inline-flex min-h-6 min-w-0 max-w-full items-center gap-1 rounded-full border border-primary/25 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground"
+                  title={`${t('chat.model_used')}: ${usedModelLabel}`}
+                >
+                  <Bot className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="truncate">{usedModelLabel}</span>
+                </span>
+              )}
             </div>
           </div>
           {renderRetryMenu('left')}
@@ -575,6 +576,8 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.selectable === nextMessage.selectable &&
     prevMessage.comparisonSelected === nextMessage.comparisonSelected &&
     prevMessage.contextExcluded === nextMessage.contextExcluded &&
+    prevMessage.startedAt === nextMessage.startedAt &&
+    prevMessage.completedAt === nextMessage.completedAt &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
     prevMessage.attachments === nextMessage.attachments &&

@@ -61,7 +61,7 @@ import {
 import i18n from './i18n'
 import { updateStats } from './lib/stats'
 import { resolveKeysForRequest } from './lib/keyManager'
-import { generateSpeech, transcribeAudio } from './lib/voiceApi'
+import { TTS_FALLBACK_MODEL, generateSpeech, isTtsFallbackableCode, transcribeAudio } from './lib/voiceApi'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
 import {
   requestsPreviousImage,
@@ -77,6 +77,7 @@ import {
 import {
   COMPARISON_SLOTS,
   allVariantsTerminal,
+  applyBothSelection,
   applyWinnerSelection,
   isComparisonJob,
 } from './lib/comparison'
@@ -377,6 +378,7 @@ function createAssistantMessage({
     requestId,
     userMessageId,
     startedAt,
+    completedAt: null,
     role: 'model',
     content: '',
     status: 'thinking',
@@ -1452,6 +1454,9 @@ function App() {
 
         if (storedSession) {
           let found = false
+          const finalCompletedAt = effectiveGenerationStatus === 'completed'
+            ? (generation.completedAt || Date.now())
+            : null
           let nextMessages = (storedSession.messages || []).map(message => {
             if (message.id !== generation.assistantMessageId || message.role !== 'model') return message
             found = true
@@ -1461,6 +1466,8 @@ function App() {
               status: terminalStatus,
               sources: Array.isArray(generation.sources) ? generation.sources : (message.sources || []),
               errorCode: generation.errorCode || null,
+              ...(message.startedAt ? {} : (generation.startedAt ? { startedAt: generation.startedAt } : {})),
+              completedAt: finalCompletedAt,
               ...(generation.model ? { model: generation.model } : {}),
               ...(generation.provider ? { provider: generation.provider } : {}),
               ...(generation.resolvedModel ? { resolvedModel: generation.resolvedModel } : {}),
@@ -1497,6 +1504,7 @@ function App() {
                 status: terminalStatus,
                 sources: Array.isArray(generation.sources) ? generation.sources : [],
                 errorCode: generation.errorCode || null,
+                completedAt: finalCompletedAt,
               },
             ]
           }
@@ -1773,15 +1781,19 @@ function App() {
         if (message.comparisonId !== comparisonId) return message
         const variant = variants[message.variantId || message.comparisonSlot]
         if (!variant) return message
+        const variantStatus = statusFor(variant)
         return {
           ...message,
           content: variant.content || '',
-          status: statusFor(variant),
+          status: variantStatus,
           sources: Array.isArray(variant.sources) ? variant.sources : [],
           errorCode: variant.errorCode || null,
           model: variant.model || message.model,
           provider: variant.provider || message.provider,
           ...(variant.resolvedModel ? { resolvedModel: variant.resolvedModel } : {}),
+          completedAt: variantStatus === 'done'
+            ? (variant.completedAt ?? generation.completedAt ?? message.completedAt ?? null)
+            : null,
         }
       })
       mergeSessionMessages(generation.sessionId, nextMessages)
@@ -1952,6 +1964,13 @@ function App() {
         const { comparisonId, winnerSlot } = message
         if (comparisonId && COMPARISON_SLOTS.includes(winnerSlot)) {
           const nextMessages = applyWinnerSelection(messagesRef.current, comparisonId, winnerSlot)
+          messagesRef.current = nextMessages
+          if (mountedRef.current) setMessages(nextMessages)
+        }
+      } else if (message?.type === 'COMPARISON_BOTH_SELECTED') {
+        const { comparisonId } = message
+        if (comparisonId) {
+          const nextMessages = applyBothSelection(messagesRef.current, comparisonId)
           messagesRef.current = nextMessages
           if (mountedRef.current) setMessages(nextMessages)
         }
@@ -3276,14 +3295,36 @@ function App() {
     setSpeechStatus({ messageId: message.id, phase: 'loading' })
     try {
       const chunks = splitSpeechText(speechText)
+      let pinnedTtsModel = null
       for (const chunk of chunks) {
         if (controller.signal.aborted || epoch !== speechEpochRef.current) return
-        const result = await generateSpeech({
-          text: chunk,
-          keys: resolution.keys,
-          signal: controller.signal,
-          onKeyStatus: reportVoiceKeyStatus,
-        })
+        let result = null
+        try {
+          result = await generateSpeech({
+            text: chunk,
+            keys: resolution.keys,
+            signal: controller.signal,
+            onKeyStatus: reportVoiceKeyStatus,
+            ...(pinnedTtsModel ? { model: pinnedTtsModel } : {}),
+          })
+        } catch (chunkError) {
+          const chunkCode = chunkError?.code || null
+          const pinnedPrimaryFailed = pinnedTtsModel
+            && pinnedTtsModel !== TTS_FALLBACK_MODEL
+            && chunkCode
+            && isTtsFallbackableCode(chunkCode)
+          if (!pinnedPrimaryFailed) throw chunkError
+          if (controller.signal.aborted || epoch !== speechEpochRef.current) return
+          result = await generateSpeech({
+            text: chunk,
+            keys: resolution.keys,
+            signal: controller.signal,
+            onKeyStatus: reportVoiceKeyStatus,
+            model: TTS_FALLBACK_MODEL,
+          })
+          pinnedTtsModel = result?.model || TTS_FALLBACK_MODEL
+        }
+        if (!pinnedTtsModel) pinnedTtsModel = result?.model || pinnedTtsModel
         if (controller.signal.aborted || epoch !== speechEpochRef.current) return
         setSpeechStatus({ messageId: message.id, phase: 'playing' })
         await playPcm(result.pcm, result.sampleRate, epoch)
@@ -3551,10 +3592,6 @@ function App() {
       && requestsPreviousWebSource(userText)
       && existingContextUrls.length > 0
     if (!userText && draftAttachments.length === 0) return
-    if (unresolvedComparison) {
-      notifyError(t('chat.comparison.locked'))
-      return
-    }
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
       notifyError(t('chat.generation_errors.already_running', {
         defaultValue: t('chat.connection_error'),
@@ -3584,9 +3621,39 @@ function App() {
     )).filter(Boolean)
     const isComparison = comparisonModels.length === 2
       && comparisonModels[0].key !== comparisonModels[1].key
+    const hasModelOverride = MODELS.includes(actionOptions?.modelOverride)
+    if (unresolvedComparison) {
+      if (isComparison) {
+        notifyError(t('chat.comparison.locked'))
+        return
+      }
+      const pendingComparisonId = unresolvedComparison
+      let resolveResponse = null
+      try {
+        resolveResponse = await sendRuntimeMessage({
+          type: 'RESOLVE_COMPARISON_BOTH',
+          comparisonId: pendingComparisonId,
+          sessionId: requestSessionId,
+        })
+      } catch (_error) {
+        resolveResponse = null
+      }
+      if (resolveResponse?.ok !== true) {
+        notifyError(t('chat.connection_error'))
+        return
+      }
+      const bothMessages = applyBothSelection(messagesRef.current, pendingComparisonId)
+      messagesRef.current = bothMessages
+      if (mountedRef.current) setMessages(bothMessages)
+      const bothPersisted = await persistSessionMessages(requestSessionId, bothMessages)
+      if (!bothPersisted) {
+        notifyError(t('chat.connection_error'))
+        return
+      }
+    }
     let requestModel = isComparison
       ? comparisonModels[0].modelId
-      : MODELS.includes(actionOptions?.modelOverride)
+      : hasModelOverride
       ? actionOptions.modelOverride
       : selectedModel
     let requestProvider = isComparison
@@ -3594,7 +3661,7 @@ function App() {
       : getProviderForModel(requestModel, selectedProvider)
     const autoDecision = !isComparison
       && modelSelectionMode === 'auto'
-      && !MODELS.includes(actionOptions?.modelOverride)
+      && !hasModelOverride
       ? selectLocalFallback({
           text: userText,
           mode,
@@ -3757,7 +3824,7 @@ function App() {
       startedAt,
       model: requestModel,
       provider: requestProvider,
-      selectionMode: isComparison ? 'manual' : modelSelectionMode,
+      selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
       selectionReasonCode: autoDecision?.reasonCode,
       routerModel: autoDecision?.routerModel,
     })
@@ -3806,7 +3873,7 @@ function App() {
       mode,
       model: requestModel,
       provider: requestProvider,
-      selectionMode: isComparison ? 'manual' : modelSelectionMode,
+      selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
       selectionReasonCode: autoDecision?.reasonCode,
       routerModel: autoDecision?.routerModel,
       language: appConfig?.language || i18n.language || 'tr',
@@ -3956,7 +4023,7 @@ function App() {
         mode,
         model: requestModel,
         provider: requestProvider,
-        selectionMode: isComparison ? 'manual' : modelSelectionMode,
+        selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
         ...(autoDecision ? {
           selectionReasonCode: autoDecision.reasonCode,
           routerModel: autoDecision.routerModel || null,
@@ -4020,7 +4087,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, modelSelectionMode, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, modelSelectionMode, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -4847,8 +4914,8 @@ function App() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={unresolvedComparison ? t('chat.comparison.locked') : t('chat.placeholder')}
-            disabled={Boolean(unresolvedComparison)}
+            placeholder={t('chat.placeholder')}
+            disabled={false}
             className="min-h-[66px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-2 pt-3 text-[14px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
             rows="2"
           />
@@ -5026,7 +5093,7 @@ function App() {
             <button
               type="button"
               onClick={() => isGenerating ? cancelStream() : handleSend()}
-              disabled={dictationPhase !== 'idle' || Boolean(unresolvedComparison) || (!isGenerating && (!input.trim() && attachments.length === 0))}
+              disabled={dictationPhase !== 'idle' || (!isGenerating && (!input.trim() && attachments.length === 0))}
               title={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
               aria-label={isGenerating ? t('chat.tooltips.stop') : t('chat.tooltips.send')}
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-35 ${

@@ -3,9 +3,25 @@ import { GoogleGenAI } from '@google/genai'
 import { base64ToBytes } from './audioUtils'
 
 export const DICTATION_MODEL = 'gemini-3.1-flash-lite'
-export const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
+export const TTS_PRIMARY_MODEL = 'gemini-3.1-flash-tts-preview'
+export const TTS_FALLBACK_MODEL = 'gemini-2.5-flash-preview-tts'
+export const TTS_MODEL = TTS_PRIMARY_MODEL
 export const TTS_VOICE = 'Kore'
 const REQUEST_TIMEOUT_MS = 200000
+
+export const TTS_FALLBACKABLE_CODES = new Set([
+  'rate_limited',
+  'quota_exceeded',
+  'model_unavailable',
+  'service_unavailable',
+  'timeout',
+  'permission_denied',
+  'empty_audio_response',
+])
+
+export function isTtsFallbackableCode(code) {
+  return TTS_FALLBACKABLE_CODES.has(code)
+}
 
 export class VoiceApiError extends Error {
   constructor(code, cause) {
@@ -26,6 +42,7 @@ function errorStatus(error) {
 function classifyError(error) {
   if (error?.name === 'AbortError') return 'aborted'
   if (error?.name === 'TimeoutError') return 'timeout'
+  if (error instanceof VoiceApiError && typeof error.code === 'string') return error.code
   const status = errorStatus(error)
   const text = String(error?.message || error?.error?.message || '').toLowerCase()
   if (status === 429 || text.includes('rate limit')) return 'rate_limited'
@@ -79,7 +96,7 @@ async function runAcrossKeys({ keys, apiVersion, signal, onKeyStatus, request, r
   let lastError = null
 
   for (const entry of entries) {
-    const client = new GoogleGenAI({ apiKey: entry.key.trim(), httpOptions: { apiVersion } })
+    const client = new GoogleGenAI({ apiKey: entry.key, httpOptions: { apiVersion } })
     const attempts = retryServerError ? 2 : 1
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
@@ -124,8 +141,11 @@ export async function transcribeAudio({ wavBase64, keys, signal, onKeyStatus }) 
   return String(response?.text || '').trim()
 }
 
-export async function generateSpeech({ text, keys, signal, onKeyStatus }) {
-  if (!String(text || '').trim()) throw new VoiceApiError('empty_text')
+function extractSpeechAudio(response) {
+  return response?.candidates?.[0]?.content?.parts?.find(candidate => candidate?.inlineData?.data)
+}
+
+async function requestSpeechWithModel({ text, keys, signal, onKeyStatus, model }) {
   const response = await runAcrossKeys({
     keys,
     apiVersion: 'v1beta',
@@ -133,7 +153,7 @@ export async function generateSpeech({ text, keys, signal, onKeyStatus }) {
     onKeyStatus,
     retryServerError: true,
     request: (client, requestSignal) => client.models.generateContent({
-      model: TTS_MODEL,
+      model,
       contents: [{ parts: [{ text: `Synthesize speech for the transcript below. Read the transcript naturally and do not read these instructions aloud.\n\nTRANSCRIPT:\n${text}` }] }],
       config: {
         abortSignal: requestSignal,
@@ -146,10 +166,28 @@ export async function generateSpeech({ text, keys, signal, onKeyStatus }) {
       },
     }),
   })
-  const part = response?.candidates?.[0]?.content?.parts?.find(candidate => candidate?.inlineData?.data)
+  const part = extractSpeechAudio(response)
   if (!part?.inlineData?.data) throw new VoiceApiError('empty_audio_response')
   return {
     pcm: base64ToBytes(part.inlineData.data),
     sampleRate: 24000,
+    model,
+  }
+}
+
+export async function generateSpeech({ text, keys, signal, onKeyStatus, model = null }) {
+  if (!String(text || '').trim()) throw new VoiceApiError('empty_text')
+  if (typeof model === 'string' && model) {
+    return requestSpeechWithModel({ text, keys, signal, onKeyStatus, model })
+  }
+  try {
+    return await requestSpeechWithModel({ text, keys, signal, onKeyStatus, model: TTS_PRIMARY_MODEL })
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    const code = error instanceof VoiceApiError ? error.code : classifyError(error)
+    if (!isTtsFallbackableCode(code)) {
+      throw error instanceof VoiceApiError ? error : new VoiceApiError(code, error)
+    }
+    return requestSpeechWithModel({ text, keys, signal, onKeyStatus, model: TTS_FALLBACK_MODEL })
   }
 }

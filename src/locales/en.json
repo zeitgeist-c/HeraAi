@@ -209,6 +209,7 @@
             "unavailable": "No API key",
             "incompatible": "Attachment type is not supported",
             "continue_with_this": "Continue with this answer",
+            "continued_with_both": "Continued with both answers",
             "locked": "Pick a winning answer to keep chatting."
         },
         "prompts": {

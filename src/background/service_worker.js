@@ -7,6 +7,7 @@ import {
 import {
   COMPARISON_SLOTS,
   allVariantsTerminal,
+  applyBothSelection,
   applyWinnerSelection,
   createComparisonJob,
   isComparisonJob,
@@ -569,6 +570,7 @@ async function writeComparisonVariantError(activeGeneration, variantId, errorCod
     ...applyVariantReport(activeGeneration.variants[variantId], details),
     status: 'error',
     errorCode: errorCode || 'generation_failed',
+    completedAt: now,
   };
   const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
   const terminal = allVariantsTerminal({ ...activeGeneration, variants: nextVariants });
@@ -619,6 +621,7 @@ async function writeComparisonVariantDone(activeGeneration, variantId, details =
     ...applyVariantReport(activeGeneration.variants[variantId], details),
     status: details.cancelled ? 'cancelled' : 'completed',
     ...(details.cancelled ? {} : { errorCode: null }),
+    completedAt: now,
   };
   const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
   return persistComparisonVariants(activeGeneration, nextVariants, {
@@ -640,6 +643,7 @@ async function applyComparisonDoneSummary(activeGeneration, summary = {}, detail
       errorCode: reported.status === 'error'
         ? (reported.errorCode || 'generation_failed')
         : null,
+      completedAt: now,
     };
   }
   return persistComparisonVariants(activeGeneration, nextVariants, {
@@ -764,6 +768,61 @@ async function handleSelectComparisonWinner(message) {
     winnerSlot,
   });
   return { ok: true, comparisonId, winnerSlot };
+}
+
+async function handleResolveComparisonBoth(message) {
+  const comparisonId = message?.comparisonId ?? message?.jobId ?? null;
+  if (!comparisonId) {
+    return { ok: false, errorCode: 'invalid_request' };
+  }
+
+  const storedState = await storageGet(['sessions', 'activeGeneration']);
+  const sessions = Array.isArray(storedState?.sessions) ? storedState.sessions : [];
+  let matched = false;
+  const nextSessions = sessions.map(session => {
+    if (
+      (message.sessionId && session?.id !== message.sessionId)
+      || !Array.isArray(session?.messages)
+      || !session.messages.some(item => item?.comparisonId === comparisonId)
+    ) {
+      return session;
+    }
+    matched = true;
+    return {
+      ...session,
+      messages: applyBothSelection(session.messages, comparisonId),
+      updatedAt: Date.now(),
+    };
+  });
+  if (!matched) return { ok: false, errorCode: 'not_found' };
+
+  const activeGeneration = storedState?.activeGeneration || null;
+  const activeMatches = activeGeneration && (
+    activeGeneration.comparisonId === comparisonId || activeGeneration.jobId === comparisonId
+  );
+  const value = {
+    sessions: nextSessions,
+    ...(activeMatches
+      ? {
+          activeGeneration: {
+            ...withoutSensitiveGenerationData(activeGeneration),
+            selection: { winnerSlot: 'both', decidedAt: Date.now() },
+            updatedAt: Date.now(),
+          },
+        }
+      : {}),
+  };
+  // Both session messages and the stored selection update in a single write.
+  await storageSet(value);
+
+  await broadcastRuntimeMessage({
+    type: 'COMPARISON_BOTH_SELECTED',
+    forwardedBy: 'service_worker',
+    jobId: activeMatches ? activeGeneration.jobId : null,
+    comparisonId,
+    winnerSlot: 'both',
+  });
+  return { ok: true, comparisonId, winnerSlot: 'both' };
 }
 
 async function handleGetModelAvailability() {
@@ -1754,6 +1813,8 @@ function handleProtocolMessage(message) {
       return handleCancel(message);
     case 'SELECT_COMPARISON_WINNER':
       return handleSelectComparisonWinner(message);
+    case 'RESOLVE_COMPARISON_BOTH':
+      return handleResolveComparisonBoth(message);
     case 'GET_MODEL_AVAILABILITY':
       return handleGetModelAvailability();
     case 'DONE_ACK':
@@ -1842,6 +1903,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     'DONE_ACK',
     'CANCEL_DONE_ACK',
     'SELECT_COMPARISON_WINNER',
+    'RESOLVE_COMPARISON_BOTH',
     'GET_MODEL_AVAILABILITY',
   ]);
   if (!supportedTypes.has(message.type)) return false;

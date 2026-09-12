@@ -1,5 +1,7 @@
 export const COMPARISON_SLOTS = ['a', 'b']
 
+export const COMPARISON_BOTH_RESOLUTION = 'both'
+
 const COMPARISON_TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'error'])
 
 function findVariantDef(defs, slot) {
@@ -29,9 +31,11 @@ function buildVariantState(slot, def = {}) {
     resolvedModel: null,
     revision: 0,
     errorCode: null,
+    completedAt: null,
   }
   if (def.model != null) variant.model = def.model
   if (def.provider != null) variant.provider = def.provider
+  if (def.completedAt != null) variant.completedAt = def.completedAt
   return variant
 }
 
@@ -83,11 +87,40 @@ export function applyWinnerSelection(messages, comparisonId, winnerSlot) {
     if (message?.comparisonId !== comparisonId) return message
     const slot = slotOfMessage(message)
     if (slot === winnerSlot) {
-      return { ...message, comparisonSelected: true, contextExcluded: false }
+      return { ...message, comparisonSelected: true, selectable: false, contextExcluded: false }
     }
     if (slot === loserSlot) {
-      return { ...message, comparisonSelected: false, contextExcluded: true }
+      return { ...message, comparisonSelected: false, selectable: false, contextExcluded: true }
     }
     return message
   })
+}
+
+export function applyBothSelection(messages, comparisonId) {
+  if (!Array.isArray(messages)) return messages
+  let changed = false
+  const next = messages.map(message => {
+    if (message?.comparisonId !== comparisonId) return message
+    if (!COMPARISON_SLOTS.includes(slotOfMessage(message))) return message
+    changed = true
+    return {
+      ...message,
+      comparisonSelected: true,
+      selectable: false,
+      contextExcluded: false,
+    }
+  })
+  return changed ? next : messages
+}
+
+export function isBothResolved(messages, comparisonId) {
+  if (!Array.isArray(messages) || comparisonId == null) return false
+  const variants = messages.filter(message => (
+    message?.comparisonId === comparisonId
+    && COMPARISON_SLOTS.includes(slotOfMessage(message))
+  ))
+  return variants.length >= 2
+    && variants.every(message => (
+      message?.comparisonSelected === true && message?.contextExcluded !== true
+    ))
 }

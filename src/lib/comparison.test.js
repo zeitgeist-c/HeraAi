@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest'
 import {
   COMPARISON_SLOTS,
   allVariantsTerminal,
+  applyBothSelection,
   applyWinnerSelection,
   createComparisonJob,
   getSelectableWinners,
+  isBothResolved,
   isComparisonJob,
 } from './comparison.js'
 
@@ -145,5 +147,52 @@ describe('comparison job model', () => {
       { id: 'assistant-1:a', comparisonId: 'cmp-1', variantId: 'a', role: 'model', content: 'A' },
     ]
     expect(applyWinnerSelection(messages, 'cmp-1', 'c')).toBe(messages)
+  })
+
+  it('resolves both answers without changing their content', () => {
+    const messages = [
+      { id: 'user-1', role: 'user', content: 'Which is better?' },
+      { id: 'assistant-1:a', comparisonId: 'cmp-1', variantId: 'a', role: 'model', content: 'A' },
+      { id: 'assistant-1:b', comparisonId: 'cmp-1', variantId: 'b', role: 'model', content: 'B' },
+    ]
+
+    const next = applyBothSelection(messages, 'cmp-1')
+
+    expect(next[0]).toBe(messages[0])
+    expect(next[1]).toMatchObject({
+      id: 'assistant-1:a',
+      content: 'A',
+      comparisonSelected: true,
+      selectable: false,
+      contextExcluded: false,
+    })
+    expect(next[2]).toMatchObject({
+      id: 'assistant-1:b',
+      content: 'B',
+      comparisonSelected: true,
+      selectable: false,
+      contextExcluded: false,
+    })
+    expect(messages[1]).not.toHaveProperty('comparisonSelected')
+    expect(isBothResolved(next, 'cmp-1')).toBe(true)
+  })
+
+  it('detects single-winner and pending states as not-both', () => {
+    const pending = [
+      { id: 'a', comparisonId: 'cmp-1', variantId: 'a', role: 'model', content: 'A', status: 'done' },
+      { id: 'b', comparisonId: 'cmp-1', variantId: 'b', role: 'model', content: 'B', status: 'done' },
+    ]
+    expect(isBothResolved(pending, 'cmp-1')).toBe(false)
+
+    const winner = applyWinnerSelection(pending, 'cmp-1', 'a')
+    expect(isBothResolved(winner, 'cmp-1')).toBe(false)
+    expect(isBothResolved(winner, 'cmp-other')).toBe(false)
+  })
+
+  it('leaves foreign comparisons untouched when resolving both', () => {
+    const messages = [
+      { id: 'assistant-9:a', comparisonId: 'cmp-9', variantId: 'a', role: 'model', content: 'X' },
+    ]
+    expect(applyBothSelection(messages, 'cmp-1')).toBe(messages)
   })
 })

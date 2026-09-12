@@ -129,6 +129,33 @@
     @apply bg-secondary text-foreground;
   }
 
+  .hera-compact-action {
+    @apply inline-flex min-h-8 max-w-8 items-center justify-start gap-1.5 overflow-hidden rounded-lg px-2 text-xs font-medium text-muted-foreground transition-all duration-200;
+  }
+
+  .hera-compact-action:hover {
+    @apply max-w-44 bg-secondary text-foreground;
+  }
+
+  .hera-compact-action:focus-visible,
+  .hera-compact-action:focus-within {
+    @apply max-w-44 bg-secondary text-foreground outline-none ring-2 ring-primary/40;
+  }
+
+  .hera-compact-action > svg {
+    @apply shrink-0;
+  }
+
+  .hera-compact-action > span {
+    @apply max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200;
+  }
+
+  .hera-compact-action:hover > span,
+  .hera-compact-action:focus-visible > span,
+  .hera-compact-action:focus-within > span {
+    @apply max-w-32 opacity-100;
+  }
+
   .hera-section-card {
     @apply rounded-2xl border border-border/80 bg-card/85 shadow-sm;
   }
