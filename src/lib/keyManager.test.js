@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 
 import {
   resolveKeysForRequest,
@@ -115,6 +115,19 @@ describe('keyManager', () => {
       await addKey('tavily', 'tvly-abcdefghij-AbC3')
       const [entry] = currentStorage.tavilyApiKeys
       expect(entry.masked).toBe('tvly...AbC3')
+    })
+
+    it('keeps OpenRouter and Ollama keys in separate provider pools', async () => {
+      await addKey('openrouter', 'sk-or-v1-abcdefghijklm1234')
+      await addKey('ollama', 'ollama-abcdefghijklm5678')
+
+      expect(currentStorage.openRouterApiKeys).toHaveLength(1)
+      expect(currentStorage.ollamaApiKeys).toHaveLength(1)
+      expect((await resolveKeysForRequest('openrouter')).keys[0].key).toBe('sk-or-v1-abcdefghijklm1234')
+      expect((await resolveKeysForRequest('ollama')).keys[0].key).toBe('ollama-abcdefghijklm5678')
+      expect(await getKeys('openrouter')).toEqual([
+        expect.not.objectContaining({ key: expect.anything() }),
+      ])
     })
   })
 

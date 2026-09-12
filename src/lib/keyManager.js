@@ -1,5 +1,10 @@
-const PROVIDERS = ['gemini', 'tavily'];
-const STORAGE_KEYS = { gemini: 'geminiApiKeys', tavily: 'tavilyApiKeys' };
+const PROVIDERS = ['gemini', 'tavily', 'openrouter', 'ollama'];
+const STORAGE_KEYS = {
+  gemini: 'geminiApiKeys',
+  tavily: 'tavilyApiKeys',
+  openrouter: 'openRouterApiKeys',
+  ollama: 'ollamaApiKeys',
+};
 
 function getStorageKey(provider) {
   if (!PROVIDERS.includes(provider)) throw new Error(`Invalid provider: ${provider}`);
@@ -41,7 +46,10 @@ export async function getKeys(provider) {
   const storageKey = getStorageKey(provider);
   const entries = await readStorage(storageKey);
   return entries
-    .map(({ key, ...rest }) => rest)
+    .map((entry) => {
+      const { key: _, ...rest } = entry;
+      return rest;
+    })
     .sort((a, b) => {
       if (a.isPrimary && !b.isPrimary) return -1;
       if (!a.isPrimary && b.isPrimary) return 1;

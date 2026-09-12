@@ -12,8 +12,10 @@ dist
 dist-ssr
 *.local
 setup/.build/
+setup/HeraAi-Extension-*/
 setup/*.exe
 release/
+.hermes/
 
 # Editor directories and files
 .vscode/*
