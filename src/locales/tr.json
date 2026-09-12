@@ -34,6 +34,8 @@
       "set_primary": "Birincil Yap",
       "primary_badge": "Birincil",
       "no_keys": "Henüz anahtar eklenmemiş",
+      "new_key_title": "YENİ ANAHTAR",
+      "summary": "{{total}} anahtar · {{ready}} hazır",
       "test_success": "Anahtar testi başarılı!",
       "test_failed": "Anahtar testi başarısız",
       "add_success": "Anahtar başarıyla eklendi",
