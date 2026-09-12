@@ -1135,6 +1135,7 @@ describe('HeraAi App', () => {
   });
 
   it('keeps the thinking state visible before revealing a fast response progressively', async () => {
+    currentStorage.modelSelectionMode = 'manual';
     const fastAnswer = 'Fast responses must still arrive progressively.';
     api.streamChat.mockImplementationOnce(() => mockStream([
       { event: 'chunk', data: { text: fastAnswer } },
@@ -1239,6 +1240,7 @@ describe('HeraAi App', () => {
   });
 
   it('keeps optimistic rendering after the panel is hidden, resumed, and switched to a new chat', async () => {
+    currentStorage.modelSelectionMode = 'manual';
     api.streamChat.mockImplementationOnce(() => mockStream([
       { event: 'chunk', data: { text: 'Answer after panel resume' } },
     ]));
@@ -1835,6 +1837,7 @@ describe('HeraAi App', () => {
   });
 
   it('should render the user message before the first assistant chunk arrives', async () => {
+    currentStorage.modelSelectionMode = 'manual';
     const controlled = createControlledStream();
     api.streamChat.mockImplementationOnce(() => controlled.stream);
 
@@ -2878,6 +2881,7 @@ describe('HeraAi App', () => {
     fireEvent.click(screen.getByText(/Ollama/));
     const optionValues = Array.from(listbox.querySelectorAll('[data-model-id]')).map(opt => opt.dataset.modelId);
     expect(optionValues).toEqual([
+      'auto',
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
@@ -2888,6 +2892,9 @@ describe('HeraAi App', () => {
       'gpt-oss:120b',
       'nemotron-3-ultra',
     ]);
+    const autoOption = listbox.querySelector('[data-model-id="auto"]');
+    expect(autoOption).toHaveTextContent('Auto');
+    expect(autoOption.querySelector('svg.lucide-sparkles')).toBeInTheDocument();
     expect(screen.getByText('Gemini')).toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
@@ -2955,17 +2962,45 @@ describe('HeraAi App', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
-  it('defaults the selected model to DEFAULT_MODEL when storage has none', async () => {
+  it('defaults the model selection mode to automatic when storage has none', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const modelSelect = document.querySelector('button[data-testid="model-selector"]');
-    expect(modelSelect.textContent).toBe('Gemini 3.1 Flash Lite');
+    expect(modelSelect.textContent).toBe('Auto');
+    await waitFor(() => expect(currentStorage.modelSelectionMode).toBe('auto'));
+  });
+
+  it('restores a persisted manual model selection', async () => {
+    currentStorage.selectedModel = 'gemini-3.7-flash';
+    currentStorage.selectedProvider = 'gemini';
+    currentStorage.modelSelectionMode = 'manual';
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.7 Flash');
+  });
+
+  it('switches back to automatic mode from the selector', async () => {
+    currentStorage.selectedModel = 'gemini-3.7-flash';
+    currentStorage.selectedProvider = 'gemini';
+    currentStorage.modelSelectionMode = 'manual';
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
+    fireEvent.click(document.querySelector('[data-model-id="auto"]'));
+
+    await waitFor(() => expect(currentStorage.modelSelectionMode).toBe('auto'));
+    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Auto');
   });
 
   it('migrates a provider-less legacy Gemini selection once', async () => {
     currentStorage.selectedModel = 'gemini-3.6-flash';
+    currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
     await waitFor(() => expect(currentStorage.selectedProvider).toBe('gemini'));
@@ -2975,6 +3010,7 @@ describe('HeraAi App', () => {
   it('migrates a retired MiniMax selection to Nemotron', async () => {
     currentStorage.selectedProvider = 'ollama';
     currentStorage.selectedModel = 'minimax-m3';
+    currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
     await waitFor(() => expect(currentStorage).toMatchObject({
@@ -3067,6 +3103,7 @@ describe('HeraAi App', () => {
     currentStorage = {
       theme: 'light',
       selectedModel: 'gemini-3.1-flash-lite',
+      modelSelectionMode: 'manual',
     };
     api.streamChat
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.1' } }]))
@@ -3114,6 +3151,113 @@ describe('HeraAi App', () => {
     expect(screen.getAllByTestId('user-message').filter(element => (
       element.textContent.includes('Compare this question')
     ))).toHaveLength(2);
+  });
+
+  it('routes an automatic send through local selection and labels the answer', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'hello auto world' } });
+    fireEvent.click(getSendButton());
+
+    let startMessage;
+    await waitFor(() => {
+      startMessage = global.chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .find(message => message?.type === 'HERA_GENERATION_START' && !message?.kind);
+      expect(startMessage).toBeDefined();
+    });
+    expect(startMessage.selectionMode).toBe('auto');
+    expect(startMessage.model).toBe('gemini-3.1-flash-lite');
+    expect(startMessage.selectionReasonCode).toBe('fast');
+
+    const answer = await screen.findByText('Hello from AI');
+    expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model'))
+      .toHaveTextContent('Auto → Gemini 3.1 Flash Lite');
+  });
+
+  it('runs a comparison and locks the composer until a winner is chosen', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
+    expect(within(dialog).getByText(/two requests|iki istek/i)).toBeInTheDocument();
+    const selects = within(dialog).getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
+    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
+
+    let startMessage;
+    await waitFor(() => {
+      startMessage = global.chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
+      expect(startMessage).toBeDefined();
+    });
+    expect(startMessage.variants.map(variant => variant.model)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.7-flash',
+    ]);
+    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
+    const snapshotFor = (status, revision, firstContent, secondContent) => ({
+      jobId,
+      kind: 'comparison',
+      comparisonId: jobId,
+      sessionId,
+      userMessageId,
+      assistantMessageId,
+      mode: 'chat',
+      status,
+      revision,
+      content: '',
+      sources: [],
+      variants: {
+        a: {
+          variantId: 'a', status, content: firstContent, sources: [], resolvedModel: null,
+          revision, errorCode: null, model: 'gemini-3.6-flash', provider: 'gemini',
+        },
+        b: {
+          variantId: 'b', status, content: secondContent, sources: [], resolvedModel: null,
+          revision, errorCode: null, model: 'gemini-3.7-flash', provider: 'gemini',
+        },
+      },
+    });
+
+    emitRuntimeMessage({ type: 'ACTIVE_GEN_CHANGED', snapshot: snapshotFor('running', 1, 'Answer A', 'Answer B') });
+    expect(await screen.findByText('Answer A')).toBeInTheDocument();
+    expect(await screen.findByText('Answer B')).toBeInTheDocument();
+
+    emitRuntimeMessage({ type: 'DONE', activeGeneration: snapshotFor('completed', 2, 'Answer A', 'Answer B') });
+    await waitFor(() => expect(document.querySelector('textarea')).toBeDisabled());
+
+    const winners = await screen.findAllByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i });
+    expect(winners).toHaveLength(2);
+    fireEvent.click(winners[0]);
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
+      message?.type === 'SELECT_COMPARISON_WINNER' && message?.winnerSlot === 'a'
+    ))).toBe(true));
+    await waitFor(() => expect(document.querySelector('textarea')).not.toBeDisabled());
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Follow up' } });
+    fireEvent.click(getSendButton());
+
+    let followUpStart;
+    await waitFor(() => {
+      followUpStart = global.chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .find(message => message?.type === 'HERA_GENERATION_START'
+          && message?.requestMessages?.some(item => item.content === 'Follow up'));
+      expect(followUpStart).toBeDefined();
+    });
+    const followUpContents = followUpStart.requestMessages.map(item => item.content);
+    expect(followUpContents).toContain('Answer A');
+    expect(followUpContents).not.toContain('Answer B');
   });
 
   it('blocks a PDF retry before starting OpenRouter generation', async () => {

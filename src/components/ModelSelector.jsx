@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Gauge, Turtle, Zap } from 'lucide-react'
+import { Check, ChevronDown, Gauge, Sparkles, Turtle, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
+function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelLabels, onModelChange, onAutoSelect }) {
   const { t } = useTranslation()
   const normalizedModels = (models || []).map(model => typeof model === 'string'
     ? { modelId: model, provider: 'gemini', label: modelLabels[model] || model }
@@ -41,7 +41,9 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
   }, [open ])
 
   const selected = normalizedModels.find(model => model.modelId === selectedModel)
-  const selectedLabel = selected?.label || modelLabels[selectedModel] || selectedModel
+  const selectedLabel = selectionMode === 'auto'
+    ? t('chat.auto.label')
+    : (selected?.label || modelLabels[selectedModel] || selectedModel)
 
   const toggleProvider = (provider) => {
     setUserCollapsed(current => current.includes(provider)
@@ -51,7 +53,12 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
 
   const chooseModel = (modelId) => {
     setOpen(false)
-    if (modelId !== selectedModel) onModelChange(modelId)
+    if (modelId !== selectedModel || selectionMode !== 'manual') onModelChange(modelId)
+  }
+
+  const chooseAuto = () => {
+    setOpen(false)
+    onAutoSelect?.()
   }
 
   return (
@@ -75,6 +82,21 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
           aria-label={t('chat.tooltips.model_selector')}
           className="absolute bottom-full left-0 z-50 mb-1.5 max-h-56 w-48 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10"
         >
+          <button
+            type="button"
+            role="option"
+            aria-selected={selectionMode === 'auto'}
+            data-model-id="auto"
+            onClick={chooseAuto}
+            className={`mb-1 flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60 ${selectionMode === 'auto' ? 'font-semibold text-primary' : 'text-foreground'}`}
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{t('chat.auto.label')}</span>
+              <span className="block truncate text-[10px] font-normal text-muted-foreground">{t('chat.auto.description')}</span>
+            </span>
+            {selectionMode === 'auto' && <Check className="h-4 w-4 shrink-0" />}
+          </button>
           {groupedModels.map(group => {
             const collapsed = isCollapsed(group.provider)
             const headingId = `model-group-${group.provider}`
@@ -96,7 +118,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                 {!collapsed && (
                   <div id={`${headingId}-models`} role="group" aria-labelledby={headingId} className="pb-0.5">
                     {group.models.map(model => {
-                      const isSelected = model.modelId === selectedModel
+                      const isSelected = selectionMode === 'manual' && model.modelId === selectedModel
                       const SpeedIcon = model.speed === 'fast' ? Zap : model.speed === 'medium' ? Gauge : model.speed === 'slow' ? Turtle : null
                       return (
                         <button

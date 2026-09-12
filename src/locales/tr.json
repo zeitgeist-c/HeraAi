@@ -193,6 +193,24 @@
       "description": "Bu denemeye özel modeli seçin",
       "default": "Varsayılan"
     },
+    "auto": {
+      "label": "Otomatik",
+      "description": "İsteğe en uygun modeli otomatik seçer"
+    },
+    "comparison": {
+      "open": "Modelleri karşılaştır",
+      "title": "İki modeli karşılaştır",
+      "model_a": "Model A",
+      "model_b": "Model B",
+      "start": "Karşılaştırmayı başlat",
+      "cancel": "İptal",
+      "different_models": "Karşılaştırmak için iki farklı model seçin.",
+      "two_requests_notice": "Karşılaştırma, her model için bir tane olmak üzere iki istek gönderir.",
+      "unavailable": "API anahtarı yok",
+      "incompatible": "Ek türü desteklenmiyor",
+      "continue_with_this": "Bu yanıtla devam et",
+      "locked": "Sohbete devam etmek için kazanan yanıtı seçin."
+    },
     "prompts": {
       "summarize": "Özetle",
       "summarize_files": "Ekli dosyaları doğru biçimde özetle. Her dosyaya adıyla başvur.",
@@ -227,6 +245,7 @@
     "sources_label": "Kaynaklar",
     "status": {
       "thinking": "Düşünüyor...",
+      "selecting_model": "Düşünüyor... Uygun model seçiliyor",
       "cancelled": "İptal edildi",
       "error": "Yanıt alınamadı",
       "interrupted": "Tarayıcı yanıt tamamlanmadan kapandı. Güvenle yeniden deneyebilirsiniz."

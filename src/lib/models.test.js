@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  AUTO_MODEL_KEY,
   DEFAULT_MODEL,
   MODEL_CATALOG,
   describeModelFallback,
+  getAutoCandidateKeys,
   getProviderForModel,
+  isAutoModelKey,
   resolveModelSelection,
 } from './models.js'
 
@@ -81,5 +84,41 @@ describe('provider-aware model catalog', () => {
     expect(describeModelFallback('gemini-3.8-flash', 'gemini-3.8-flash', {})).toBeNull()
     expect(describeModelFallback('gemini-3.8-flash', null, {})).toBeNull()
     expect(describeModelFallback('gemini-3.8-flash', '', {})).toBeNull()
+  })
+
+  it('keeps the automatic selector out of the concrete catalog', () => {
+    expect(AUTO_MODEL_KEY).toBe('auto')
+    expect(MODEL_CATALOG.some(model => model.key === AUTO_MODEL_KEY || model.modelId === AUTO_MODEL_KEY)).toBe(false)
+    expect(isAutoModelKey('auto')).toBe(true)
+    expect(isAutoModelKey('gemini-3.1-flash-lite')).toBe(false)
+    expect(isAutoModelKey(null)).toBe(false)
+    expect(isAutoModelKey(undefined)).toBe(false)
+  })
+
+  it('lists eligible automatic candidates as catalog keys filtered by capability', () => {
+    expect(getAutoCandidateKeys()).toEqual(MODEL_CATALOG.map(model => model.key))
+    expect(getAutoCandidateKeys({ mode: 'chat' })).toHaveLength(9)
+    expect(getAutoCandidateKeys({ mimeTypes: ['application/pdf'] })).toEqual([
+      'gemini:gemini-3.1-flash-lite',
+      'gemini:gemini-3.5-flash-lite',
+      'gemini:gemini-3.6-flash',
+      'gemini:gemini-3.7-flash',
+      'gemini:gemini-3.8-flash',
+    ])
+    expect(getAutoCandidateKeys({ mimeTypes: ['image/png'] })).toEqual([
+      'gemini:gemini-3.1-flash-lite',
+      'gemini:gemini-3.5-flash-lite',
+      'gemini:gemini-3.6-flash',
+      'gemini:gemini-3.7-flash',
+      'gemini:gemini-3.8-flash',
+      'openrouter:openrouter/free',
+    ])
+    expect(getAutoCandidateKeys({ mode: 'web' })).toEqual([
+      'gemini:gemini-3.1-flash-lite',
+      'gemini:gemini-3.5-flash-lite',
+      'gemini:gemini-3.6-flash',
+      'gemini:gemini-3.7-flash',
+      'gemini:gemini-3.8-flash',
+    ])
   })
 })

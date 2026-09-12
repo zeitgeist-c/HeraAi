@@ -6,13 +6,14 @@ import {
   getProviderForModel,
 } from './models.js'
 import { streamRemoteProvider, testOllamaKey, testOpenRouterKey } from './providerApi.js'
+import { classifyWithGemmaRouter as classifyWithGemmaRouterImpl } from './autoRouter.js'
 
 export { DEFAULT_MODEL, MODEL_CAPABILITIES, MODELS }
 const GEMINI_API_VERSION = 'v1'
 const GEMINI_URL_CONTEXT_API_VERSION = 'v1beta'
-const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 60000
-const GEMINI_REASONING_REQUEST_TIMEOUT_MS = 120000
-const GEMINI_STREAM_IDLE_TIMEOUT_MS = 120000
+const GEMINI_DEFAULT_REQUEST_TIMEOUT_MS = 90000
+const GEMINI_REASONING_REQUEST_TIMEOUT_MS = 180000
+const GEMINI_STREAM_IDLE_TIMEOUT_MS = 180000
 const GEMINI_REASONING_MODELS = new Set([
   'gemini-3.6-flash',
   'gemini-3.7-flash',
@@ -356,6 +357,7 @@ const GEMINI_MODEL_FALLBACKABLE = new Set([
   'cooldown',
   'service_unavailable',
   'model_unavailable',
+  'timeout',
 ])
 const GEMINI_NON_RETRYABLE_FAILURE = new Set([
   'invalid_request',
@@ -613,6 +615,9 @@ const REMOTE_GEMINI_FALLBACKABLE = new Set([
   'quota_exceeded',
   'service_unavailable',
   'timeout',
+  'network_error',
+  'model_unavailable',
+  'empty_response',
   'image_not_supported',
   'pdf_requires_gemini',
 ])
@@ -1131,6 +1136,78 @@ async function* streamUrlResearch(input, urls, providerKeys, tavilyKeys, signal,
   }
 }
 
+export async function prepareSharedResearch(input, tavilyKeys = [], signal, options = {}) {
+  const conversationMessages = Array.isArray(input)
+    ? normalizeTextMessages(input)
+    : normalizeTextMessages([{ role: 'user', content: input }])
+  const lastUserIndex = conversationMessages.findLastIndex(message => message.role === 'user')
+  const question = lastUserIndex >= 0 ? conversationMessages[lastUserIndex].content : ''
+  const urls = Array.isArray(options?.webContext?.urls) ? options.webContext.urls : []
+
+  if (options?.webContext?.kind === 'url' && urls.length > 0) {
+    if (validKeys(tavilyKeys).length === 0) return null
+    const extraction = await extractTavilyUrls(urls, tavilyKeys, signal)
+    if (!extraction.results) {
+      return {
+        errorCode: extraction.missingKey ? 'tavily_key_missing' : 'url_retrieval_failed',
+        keyStatuses: extraction.keyStatuses || [],
+      }
+    }
+    return {
+      messages: conversationMessages.map((message, index) => index === lastUserIndex
+        ? { ...message, content: buildExtractedUrlPrompt(question, extraction.results, options.language) }
+        : message),
+      sources: extraction.results.map((result, index) => ({
+        index: index + 1,
+        title: result.title,
+        requestedUrl: result.requestedUrl,
+        resolvedUrl: result.resolvedUrl,
+        url: result.url,
+        kind: 'url',
+        status: 'retrieved',
+        truncated: result.truncated,
+      })),
+      keyStatuses: extraction.keyStatuses || [],
+    }
+  }
+
+  const queryResult = await generateResearchQuery(conversationMessages, question)
+  let searchResult
+  if (options?.webContext?.searchMode === 'auto') {
+    searchResult = await searchDuckDuckGo(queryResult.query, signal)
+    if (!searchResult?.results?.length) {
+      return { messages: conversationMessages, sources: [], keyStatuses: queryResult.keyStatuses || [] }
+    }
+  } else {
+    const entries = validKeys(tavilyKeys)
+    if (entries.length === 0) return { errorCode: 'tavily_key_missing', keyStatuses: [] }
+    for (const entry of entries) {
+      searchResult = await searchTavily(queryResult.query, [entry], signal)
+      if (searchResult.results || !searchResult.retryable) break
+    }
+    if (!searchResult?.results?.length) {
+      return {
+        errorCode: 'research_failed',
+        keyStatuses: searchResult?.keyStatus ? [searchResult.keyStatus] : [],
+      }
+    }
+  }
+
+  const answerMessages = conversationMessages.length > 0
+    ? conversationMessages.map((message, index) => index === conversationMessages.length - 1
+        ? { ...message, content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }
+        : message)
+    : [{ role: 'user', content: buildResearchPrompt(question, queryResult.query, queryResult.context, searchResult.results) }]
+  return {
+    messages: answerMessages,
+    sources: searchResult.results.map((result, index) => ({ index: index + 1, title: result.title, url: result.url })),
+    keyStatuses: [
+      ...(queryResult.keyStatuses || []),
+      ...(searchResult.keyStatus ? [searchResult.keyStatus] : []),
+    ],
+  }
+}
+
 export async function* streamResearch(
   input,
   providerKeys = [],
@@ -1299,4 +1376,8 @@ export async function testKey(provider, key, _model = DEFAULT_MODEL) {
   if (provider === 'ollama') return testOllamaKey(normalizedKey)
 
   return { success: false, provider, errorType: 'invalid' }
+}
+
+export async function classifyWithGemmaRouter(args) {
+  return classifyWithGemmaRouterImpl(args)
 }

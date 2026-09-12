@@ -905,12 +905,12 @@ describe('streamChat fallback', () => {
     'gemini-3.6-flash',
     'gemini-3.7-flash',
     'gemini-3.8-flash',
-  ])('reports the %s 120-second startup deadline as timeout without a second request', async model => {
+  ])('uses the extended startup deadline and then tries the safe lite fallbacks for %s', async model => {
     vi.useFakeTimers()
     try {
-      let requestSignal
-      mocks.generateContentStreamMock.mockImplementationOnce(parameters => {
-        requestSignal = parameters.config.abortSignal
+      const requestSignals = []
+      mocks.generateContentStreamMock.mockImplementation(parameters => {
+        requestSignals.push(parameters.config.abortSignal)
         return new Promise(() => {})
       })
 
@@ -923,22 +923,31 @@ describe('streamChat fallback', () => {
       ))
 
       await vi.advanceTimersByTimeAsync(120000)
+      expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(240000)
       const events = await eventsPromise
 
       expect(events).toContainEqual(expect.objectContaining({
         event: 'error',
         data: expect.objectContaining({ code: 'timeout' }),
       }))
-      expect(requestSignal.aborted).toBe(true)
+      expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+        model,
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+      ])
+      expect(requestSignals.every(signal => signal.aborted)).toBe(true)
       expect(mocks.generateContentMock).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('treats an SDK-internal abort as a timeout when the caller did not cancel', async () => {
+  it('reports an SDK-internal abort as timeout when both streaming and recovery fail', async () => {
     const sdkTimeout = new DOMException('The operation was aborted', 'AbortError')
-    mocks.generateContentStreamMock.mockRejectedValueOnce(sdkTimeout)
+    mocks.generateContentStreamMock.mockRejectedValue(sdkTimeout)
+    mocks.generateContentMock.mockRejectedValue(sdkTimeout)
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'question' }],
@@ -952,6 +961,11 @@ describe('streamChat fallback', () => {
       event: 'error',
       data: expect.objectContaining({ code: 'timeout' }),
     }))
+    expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+    ])
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
