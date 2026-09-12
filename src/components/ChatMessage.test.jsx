@@ -329,4 +329,58 @@ describe('ChatMessage copy actions', () => {
     expect(screen.queryByText(/Copied!|Kopyalandı!/i)).not.toBeInTheDocument()
     consoleError.mockRestore()
   })
+
+  it('shows the automatic routing chain from router to resolved model', () => {
+    render(<ChatMessage
+      message={{
+        id: 21,
+        role: 'model',
+        content: 'Auto answer',
+        model: 'gemini-3.1-flash-lite',
+        selectionMode: 'auto',
+        routerModel: 'gemini-3.5-flash-lite',
+        resolvedModel: 'gemini-3.5-flash-lite',
+      }}
+      modelLabels={modelLabels}
+    />)
+
+    expect(screen.getByTestId('auto-chain')).toHaveTextContent('Auto → Gemini 3.5 Flash Lite')
+  })
+
+  it('offers the winning answer control for selectable comparison variants', () => {
+    const onSelectWinner = vi.fn()
+    const message = {
+      id: 22,
+      role: 'model',
+      content: 'Variant A',
+      status: 'done',
+      comparisonId: 'comparison-1',
+      variantId: 'a',
+      selectable: true,
+      model: 'gemini-3.6-flash',
+    }
+    render(<ChatMessage message={message} modelLabels={modelLabels} onSelectWinner={onSelectWinner} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i }))
+
+    expect(onSelectWinner).toHaveBeenCalledWith(message)
+  })
+
+  it('dims context-excluded comparison losers', () => {
+    render(<ChatMessage
+      message={{
+        id: 23,
+        role: 'model',
+        content: 'Loser answer',
+        status: 'done',
+        comparisonId: 'comparison-1',
+        variantId: 'b',
+        contextExcluded: true,
+      }}
+      modelLabels={modelLabels}
+      onSelectWinner={vi.fn()}
+    />)
+
+    expect(screen.getByTestId('assistant-message')).toHaveAttribute('data-context-excluded', 'true')
+  })
 })

@@ -119,6 +119,29 @@ describe('OpenRouter provider adapter', () => {
     expect(events.find(event => event.event === 'error')).toBeUndefined()
   })
 
+  it('falls back to the router when a named model has a transient network failure', async () => {
+    global.fetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(streamResponse([
+        'data: {"model":"meta-llama/free","choices":[{"delta":{"content":"recovered"}}]}\n\n',
+      ]))
+
+    const events = await collect(streamRemoteProvider(
+      'openrouter',
+      messages,
+      {},
+      keys,
+      undefined,
+      null,
+      'nvidia/nemotron-3-super-120b-a12b:free',
+    ))
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'recovered' } })
+    expect(events.some(event => event.event === 'error')).toBe(false)
+  })
+
   it('does not fall back to the router after partial output', async () => {
     global.fetch.mockResolvedValue(streamResponse([
       'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":429,"message":"rate limit"}}\n\n',
@@ -194,7 +217,7 @@ describe('OpenRouter provider adapter', () => {
       }, { once: true })
     }))
     const pending = collect(streamRemoteProvider('openrouter', messages, {}, keys))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await vi.advanceTimersByTimeAsync(180_000)
     await expect(pending).resolves.toEqual(expect.arrayContaining([
       { event: 'error', data: { code: 'timeout' } },
     ]))

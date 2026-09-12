@@ -4,16 +4,20 @@ export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api'
 export const OLLAMA_CLOUD_MODEL = 'nemotron-3-ultra'
 export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
 
-const REQUEST_TIMEOUT_MS = 120_000
-const STREAM_IDLE_TIMEOUT_MS = 120_000
+const REQUEST_TIMEOUT_MS = 180_000
+const STREAM_IDLE_TIMEOUT_MS = 180_000
 
-// Any named OpenRouter model automatically falls back to the free router
-// when the model itself is at fault, so newly added models need no extra wiring.
+// Named OpenRouter models fall back to the free router when they fail before
+// producing content, so transient failures never duplicate a partial answer.
 const OPENROUTER_ROUTER_FALLBACKABLE = new Set([
   'model_unavailable',
   'rate_limited',
   'quota_exceeded',
   'service_unavailable',
+  'network_error',
+  'timeout',
+  'empty_response',
+  'generation_failed',
 ])
 
 function createAbortError() {

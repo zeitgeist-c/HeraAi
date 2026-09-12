@@ -309,3 +309,212 @@ describe('generation worker runtime', () => {
     }))
   })
 })
+
+describe('generation worker comparison runtime', () => {
+  const comparisonStart = (jobId = 'job-comparison', overrides = {}) => ({
+    kind: 'comparison',
+    jobId,
+    mode: 'chat',
+    requestMessages: [{ role: 'user', content: 'compare these' }],
+    providerKeys: [{ id: 'g1', key: 'shared-secret' }],
+    tavilyKeys: [],
+    systemInstruction: 'system',
+    language: 'en',
+    variants: [
+      { variantId: 'a', model: 'gemini-3.6-flash', provider: 'gemini' },
+      { variantId: 'b', model: 'openrouter/free', provider: 'openrouter' },
+    ],
+    ...overrides,
+  })
+
+  const eventsByKind = (emit, kind) => emit.mock.calls
+    .map(([event]) => event)
+    .filter(event => event.kind === kind)
+
+  it('runs both variants concurrently with isolated buffers and variantId on every event', async () => {
+    const engines = createEngines()
+    engines.streamChat.mockImplementation((_messages, _options, _keys, _signal, model) => {
+      if (model === 'gemini-3.6-flash') {
+        return asyncEvents([
+          { event: 'model_resolved', data: { provider: 'gemini', resolvedModel: 'gemini-3.6-flash' } },
+          { event: 'chunk', data: { text: 'answer A' } },
+        ])
+      }
+      return asyncEvents([
+        { event: 'key_status', data: { provider: 'openrouter', keyId: 'o1', status: 'success' } },
+        { event: 'chunk', data: { text: 'answer B' } },
+      ])
+    })
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines })
+
+    await runtime.handleMessage(comparisonStart())
+
+    expect(engines.streamChat).toHaveBeenCalledTimes(2)
+    const models = engines.streamChat.mock.calls.map(args => args[4]).sort()
+    expect(models).toEqual(['gemini-3.6-flash', 'openrouter/free'])
+    // Shared request context reaches both variants.
+    for (const args of engines.streamChat.mock.calls) {
+      expect(args[0]).toEqual([{ role: 'user', content: 'compare these' }])
+      expect(args[2]).toEqual([{ id: 'g1', key: 'shared-secret' }])
+    }
+
+    const snapshots = eventsByKind(emit, 'snapshot')
+    expect(snapshots).toHaveLength(3)
+    expect(snapshots).toContainEqual(expect.objectContaining({
+      jobId: 'job-comparison',
+      variantId: 'a',
+      content: 'answer A',
+      resolvedModel: 'gemini-3.6-flash',
+    }))
+    expect(snapshots).toContainEqual(expect.objectContaining({
+      jobId: 'job-comparison',
+      variantId: 'b',
+      content: 'answer B',
+    }))
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'model_resolved',
+      jobId: 'job-comparison',
+      variantId: 'a',
+      resolvedModel: 'gemini-3.6-flash',
+    }))
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'key_status',
+      jobId: 'job-comparison',
+      variantId: 'b',
+      keyId: 'o1',
+    }))
+    const heartbeats = eventsByKind(emit, 'heartbeat')
+    expect(heartbeats.map(event => event.variantId).sort()).toEqual(['a', 'b'])
+
+    // Every comparison event carries its variantId except the aggregate done.
+    for (const [event] of emit.mock.calls) {
+      if (event.kind === 'done') continue
+      expect(event.variantId).toMatch(/^[ab]$/)
+    }
+
+    const doneEvents = eventsByKind(emit, 'done')
+    expect(doneEvents).toHaveLength(1)
+    expect(doneEvents[0]).toMatchObject({
+      jobId: 'job-comparison',
+      cancelled: false,
+      errorCode: null,
+    })
+    expect(doneEvents[0]).not.toHaveProperty('variantId')
+    expect(doneEvents[0].variants.a).toMatchObject({
+      variantId: 'a',
+      status: 'completed',
+      content: 'answer A',
+      resolvedModel: 'gemini-3.6-flash',
+    })
+    expect(doneEvents[0].variants.b).toMatchObject({
+      variantId: 'b',
+      status: 'completed',
+      content: 'answer B',
+    })
+    expect(runtime.getActiveJob()).toBeNull()
+  })
+
+  it('keeps single start payloads free of variantId', async () => {
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines: createEngines([]) })
+
+    await runtime.handleMessage({ kind: 'start', jobId: 'job-single', mode: 'chat' })
+
+    expect(emit.mock.calls.length).toBeGreaterThan(0)
+    for (const [event] of emit.mock.calls) {
+      expect(event).not.toHaveProperty('variantId')
+      expect(event).not.toHaveProperty('variants')
+    }
+  })
+
+  it('lets one variant fail without cancelling the other and summarizes both in done', async () => {
+    const engines = createEngines()
+    engines.streamChat.mockImplementation((_messages, _options, _keys, _signal, model) => {
+      if (model === 'gemini-3.6-flash') {
+        return asyncEvents([
+          { event: 'chunk', data: { text: 'partial A' } },
+          { event: 'error', data: { code: 'timeout', message: 'too slow' } },
+        ])
+      }
+      return asyncEvents([{ event: 'chunk', data: { text: 'full B' } }])
+    })
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines })
+
+    await runtime.handleMessage(comparisonStart('job-partial-failure'))
+
+    const errorEvents = eventsByKind(emit, 'error')
+    expect(errorEvents).toHaveLength(1)
+    expect(errorEvents[0]).toMatchObject({
+      jobId: 'job-partial-failure',
+      variantId: 'a',
+      code: 'timeout',
+      errorCode: 'timeout',
+      content: 'partial A',
+    })
+
+    const doneEvents = eventsByKind(emit, 'done')
+    expect(doneEvents).toHaveLength(1)
+    expect(doneEvents[0]).toMatchObject({ cancelled: false })
+    expect(doneEvents[0].variants.a).toMatchObject({ status: 'error', errorCode: 'timeout' })
+    expect(doneEvents[0].variants.b).toMatchObject({ status: 'completed', content: 'full B' })
+  })
+
+  it('prepares web search once and shares the same source context with both variants', async () => {
+    const engines = createEngines()
+    engines.prepareSharedResearch = vi.fn().mockResolvedValue({
+      messages: [{ role: 'user', content: 'shared web evidence' }],
+      sources: [{ index: 1, title: 'Source', url: 'https://example.com' }],
+      keyStatuses: [],
+    })
+    engines.streamChat.mockImplementation(() => asyncEvents([
+      { event: 'chunk', data: { text: 'answer' } },
+    ]))
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines })
+
+    await runtime.handleMessage(comparisonStart('job-shared-web', {
+      mode: 'web',
+      webContext: { kind: 'search', searchMode: 'explicit', urls: [] },
+      tavilyKeys: [{ id: 't1', key: 'tavily-secret' }],
+    }))
+
+    expect(engines.prepareSharedResearch).toHaveBeenCalledTimes(1)
+    expect(engines.streamResearch).not.toHaveBeenCalled()
+    expect(engines.streamChat).toHaveBeenCalledTimes(2)
+    for (const args of engines.streamChat.mock.calls) {
+      expect(args[0]).toEqual([{ role: 'user', content: 'shared web evidence' }])
+    }
+    const done = eventsByKind(emit, 'done')[0]
+    expect(done.variants.a.sources).toEqual([{ index: 1, title: 'Source', url: 'https://example.com' }])
+    expect(done.variants.b.sources).toEqual([{ index: 1, title: 'Source', url: 'https://example.com' }])
+  })
+
+  it('cancels both variants together and reports a cancelled aggregate done', async () => {
+    const engines = createEngines()
+    engines.streamChat.mockImplementation((_messages, _options, _keys, signal) => (
+      (async function* controlledStream() {
+        yield { event: 'chunk', data: { text: 'visible' } }
+        await new Promise((resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+        })
+      })()
+    ))
+    const emit = vi.fn()
+    const runtime = createGenerationWorkerRuntime({ emit, engines })
+
+    const task = runtime.handleMessage(comparisonStart('job-comparison-cancel'))
+    await vi.waitFor(() => expect(eventsByKind(emit, 'snapshot')).toHaveLength(2))
+    expect(runtime.handleMessage({ kind: 'cancel', jobId: 'job-comparison-cancel' })).toBe(true)
+    await task
+
+    const doneEvents = eventsByKind(emit, 'done')
+    expect(doneEvents).toHaveLength(1)
+    expect(doneEvents[0]).toMatchObject({ jobId: 'job-comparison-cancel', cancelled: true })
+    expect(doneEvents[0].variants.a.status).toBe('cancelled')
+    expect(doneEvents[0].variants.b.status).toBe('cancelled')
+    expect(emit.mock.calls.map(([event]) => event.kind)).not.toContain('error')
+  })
+})

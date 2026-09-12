@@ -193,6 +193,24 @@
             "description": "Choose a model for this retry only",
             "default": "Default"
         },
+        "auto": {
+            "label": "Auto",
+            "description": "Automatically selects the best model for the request"
+        },
+        "comparison": {
+            "open": "Compare models",
+            "title": "Compare two models",
+            "model_a": "Model A",
+            "model_b": "Model B",
+            "start": "Start comparison",
+            "cancel": "Cancel",
+            "different_models": "Choose two different models to compare.",
+            "two_requests_notice": "A comparison sends two requests, one for each model.",
+            "unavailable": "No API key",
+            "incompatible": "Attachment type is not supported",
+            "continue_with_this": "Continue with this answer",
+            "locked": "Pick a winning answer to keep chatting."
+        },
         "prompts": {
             "summarize": "Summarize",
             "summarize_files": "Summarize the attached files accurately. Refer to each file by name.",
@@ -227,6 +245,7 @@
         "sources_label": "Sources",
         "status": {
             "thinking": "Thinking...",
+            "selecting_model": "Thinking... Selecting a model",
             "cancelled": "Cancelled",
             "error": "Response failed",
             "interrupted": "The browser closed before the response finished. You can retry safely."

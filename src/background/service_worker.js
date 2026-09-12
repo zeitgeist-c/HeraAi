@@ -1,5 +1,20 @@
-import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
-import { getProviderForModel } from '../lib/models.js';
+import { getKeys, resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
+import {
+  MODEL_CATALOG,
+  PROVIDERS,
+  getProviderForModel,
+} from '../lib/models.js';
+import {
+  COMPARISON_SLOTS,
+  allVariantsTerminal,
+  applyWinnerSelection,
+  createComparisonJob,
+  isComparisonJob,
+} from '../lib/comparison.js';
+import {
+  classifyWithGemmaRouter,
+  selectLocalFallback,
+} from '../lib/autoRouter.js';
 import {
   hasRetiredModelProvenance,
   stripRetiredModelProvenance,
@@ -18,6 +33,19 @@ const HEARTBEAT_STALE_AFTER_MS = 45_000;
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running']);
 const ACKNOWLEDGEABLE_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted']);
 const VALID_KEY_PROVIDERS = new Set(['gemini', 'tavily', 'openrouter', 'ollama']);
+
+function compatibleAutoModels({ availableProviders, mimeTypes, mode, tavilyAvailable }) {
+  const providers = new Set(availableProviders || []);
+  const hasPdf = mimeTypes.includes('application/pdf');
+  const hasImage = mimeTypes.some(mime => mime.startsWith('image/'));
+  return MODEL_CATALOG.filter(model => {
+    if (!providers.has(model.provider)) return false;
+    if (hasPdf && model.capabilities?.supportsPdf !== true) return false;
+    if (hasImage && model.capabilities?.supportsImage !== true) return false;
+    if (mode === 'web' && !tavilyAvailable && model.capabilities?.supportsUrlContext !== true) return false;
+    return true;
+  });
+}
 
 let generationQueue = Promise.resolve();
 const latestKeyStatuses = new Map();
@@ -339,7 +367,20 @@ function createQueuedGeneration(message, storedGeneration = null) {
     model: message.model ?? stored.model ?? null,
     provider: message.provider ?? stored.provider ?? getProviderForModel(message.model),
     resolvedModel: message.resolvedModel ?? stored.resolvedModel ?? null,
+    selectionMode: message.selectionMode ?? stored.selectionMode ?? 'manual',
+    selectionReasonCode: message.selectionReasonCode ?? stored.selectionReasonCode ?? null,
+    routerModel: message.routerModel ?? stored.routerModel ?? null,
     language: message.language ?? stored.language ?? 'tr',
+    ...(message.kind === 'comparison' || stored.kind === 'comparison'
+      ? {
+          kind: 'comparison',
+          comparisonId: message.comparisonId ?? stored.comparisonId ?? message.jobId,
+          variants: message.variants != null
+            ? createComparisonJob({ jobId: message.jobId, variants: message.variants }).variants
+            : (stored.variants ?? createComparisonJob({ jobId: message.jobId }).variants),
+          selection: message.selection ?? stored.selection ?? { winnerSlot: null, decidedAt: null },
+        }
+      : {}),
     status: 'queued',
     revision: normalizedRevision(stored.revision),
     content: typeof stored.content === 'string' ? stored.content : '',
@@ -441,7 +482,36 @@ function createThinkingPlaceholder(message, queuedGeneration) {
     ...(typeof queuedGeneration.resolvedModel === 'string' && queuedGeneration.resolvedModel
       ? { resolvedModel: queuedGeneration.resolvedModel }
       : {}),
+    ...(queuedGeneration.selectionMode === 'auto' ? { selectionMode: 'auto' } : {}),
+    ...(queuedGeneration.selectionReasonCode
+      ? { selectionReasonCode: queuedGeneration.selectionReasonCode }
+      : {}),
+    ...(queuedGeneration.routerModel ? { routerModel: queuedGeneration.routerModel } : {}),
   };
+}
+
+function createComparisonThinkingPlaceholder(message, queuedGeneration, slot) {
+  const base = createThinkingPlaceholder(message, queuedGeneration);
+  const variant = queuedGeneration.variants?.[slot] || {};
+  return {
+    ...base,
+    id: `${message.assistantMessageId}:${slot}`,
+    comparisonId: queuedGeneration.comparisonId ?? queuedGeneration.jobId,
+    variantId: slot,
+    comparisonSelected: false,
+    contextExcluded: false,
+    ...(typeof variant.model === 'string' && variant.model
+      ? { model: variant.model }
+      : {}),
+    ...(typeof variant.provider === 'string' && variant.provider
+      ? { provider: variant.provider }
+      : {}),
+  };
+}
+
+function createThinkingPlaceholders(message, queuedGeneration) {
+  if (!isComparisonJob(queuedGeneration)) return [createThinkingPlaceholder(message, queuedGeneration)];
+  return COMPARISON_SLOTS.map(slot => createComparisonThinkingPlaceholder(message, queuedGeneration, slot));
 }
 
 function generationLivenessTimestamp(activeGeneration) {
@@ -474,8 +544,259 @@ async function markGenerationInterrupted(activeGeneration, reason) {
   return interruptedGeneration;
 }
 
+function applyVariantReport(currentVariant, details = {}) {
+  const currentRevision = normalizedRevision(currentVariant?.revision);
+  const revision = normalizedRevision(
+    details.finalRev ?? details.finalRevision ?? details.revision,
+    currentRevision,
+  );
+  const acceptsReportedContent = revision >= currentRevision;
+  return {
+    ...currentVariant,
+    revision: Math.max(currentRevision, revision),
+    content: acceptsReportedContent && typeof details.content === 'string'
+      ? details.content
+      : (currentVariant?.content || ''),
+    sources: acceptsReportedContent && Array.isArray(details.sources)
+      ? details.sources
+      : (Array.isArray(currentVariant?.sources) ? currentVariant.sources : []),
+    resolvedModel: details.resolvedModel || currentVariant?.resolvedModel || null,
+  };
+}
+
+async function writeComparisonVariantError(activeGeneration, variantId, errorCode, details = {}, now = Date.now()) {
+  const nextVariant = {
+    ...applyVariantReport(activeGeneration.variants[variantId], details),
+    status: 'error',
+    errorCode: errorCode || 'generation_failed',
+  };
+  const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
+  const terminal = allVariantsTerminal({ ...activeGeneration, variants: nextVariants });
+  const nextGeneration = {
+    ...withoutSensitiveGenerationData(activeGeneration),
+    variants: nextVariants,
+    status: terminal ? 'error' : activeGeneration.status,
+    ...(terminal ? { streamCompletedAt: now, completedAt: now } : {}),
+    lastSnapshotAt: now,
+    updatedAt: now,
+  };
+
+  await setActiveGeneration(nextGeneration);
+  const snapshot = generationSnapshot(nextGeneration);
+  if (terminal) {
+    await broadcastRuntimeMessage({
+      type: 'DONE',
+      forwardedBy: 'service_worker',
+      jobId: nextGeneration.jobId,
+      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+      status: 'error',
+      finalRev: nextGeneration.revision,
+      finalRevision: nextGeneration.revision,
+      errorCode: nextGeneration.errorCode || errorCode || 'generation_failed',
+      activeGeneration: snapshot,
+      snapshot,
+    });
+    await closeOffscreenDocument();
+  } else {
+    await broadcastRuntimeMessage({
+      type: 'ACTIVE_GEN_CHANGED',
+      forwardedBy: 'service_worker',
+      jobId: nextGeneration.jobId,
+      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+      variantId,
+      revision: nextVariant.revision,
+      content: nextVariant.content,
+      sources: nextVariant.sources,
+      status: nextGeneration.status,
+      snapshot,
+    });
+  }
+  return nextGeneration;
+}
+
+async function writeComparisonVariantDone(activeGeneration, variantId, details = {}, now = Date.now()) {
+  const nextVariant = {
+    ...applyVariantReport(activeGeneration.variants[variantId], details),
+    status: details.cancelled ? 'cancelled' : 'completed',
+    ...(details.cancelled ? {} : { errorCode: null }),
+  };
+  const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
+  return persistComparisonVariants(activeGeneration, nextVariants, {
+    cancelled: Boolean(details.cancelled),
+    now,
+  });
+}
+
+async function applyComparisonDoneSummary(activeGeneration, summary = {}, details = {}, now = Date.now()) {
+  const nextVariants = { ...activeGeneration.variants };
+  for (const slot of COMPARISON_SLOTS) {
+    const reported = summary[slot];
+    if (!reported || !nextVariants[slot]) continue;
+    nextVariants[slot] = {
+      ...applyVariantReport(nextVariants[slot], reported),
+      status: reported.status === 'error'
+        ? 'error'
+        : (reported.status === 'cancelled' ? 'cancelled' : 'completed'),
+      errorCode: reported.status === 'error'
+        ? (reported.errorCode || 'generation_failed')
+        : null,
+    };
+  }
+  return persistComparisonVariants(activeGeneration, nextVariants, {
+    cancelled: Boolean(details.cancelled),
+    now,
+  });
+}
+
+async function persistComparisonVariants(activeGeneration, nextVariants, { cancelled = false, now = Date.now() } = {}) {
+  const terminal = allVariantsTerminal({ ...activeGeneration, variants: nextVariants });
+  const revision = Math.max(
+    normalizedRevision(activeGeneration.revision),
+    ...COMPARISON_SLOTS.map(slot => normalizedRevision(nextVariants[slot]?.revision)),
+  );
+  const nextGeneration = {
+    ...withoutSensitiveGenerationData(activeGeneration),
+    variants: nextVariants,
+    status: terminal ? (cancelled ? 'cancelled' : 'completed') : activeGeneration.status,
+    revision,
+    ...(terminal ? { streamCompletedAt: now, completedAt: now } : {}),
+    lastSnapshotAt: now,
+    updatedAt: now,
+    presentedRevision: Math.max(normalizedRevision(activeGeneration.presentedRevision), revision),
+  };
+
+  await setActiveGeneration(nextGeneration);
+  const snapshot = generationSnapshot(nextGeneration);
+  if (!terminal) {
+    await broadcastRuntimeMessage({
+      type: 'ACTIVE_GEN_CHANGED',
+      forwardedBy: 'service_worker',
+      jobId: nextGeneration.jobId,
+      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+      revision,
+      status: nextGeneration.status,
+      snapshot,
+    });
+    return { terminal: false, activeGeneration: snapshot, nextGeneration };
+  }
+
+  if (cancelled) {
+    await broadcastRuntimeMessage({
+      type: 'CANCEL_DONE',
+      forwardedBy: 'service_worker',
+      jobId: nextGeneration.jobId,
+      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+      status: 'cancelled',
+      finalRev: nextGeneration.revision,
+      finalRevision: nextGeneration.revision,
+      activeGeneration: snapshot,
+      snapshot,
+    });
+  } else {
+    await broadcastRuntimeMessage({
+      type: 'DONE',
+      forwardedBy: 'service_worker',
+      jobId: nextGeneration.jobId,
+      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+      status: 'completed',
+      finalRev: nextGeneration.revision,
+      finalRevision: nextGeneration.revision,
+      errorCode: null,
+      activeGeneration: snapshot,
+      snapshot,
+    });
+  }
+  await closeOffscreenDocument();
+  return { terminal: true, activeGeneration: snapshot, nextGeneration };
+}
+
+async function handleSelectComparisonWinner(message) {
+  const comparisonId = message?.comparisonId ?? message?.jobId ?? null;
+  const winnerSlot = message?.winnerSlot;
+  if (!comparisonId || !COMPARISON_SLOTS.includes(winnerSlot)) {
+    return { ok: false, errorCode: 'invalid_request' };
+  }
+
+  const storedState = await storageGet(['sessions', 'activeGeneration']);
+  const sessions = Array.isArray(storedState?.sessions) ? storedState.sessions : [];
+  let matched = false;
+  const nextSessions = sessions.map(session => {
+    if (
+      (message.sessionId && session?.id !== message.sessionId)
+      || !Array.isArray(session?.messages)
+      || !session.messages.some(item => item?.comparisonId === comparisonId)
+    ) {
+      return session;
+    }
+    matched = true;
+    return {
+      ...session,
+      messages: applyWinnerSelection(session.messages, comparisonId, winnerSlot),
+      updatedAt: Date.now(),
+    };
+  });
+  if (!matched) return { ok: false, errorCode: 'not_found' };
+
+  const activeGeneration = storedState?.activeGeneration || null;
+  const activeMatches = activeGeneration && (
+    activeGeneration.comparisonId === comparisonId || activeGeneration.jobId === comparisonId
+  );
+  const value = {
+    sessions: nextSessions,
+    ...(activeMatches
+      ? {
+          activeGeneration: {
+            ...withoutSensitiveGenerationData(activeGeneration),
+            selection: { winnerSlot, decidedAt: Date.now() },
+            updatedAt: Date.now(),
+          },
+        }
+      : {}),
+  };
+  // Both session messages and the stored selection update in a single write.
+  await storageSet(value);
+
+  await broadcastRuntimeMessage({
+    type: 'COMPARISON_WINNER_SELECTED',
+    forwardedBy: 'service_worker',
+    jobId: activeMatches ? activeGeneration.jobId : null,
+    comparisonId,
+    winnerSlot,
+  });
+  return { ok: true, comparisonId, winnerSlot };
+}
+
+async function handleGetModelAvailability() {
+  const providers = [...new Set(MODEL_CATALOG.map(model => model.provider))];
+  const entries = await Promise.all(providers.map(async provider => {
+    try {
+      return [provider, await getKeys(provider)];
+    } catch (_error) {
+      return [provider, []];
+    }
+  }));
+  const keysByProvider = Object.fromEntries(entries);
+  return {
+    ok: true,
+    models: MODEL_CATALOG.map(model => ({
+      modelKey: model.key,
+      provider: model.provider,
+      hasKey: (keysByProvider[model.provider] || []).length > 0,
+      supportsImage: Boolean(model.capabilities?.supportsImage),
+      supportsPdf: Boolean(model.capabilities?.supportsPdf),
+    })),
+  };
+}
+
 async function writeTerminalError(activeGeneration, errorCode, details = {}) {
   const now = Date.now();
+  if (
+    isComparisonJob(activeGeneration)
+    && typeof details?.variantId === 'string'
+    && activeGeneration.variants?.[details.variantId]
+  ) {
+    return writeComparisonVariantError(activeGeneration, details.variantId, errorCode, details, now);
+  }
   const currentRevision = normalizedRevision(activeGeneration.revision);
   const revision = normalizedRevision(
     details.finalRev ?? details.finalRevision,
@@ -541,6 +862,7 @@ async function handleGenerationStart(message) {
     'activeGeneration',
     'sessions',
     'activeSessionId',
+    'autoRouterHealth',
   ]);
   const storedGeneration = storedState?.activeGeneration || null;
   if (
@@ -620,29 +942,95 @@ async function handleGenerationStart(message) {
     requestMessages[userIndex] = { ...userMessage, id: message.userMessageId };
   }
 
-  const queuedGeneration = createQueuedGeneration(message, storedGeneration);
+  let startMessage = message;
+  if (message.selectionMode === 'auto') {
+    const providerIds = [PROVIDERS.GEMINI, PROVIDERS.OPENROUTER, PROVIDERS.OLLAMA];
+    const providerEntries = await Promise.all(providerIds.map(async providerId => ([
+      providerId,
+      await resolveKeysForRequest(providerId),
+    ])));
+    const providerResolutions = Object.fromEntries(providerEntries);
+    const tavilyResolution = await resolveKeysForRequest('tavily');
+    const attachmentMimeTypes = requestMessages.flatMap(requestMessage => (
+      Array.isArray(requestMessage?.attachments)
+        ? requestMessage.attachments.map(attachment => attachment?.mimeType).filter(Boolean)
+        : []
+    ));
+    const latestUserMessage = [...requestMessages].reverse().find(item => item?.role === 'user');
+    const metadata = {
+      text: String(latestUserMessage?.content || ''),
+      mode: message.mode || 'chat',
+      turnCount: requestMessages.filter(item => item?.role === 'user').length,
+      mimeTypes: attachmentMimeTypes,
+    };
+    const availableProviders = providerIds.filter(providerId => (
+      (providerResolutions[providerId]?.keys || []).length > 0
+    ));
+    const candidates = compatibleAutoModels({
+      availableProviders,
+      mimeTypes: attachmentMimeTypes,
+      mode: metadata.mode,
+      tavilyAvailable: (tavilyResolution.keys || []).length > 0,
+    });
+    const routerDecision = await classifyWithGemmaRouter({
+      ...metadata,
+      candidates,
+      geminiKeys: providerResolutions[PROVIDERS.GEMINI]?.keys || [],
+      health: storedState?.autoRouterHealth || {},
+    });
+    const localDecision = routerDecision?.fallback === true
+      ? selectLocalFallback({
+          ...metadata,
+          candidates,
+          hasTavilyKeys: (tavilyResolution.keys || []).length > 0,
+        })
+      : routerDecision;
+    const selectedModel = candidates.find(candidate => candidate.key === localDecision?.modelKey);
+    if (!selectedModel) {
+      await broadcastRuntimeMessage({
+        type: 'START_REJECTED',
+        forwardedBy: 'service_worker',
+        jobId: message.jobId,
+        errorCode: 'api_key_missing',
+      });
+      return { ok: false, errorCode: 'api_key_missing' };
+    }
+    startMessage = {
+      ...message,
+      model: selectedModel.modelId,
+      provider: selectedModel.provider,
+      selectionMode: 'auto',
+      selectionReasonCode: localDecision.reasonCode,
+      routerModel: routerDecision?.routerModel || null,
+    };
+    await storageSet({
+      autoRouterHealth: routerDecision?.updatedHealth || storedState?.autoRouterHealth || {},
+    });
+  }
+
+  const queuedGeneration = createQueuedGeneration(startMessage, storedGeneration);
   const storedSessions = Array.isArray(storedState?.sessions) ? storedState.sessions : [];
   const existingSession = storedSessions.find(session => session?.id === message.sessionId);
   const optimisticMessages = [
     ...requestMessages,
-    createThinkingPlaceholder(message, queuedGeneration),
+    ...createThinkingPlaceholders(startMessage, queuedGeneration),
   ];
   const nextSession = {
     ...(existingSession || {}),
     id: message.sessionId,
-    title: deriveSessionTitle(message, existingSession, requestMessages),
+    title: deriveSessionTitle(startMessage, existingSession, requestMessages),
     isTitleCustom: existingSession?.isTitleCustom === true,
     isStarred: existingSession?.isStarred === true,
     updatedAt: queuedGeneration.updatedAt,
     messages: optimisticMessages,
-    activeAttachmentIds: Array.isArray(message.activeAttachmentIds)
-      ? message.activeAttachmentIds
-      : (Array.isArray(message.attachmentIds) ? message.attachmentIds : (existingSession?.activeAttachmentIds || [])),
-    activeWebUrls: Array.isArray(message.activeWebUrls)
-      ? message.activeWebUrls
-      : (message.webContext?.kind === 'none'
+    activeAttachmentIds: Array.isArray(startMessage.activeAttachmentIds)
+      ? startMessage.activeAttachmentIds
+      : (Array.isArray(startMessage.attachmentIds) ? startMessage.attachmentIds : (existingSession?.activeAttachmentIds || [])),
+    activeWebUrls: Array.isArray(startMessage.activeWebUrls)
+      ? startMessage.activeWebUrls
+      : (startMessage.webContext?.kind === 'none'
           ? (existingSession?.activeWebUrls || [])
-          : (Array.isArray(message.webContext?.urls) ? message.webContext.urls : (existingSession?.activeWebUrls || []))),
+          : (Array.isArray(startMessage.webContext?.urls) ? startMessage.webContext.urls : (existingSession?.activeWebUrls || []))),
   };
   const nextSessions = [
     ...storedSessions.filter(session => session?.id !== message.sessionId),
@@ -683,7 +1071,7 @@ async function handleGenerationStart(message) {
     let tavilyResolution = { keys: [], allInCooldown: false };
     if (runningGeneration.mode === 'web') {
       tavilyResolution = await resolveKeysForRequest('tavily');
-      if (tavilyResolution.allInCooldown && message.webContext?.kind !== 'url') {
+      if (tavilyResolution.allInCooldown && startMessage.webContext?.kind !== 'url') {
         const failedGeneration = await writeTerminalError(
           runningGeneration,
           'all_keys_cooldown',
@@ -694,6 +1082,35 @@ async function handleGenerationStart(message) {
           errorCode: 'all_keys_cooldown',
           activeGeneration: generationSnapshot(failedGeneration),
         };
+      }
+    }
+
+    let comparisonVariants = null;
+    if (isComparisonJob(runningGeneration)) {
+      comparisonVariants = [];
+      for (const [index, slot] of COMPARISON_SLOTS.entries()) {
+        const variant = runningGeneration.variants[slot];
+        const variantProvider = variant.provider || getProviderForModel(variant.model);
+        const variantResolution = await resolveKeysForRequest(variantProvider);
+        let variantKeys = variantResolution.keys || [];
+        if (
+          index === 1
+          && variantProvider === runningGeneration.variants.a?.provider
+          && variantKeys.length > 1
+        ) {
+          variantKeys = [...variantKeys.slice(1), variantKeys[0]];
+        }
+        let fallbackGeminiKeys = [];
+        if (variantProvider !== PROVIDERS.GEMINI) {
+          fallbackGeminiKeys = (await resolveKeysForRequest(PROVIDERS.GEMINI)).keys || [];
+        }
+        comparisonVariants.push({
+          variantId: slot,
+          model: variant.model,
+          provider: variantProvider,
+          providerKeys: variantKeys,
+          fallbackGeminiKeys,
+        });
       }
     }
 
@@ -708,16 +1125,23 @@ async function handleGenerationStart(message) {
       assistantMessageId: runningGeneration.assistantMessageId,
       startedAt: runningGeneration.startedAt,
       requestMessages,
-      attachmentIds: Array.isArray(message.attachmentIds) ? message.attachmentIds : [],
-      webContext: message.webContext || { kind: 'none', urls: [] },
+      attachmentIds: Array.isArray(startMessage.attachmentIds) ? startMessage.attachmentIds : [],
+      webContext: startMessage.webContext || { kind: 'none', urls: [] },
       provider,
       providerKeys: providerResolution.keys || [],
       fallbackGeminiKeys: geminiFallbackResolution.keys || [],
       tavilyKeys: tavilyResolution.keys || [],
       model: runningGeneration.model,
       mode: runningGeneration.mode,
-      systemInstruction: message.systemInstruction || '',
+      systemInstruction: startMessage.systemInstruction || '',
       language: runningGeneration.language,
+      ...(isComparisonJob(runningGeneration)
+        ? {
+            kind: 'comparison',
+            comparisonId: runningGeneration.comparisonId ?? runningGeneration.jobId,
+            variants: comparisonVariants,
+          }
+        : {}),
     }, response => (
       response?.ok === true
       && response.accepted === true
@@ -757,6 +1181,14 @@ async function handleSnapshot(message) {
     || !ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)
   ) {
     return { ok: true, accepted: false, ignored: true };
+  }
+
+  if (
+    isComparisonJob(activeGeneration)
+    && typeof message.variantId === 'string'
+    && activeGeneration.variants?.[message.variantId]
+  ) {
+    return handleComparisonSnapshot(activeGeneration, message.variantId, message);
   }
 
   const revision = normalizedRevision(message.revision, -1);
@@ -811,6 +1243,61 @@ async function handleSnapshot(message) {
   return { ok: true, accepted: true, revision };
 }
 
+async function handleComparisonSnapshot(activeGeneration, variantId, message) {
+  const variant = activeGeneration.variants[variantId];
+  const revision = normalizedRevision(message.revision, -1);
+  const currentRevision = normalizedRevision(variant.revision);
+  if (revision <= currentRevision) {
+    return {
+      ok: true,
+      accepted: false,
+      revision: currentRevision,
+    };
+  }
+
+  const now = Date.now();
+  const nextVariant = {
+    ...applyVariantReport(variant, message),
+    status: 'running',
+  };
+  const nextGeneration = {
+    ...withoutSensitiveGenerationData(activeGeneration),
+    variants: { ...activeGeneration.variants, [variantId]: nextVariant },
+    status: 'running',
+    revision: Math.max(normalizedRevision(activeGeneration.revision), revision),
+    lastSnapshotAt: now,
+    presentedRevision: revision,
+    updatedAt: now,
+  };
+
+  // This write must resolve before either the panel update or PRESENTED ack.
+  await setActiveGeneration(nextGeneration);
+
+  const snapshot = generationSnapshot(nextGeneration);
+  await broadcastRuntimeMessage({
+    type: 'ACTIVE_GEN_CHANGED',
+    forwardedBy: 'service_worker',
+    jobId: nextGeneration.jobId,
+    comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
+    variantId,
+    revision,
+    content: nextVariant.content,
+    sources: nextVariant.sources,
+    status: nextGeneration.status,
+    snapshot,
+  });
+  await broadcastRuntimeMessage({
+    type: 'PRESENTED',
+    target: 'offscreen',
+    forwardedBy: 'service_worker',
+    jobId: nextGeneration.jobId,
+    variantId,
+    revision,
+  });
+
+  return { ok: true, accepted: true, revision };
+}
+
 async function handleHeartbeat(message) {
   const activeGeneration = await getActiveGeneration();
   if (
@@ -851,11 +1338,25 @@ async function handleModelResolved(message) {
     resolvedModel,
     updatedAt: Date.now(),
   };
+  if (
+    isComparisonJob(activeGeneration)
+    && typeof message.variantId === 'string'
+    && nextGeneration.variants?.[message.variantId]
+  ) {
+    nextGeneration.variants = {
+      ...nextGeneration.variants,
+      [message.variantId]: {
+        ...nextGeneration.variants[message.variantId],
+        resolvedModel,
+      },
+    };
+  }
   await setActiveGeneration(nextGeneration);
   await broadcastRuntimeMessage({
     type: 'MODEL_RESOLVED',
     forwardedBy: 'service_worker',
     jobId: nextGeneration.jobId,
+    ...(typeof message.variantId === 'string' && message.variantId ? { variantId: message.variantId } : {}),
     provider: message.provider || nextGeneration.provider || null,
     requestedModel: message.requestedModel || nextGeneration.model || null,
     resolvedModel,
@@ -950,6 +1451,10 @@ async function handleWorkerDone(message) {
     };
   }
 
+  if (isComparisonJob(activeGeneration)) {
+    return handleComparisonDone(activeGeneration, message);
+  }
+
   const now = Date.now();
   const currentRevision = normalizedRevision(activeGeneration.revision);
   const reportedRevision = normalizedRevision(message.finalRev, currentRevision);
@@ -1017,6 +1522,40 @@ async function handleWorkerDone(message) {
     accepted: true,
     activeGeneration: generationSnapshot(nextGeneration),
   };
+}
+
+async function handleComparisonDone(activeGeneration, message) {
+  if (
+    message?.variants
+    && typeof message.variants === 'object'
+    && !Array.isArray(message.variants)
+  ) {
+    const { terminal, activeGeneration: snapshot } = await applyComparisonDoneSummary(
+      activeGeneration,
+      message.variants,
+      message,
+    );
+    return {
+      ok: true,
+      accepted: true,
+      ...(terminal ? {} : { partial: true }),
+      activeGeneration: snapshot,
+    };
+  }
+  if (typeof message?.variantId === 'string' && activeGeneration.variants?.[message.variantId]) {
+    const { terminal, activeGeneration: snapshot } = await writeComparisonVariantDone(
+      activeGeneration,
+      message.variantId,
+      message,
+    );
+    return {
+      ok: true,
+      accepted: true,
+      ...(terminal ? {} : { partial: true }),
+      activeGeneration: snapshot,
+    };
+  }
+  return { ok: true, accepted: false, ignored: true };
 }
 
 async function handleWorkerError(message) {
@@ -1213,6 +1752,10 @@ function handleProtocolMessage(message) {
       return handleWorkerError(message);
     case 'CANCEL':
       return handleCancel(message);
+    case 'SELECT_COMPARISON_WINNER':
+      return handleSelectComparisonWinner(message);
+    case 'GET_MODEL_AVAILABILITY':
+      return handleGetModelAvailability();
     case 'DONE_ACK':
     case 'CANCEL_DONE_ACK':
       return handleDoneAck(message);
@@ -1298,6 +1841,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     'CANCEL',
     'DONE_ACK',
     'CANCEL_DONE_ACK',
+    'SELECT_COMPARISON_WINNER',
+    'GET_MODEL_AVAILABILITY',
   ]);
   if (!supportedTypes.has(message.type)) return false;
 

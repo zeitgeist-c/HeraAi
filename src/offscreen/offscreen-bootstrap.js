@@ -24,7 +24,7 @@ function normalizeStartMessage(message) {
   const { type: _type, keysForGemini, keysForTavily, ...payload } = message
   return {
     ...payload,
-    kind: 'start',
+    kind: payload.kind === 'comparison' ? 'comparison' : 'start',
     providerKeys: Array.isArray(message.providerKeys)
       ? message.providerKeys
       : (Array.isArray(message.geminiKeys) ? message.geminiKeys : (keysForGemini || [])),
@@ -90,9 +90,11 @@ export function createOffscreenBridge({
   const forwardWorkerMessage = (jobId, worker, event) => {
     if (jobs.get(jobId) !== worker) return
     const data = event?.data || {}
+    const variantId = typeof data.variantId === 'string' && data.variantId ? data.variantId : null
+    const withVariantId = payload => (variantId ? { ...payload, variantId } : payload)
 
     if (data.kind === 'snapshot') {
-      void forwardWithRetry({
+      void forwardWithRetry(withVariantId({
         type: 'SNAPSHOT',
         jobId,
         revision: data.rev ?? data.revision,
@@ -100,44 +102,44 @@ export function createOffscreenBridge({
         sources: Array.isArray(data.sources) ? data.sources : [],
         resolvedModel: data.resolvedModel || null,
         status: 'running',
-      })
+      }))
       return
     }
 
     if (data.kind === 'key_status') {
-      void forwardWithRetry({
+      void forwardWithRetry(withVariantId({
         type: 'KEY_STATUS',
         jobId,
         provider: data.provider,
         keyId: data.keyId,
         status: data.status,
-      })
+      }))
       return
     }
 
     if (data.kind === 'model_resolved') {
-      void forwardWithRetry({
+      void forwardWithRetry(withVariantId({
         type: 'MODEL_RESOLVED',
         jobId,
         provider: data.provider || null,
         requestedModel: data.requestedModel || null,
         resolvedModel: data.resolvedModel || null,
-      })
+      }))
       return
     }
 
     if (data.kind === 'heartbeat') {
-      void forwardWithRetry({
+      void forwardWithRetry(withVariantId({
         type: 'HEARTBEAT',
         jobId,
         uptimeMs: data.uptimeMs,
-      })
+      }))
       return
     }
 
     if (data.kind === 'error') {
       const code = data.code || data.errorCode || 'generation_failed'
-      const payload = {
+      const payload = withVariantId({
         type: 'WORKER_ERROR',
         jobId,
         code,
@@ -146,6 +148,12 @@ export function createOffscreenBridge({
         content: data.content || '',
         sources: Array.isArray(data.sources) ? data.sources : [],
         resolvedModel: data.resolvedModel || null,
+      })
+      if (variantId) {
+        // A single comparison variant failed; the sibling stream keeps running
+        // in the same worker, so this event is non-terminal for the job.
+        void forwardWithRetry(payload)
+        return
       }
       terminateJob(jobId, worker)
       forwardTerminalMessage(jobId, payload)
@@ -153,7 +161,7 @@ export function createOffscreenBridge({
     }
 
     if (data.kind === 'done') {
-      const payload = {
+      const payload = withVariantId({
         type: 'WORKER_DONE',
         jobId,
         cancelled: Boolean(data.cancelled),
@@ -162,6 +170,11 @@ export function createOffscreenBridge({
         sources: Array.isArray(data.sources) ? data.sources : [],
         resolvedModel: data.resolvedModel || null,
         errorCode: data.errorCode || null,
+        ...(data.variants && typeof data.variants === 'object' ? { variants: data.variants } : {}),
+      })
+      if (variantId) {
+        void forwardWithRetry(payload)
+        return
       }
       terminateJob(jobId, worker)
       forwardTerminalMessage(jobId, payload)
@@ -237,6 +250,7 @@ export function createOffscreenBridge({
       kind: 'presented',
       jobId: message.jobId,
       rev: message.revision,
+      ...(typeof message.variantId === 'string' && message.variantId ? { variantId: message.variantId } : {}),
     })
     return { ok: true, accepted: true, jobId: message.jobId }
   }

@@ -84,6 +84,7 @@ const ChatMessage = ({
   speechDisabled = false,
   speechStatus = 'idle',
   onToggleSpeech,
+  onSelectWinner,
   searchMatch = false,
   searchCurrent = false,
 }) => {
@@ -115,12 +116,32 @@ const ChatMessage = ({
         : model)
     : []
   const hasRetryModelChoices = availableRetryModels.length > 0
-  const requestedModelLabel = typeof message.model === 'string' && message.model
+  const concreteModelLabel = typeof message.model === 'string' && message.model
     ? (modelLabels[message.model] || message.model)
     : ''
+  const requestedModelLabel = message.selectionMode === 'auto'
+    ? `${t('chat.auto.label')} → ${concreteModelLabel}`
+    : concreteModelLabel
   const usedModelLabel = message.resolvedModel && message.resolvedModel !== message.model
-    ? `${requestedModelLabel || message.model} → ${message.resolvedModel}`
+    ? `${requestedModelLabel || message.model} → ${modelLabels[message.resolvedModel] || message.resolvedModel}`
     : requestedModelLabel
+  const autoRouteLabels = message.selectionMode === 'auto'
+    ? [message.routerModel, message.resolvedModel]
+      .filter((modelId, index, list) => (
+        typeof modelId === 'string' && modelId && list.indexOf(modelId) === index
+      ))
+      .map(modelId => modelLabels[modelId] || modelId)
+    : []
+  const autoChainLabel = autoRouteLabels.length > 0
+    ? `${t('chat.auto.label')} → ${autoRouteLabels.join(' → ')}`
+    : ''
+  const showWinnerControl = isBot
+    && message.comparisonId != null
+    && message.selectable !== false
+    && message.comparisonSelected !== true
+    && message.status === 'done'
+    && typeof onSelectWinner === 'function'
+  const isContextExcluded = message.contextExcluded === true
   const errorMessage = message.errorCode
     ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
     : t('chat.status.error')
@@ -386,13 +407,16 @@ const ChatMessage = ({
       {...(message.id ? { id: `chat-msg-${message.id}` } : {})}
       {...(searchMatch ? { 'data-search-match': 'true' } : {})}
       {...(searchCurrent ? { 'data-search-current': 'true' } : {})}
-      className={`group w-full min-w-0 py-1${searchCurrent ? ' rounded-xl ring-2 ring-primary/70' : searchMatch ? ' rounded-xl ring-1 ring-primary/30' : ''}`}
+      {...(isContextExcluded ? { 'data-context-excluded': 'true' } : {})}
+      className={`group w-full min-w-0 py-1${searchCurrent ? ' rounded-xl ring-2 ring-primary/70' : searchMatch ? ' rounded-xl ring-1 ring-primary/30' : ''}${isContextExcluded ? ' opacity-60' : ''}`}
     >
       {isPending && !message.content ? (
         <div className="min-h-16 space-y-2 rounded-xl py-2">
           <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-muted-foreground/15" />
           <div className="h-2.5 w-1/2 animate-pulse rounded-full bg-muted-foreground/15" />
-          <span className="block pt-1 text-[11px] text-muted-foreground">{t('chat.status.thinking')}</span>
+          <span className="block pt-1 text-[11px] text-muted-foreground">
+            {t(message.selectionMode === 'auto' ? 'chat.status.selecting_model' : 'chat.status.thinking')}
+          </span>
         </div>
       ) : (
         <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:whitespace-pre-wrap prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
@@ -492,16 +516,38 @@ const ChatMessage = ({
                 </button>
               )}
               {renderRetryButton()}
+              {showWinnerControl && (
+                <button
+                  type="button"
+                  onClick={() => onSelectWinner?.(message)}
+                  aria-label={t('chat.comparison.continue_with_this')}
+                  className="hera-action-button"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>{t('chat.comparison.continue_with_this')}</span>
+                </button>
+              )}
             </div>
+            <div className="flex min-w-0 max-w-[46%] flex-col items-end gap-0.5">
+              {autoChainLabel && (
+                <span
+                  data-testid="auto-chain"
+                  className="max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
+                  title={`${t('chat.model_used')}: ${autoChainLabel}`}
+                >
+                  {autoChainLabel}
+                </span>
+              )}
             {usedModelLabel && (
               <span
                 data-testid="message-model"
-                className="min-w-0 max-w-[46%] truncate text-right text-[10px] font-medium text-muted-foreground/70"
+                className="min-w-0 max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
                 title={`${t('chat.model_used')}: ${usedModelLabel}`}
               >
                 {usedModelLabel}
               </span>
             )}
+            </div>
           </div>
           {renderRetryMenu('left')}
         </div>
@@ -520,6 +566,15 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.content === nextMessage.content &&
     prevMessage.displayContent === nextMessage.displayContent &&
     prevMessage.model === nextMessage.model &&
+    prevMessage.resolvedModel === nextMessage.resolvedModel &&
+    prevMessage.selectionMode === nextMessage.selectionMode &&
+    prevMessage.selectionReasonCode === nextMessage.selectionReasonCode &&
+    prevMessage.routerModel === nextMessage.routerModel &&
+    prevMessage.comparisonId === nextMessage.comparisonId &&
+    prevMessage.variantId === nextMessage.variantId &&
+    prevMessage.selectable === nextMessage.selectable &&
+    prevMessage.comparisonSelected === nextMessage.comparisonSelected &&
+    prevMessage.contextExcluded === nextMessage.contextExcluded &&
     prevMessage.status === nextMessage.status &&
     prevMessage.sources === nextMessage.sources &&
     prevMessage.attachments === nextMessage.attachments &&
@@ -537,6 +592,7 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.onEdit === nextProps.onEdit &&
     prevProps.onRetry === nextProps.onRetry &&
     prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
+    prevProps.onSelectWinner === nextProps.onSelectWinner &&
     prevProps.searchMatch === nextProps.searchMatch &&
     prevProps.searchCurrent === nextProps.searchCurrent
   )
