@@ -102,7 +102,7 @@ describe('ChatMessage copy actions', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('Copy this question'))
   })
 
-  it('keeps an internal prompt hidden while preserving its attachment and retry action', () => {
+  it('keeps an internal prompt hidden while preserving its attachment', () => {
     const onEdit = vi.fn()
     const onRetry = vi.fn()
     const message = {
@@ -119,8 +119,8 @@ describe('ChatMessage copy actions', () => {
     expect(screen.getByText('scan.png')).toBeInTheDocument()
     expect(document.querySelector('svg.lucide-copy')).not.toBeInTheDocument()
     expect(document.querySelector('svg.lucide-pencil')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Regenerate response|Retry|Yeniden dene/i }))
-    expect(onRetry).toHaveBeenCalledWith(message)
+    expect(screen.queryByRole('button', { name: /Regenerate response|Retry|Yeniden dene/i })).not.toBeInTheDocument()
+    expect(onRetry).not.toHaveBeenCalled()
     expect(onEdit).not.toHaveBeenCalled()
   })
 
@@ -149,9 +149,28 @@ describe('ChatMessage copy actions', () => {
     expect(screen.queryByRole('button', { name: /Remove attachment|Eki kaldır/i })).not.toBeInTheDocument()
   })
 
-  it('retries a user question with the model selected from the retry menu', () => {
-    const onRetry = vi.fn()
+  it('shows no model retry on user questions', () => {
     const message = { id: 5, role: 'user', content: 'Compare this answer' }
+    render(
+      <ChatMessage
+        message={message}
+        onRetry={vi.fn()}
+        retryModels={retryModels}
+        modelLabels={modelLabels}
+        currentModel="gemini-3.1-flash-lite"
+      />
+    )
+
+    expect(screen.queryByRole('button', { name: /Try again with a model|Model ile yeniden dene/i }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i }))
+      .not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Copy|Kopyala/i })).toBeInTheDocument()
+  })
+
+  it('lists every retry model in the assistant retry menu', () => {
+    const onRetry = vi.fn()
+    const message = { id: 31, role: 'model', content: 'Compare this answer', status: 'done' }
     render(
       <ChatMessage
         message={message}
@@ -162,8 +181,7 @@ describe('ChatMessage copy actions', () => {
       />
     )
 
-    const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
-    fireEvent.click(retryButton)
+    fireEvent.click(screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i }))
 
     const retryDialog = screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i })
     expect(Array.from(retryDialog.querySelectorAll('[data-retry-model]')).map(button => button.dataset.retryModel)).toEqual(retryModels)
@@ -239,7 +257,7 @@ describe('ChatMessage copy actions', () => {
   it('disables model retry while a response is being generated', () => {
     render(
       <ChatMessage
-        message={{ id: 7, role: 'user', content: 'Wait for the active response' }}
+        message={{ id: 7, role: 'model', content: 'Wait for the active response', status: 'streaming' }}
         retryModels={retryModels}
         modelLabels={modelLabels}
         currentModel="gemini-3.1-flash-lite"
@@ -251,26 +269,6 @@ describe('ChatMessage copy actions', () => {
     expect(retryButton).toBeDisabled()
     fireEvent.click(retryButton)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
-  it('shows model retry for an attachment-only user question', () => {
-    render(
-      <ChatMessage
-        message={{
-          id: 8,
-          role: 'user',
-          content: '',
-          attachments: [{ name: 'question.png', mimeType: 'image/png', data: 'image-data' }],
-        }}
-        retryModels={retryModels}
-        modelLabels={modelLabels}
-        currentModel="gemini-3.1-flash-lite"
-      />
-    )
-
-    const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
-    fireEvent.click(retryButton)
-    expect(screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i })).toBeInTheDocument()
   })
 
   it('copies fenced code independently from the full message', async () => {
@@ -382,5 +380,108 @@ describe('ChatMessage copy actions', () => {
     />)
 
     expect(screen.getByTestId('assistant-message')).toHaveAttribute('data-context-excluded', 'true')
+  })
+
+  it('renders response actions as compact icon buttons with intact accessible names', () => {
+    const message = { id: 30, role: 'model', content: 'Compact actions', status: 'done' }
+    render(
+      <ChatMessage
+        message={message}
+        speechEnabled
+        speechStatus="idle"
+        onToggleSpeech={vi.fn()}
+        onRetry={vi.fn()}
+        retryModels={retryModels}
+        modelLabels={modelLabels}
+        currentModel="gemini-3.1-flash-lite"
+      />,
+    )
+
+    const copyButton = screen.getByRole('button', { name: /Copy|Kopyala/i })
+    const speechButton = screen.getByRole('button', { name: /Read aloud|Sesli oku/i })
+    const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
+    for (const button of [copyButton, speechButton, retryButton]) {
+      expect(button.className).toMatch(/hera-compact-action/)
+    }
+    fireEvent.click(copyButton)
+    fireEvent.click(speechButton)
+    fireEvent.click(retryButton)
+    expect(screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i })).toBeInTheDocument()
+  })
+
+  it('docks assistant actions in a left vertical rail beside the badges', () => {
+    const message = { id: 35, role: 'model', content: 'Rail actions', status: 'done', model: 'gemini-3.6-flash' }
+    render(
+      <ChatMessage
+        message={message}
+        speechEnabled
+        speechStatus="idle"
+        onToggleSpeech={vi.fn()}
+        onRetry={vi.fn()}
+        retryModels={retryModels}
+        modelLabels={modelLabels}
+        currentModel="gemini-3.1-flash-lite"
+      />,
+    )
+
+    const rail = screen.getByTestId('response-action-rail')
+    expect(rail.className).toMatch(/flex-col/)
+    const copyButton = screen.getByRole('button', { name: /Copy|Kopyala/i })
+    const speechButton = screen.getByRole('button', { name: /Read aloud|Sesli oku/i })
+    const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
+    expect(rail.contains(copyButton)).toBe(true)
+    expect(rail.contains(speechButton)).toBe(true)
+    expect(rail.contains(retryButton)).toBe(true)
+    expect(rail.contains(screen.getByTestId('message-model'))).toBe(false)
+  })
+
+  it('shows a frozen duration badge for completed responses with timing data', () => {
+    render(<ChatMessage
+      message={{
+        id: 31,
+        role: 'model',
+        content: 'Timed answer',
+        status: 'done',
+        model: 'gemini-3.6-flash',
+        startedAt: 1000,
+        completedAt: 6400,
+      }}
+      modelLabels={modelLabels}
+    />)
+
+    expect(screen.getByTestId('response-duration')).toHaveTextContent('5.4 s')
+    const modelBadge = screen.getByTestId('message-model')
+    expect(modelBadge.className).toMatch(/border-primary/)
+    expect(modelBadge).toHaveTextContent('Gemini 3.6 Flash')
+  })
+
+  it('hides the duration badge for legacy and failed responses', () => {
+    const { rerender } = render(<ChatMessage
+      message={{ id: 32, role: 'model', content: 'Legacy answer', status: 'done', model: 'gemini-3.6-flash' }}
+      modelLabels={modelLabels}
+    />)
+    expect(screen.queryByTestId('response-duration')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-model')).toBeInTheDocument()
+
+    rerender(<ChatMessage
+      message={{
+        id: 33, role: 'model', content: 'Failed answer', status: 'error',
+        startedAt: 1000, completedAt: 9000, errorCode: 'timeout',
+      }}
+      modelLabels={modelLabels}
+    />)
+    expect(screen.queryByTestId('response-duration')).not.toBeInTheDocument()
+  })
+
+  it('shows a live duration badge while a response streams', () => {
+    render(<ChatMessage
+      message={{
+        id: 34, role: 'model', content: 'Streaming answer', status: 'streaming',
+        startedAt: Date.now() - 2500,
+      }}
+      modelLabels={modelLabels}
+    />)
+
+    expect(screen.getByTestId('response-duration')).toBeInTheDocument()
   })
 })

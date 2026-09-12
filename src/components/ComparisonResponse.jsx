@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { isBothResolved } from '../lib/comparison'
 import ChatMessage from './ChatMessage'
 
 const TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'interrupted'])
@@ -17,9 +18,20 @@ function ComparisonResponse({
   )).filter(Boolean)
   const terminal = variants.length === 2 && variants.every(message => TERMINAL_STATUSES.has(message.status))
   const selected = variants.find(message => message.comparisonSelected === true)
+  const comparisonId = variants[0]?.comparisonId ?? null
+  const continuedWithBoth = comparisonId != null && isBothResolved(messages, comparisonId)
+  const selectedWinner = !continuedWithBoth ? selected : null
 
   return (
     <section className="rounded-2xl border border-border/70 bg-secondary/20 p-2" data-testid="comparison-response">
+      {continuedWithBoth && (
+        <p
+          data-testid="comparison-both-note"
+          className="mb-2 rounded-lg border border-primary/20 bg-primary/[0.06] px-2.5 py-1.5 text-[11px] font-medium text-foreground"
+        >
+          {t('chat.comparison.continued_with_both')}
+        </p>
+      )}
       <div className="mb-2 flex gap-1 md:hidden">
         {variants.map(message => {
           const slot = message.variantId || message.comparisonSlot
@@ -38,7 +50,7 @@ function ComparisonResponse({
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {variants.map(message => {
           const slot = message.variantId || message.comparisonSlot
-          const canSelect = terminal && message.status === 'done' && !selected
+          const canSelect = terminal && message.status === 'done' && !selectedWinner && !continuedWithBoth
           return (
             <article
               key={message.id}

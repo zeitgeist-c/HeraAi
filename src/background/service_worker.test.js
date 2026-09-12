@@ -1702,6 +1702,57 @@ describe('background comparison coordinator', () => {
     expect(mock.storageSet).not.toHaveBeenCalled();
   });
 
+  it('resolves both answers in a single write without changing their content', async () => {
+    const mock = createChromeMock({
+      initialStorage: {
+        sessions: [comparisonSession()],
+        activeGeneration: comparisonGeneration({ status: 'completed' }),
+      },
+    });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, {
+      type: 'RESOLVE_COMPARISON_BOTH', comparisonId: 'cmp-1',
+    });
+
+    expect(response).toEqual({ ok: true, comparisonId: 'cmp-1', winnerSlot: 'both' });
+    expect(mock.storageSet).toHaveBeenCalledTimes(1);
+    const written = mock.storageSet.mock.calls[0][0];
+    expect(Object.keys(written).sort()).toEqual(['activeGeneration', 'sessions']);
+    const messages = written.sessions.find(session => session.id === 'session-1').messages;
+    expect(messages[0]).toMatchObject({ id: 'user-1', role: 'user' });
+    expect(messages[0]).not.toHaveProperty('contextExcluded');
+    expect(messages[1]).toMatchObject({
+      variantId: 'a', content: 'A', comparisonSelected: true, selectable: false, contextExcluded: false,
+    });
+    expect(messages[2]).toMatchObject({
+      variantId: 'b', content: 'B', comparisonSelected: true, selectable: false, contextExcluded: false,
+    });
+    expect(written.activeGeneration.selection).toMatchObject({ winnerSlot: 'both' });
+    expect(written.activeGeneration.selection.decidedAt).toEqual(expect.any(Number));
+    expect(runtimeMessages(mock, 'COMPARISON_BOTH_SELECTED')[0]).toMatchObject({
+      comparisonId: 'cmp-1', winnerSlot: 'both',
+    });
+  });
+
+  it('rejects both-resolutions for unknown comparisons without writing', async () => {
+    const mock = createChromeMock({
+      initialStorage: {
+        sessions: [comparisonSession()],
+        activeGeneration: comparisonGeneration(),
+      },
+    });
+    const listener = await loadWorker(mock);
+
+    expect(await dispatch(listener, {
+      type: 'RESOLVE_COMPARISON_BOTH',
+    })).toEqual({ ok: false, errorCode: 'invalid_request' });
+    expect(await dispatch(listener, {
+      type: 'RESOLVE_COMPARISON_BOTH', comparisonId: 'missing',
+    })).toEqual({ ok: false, errorCode: 'not_found' });
+    expect(mock.storageSet).not.toHaveBeenCalled();
+  });
+
   it('reports model availability without leaking key values', async () => {
     keyManagerMocks.getKeys.mockImplementation(async (provider) => {
       if (provider === 'gemini') return [{ id: 'g1', isPrimary: true }];

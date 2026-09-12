@@ -209,6 +209,7 @@
       "unavailable": "API anahtarı yok",
       "incompatible": "Ek türü desteklenmiyor",
       "continue_with_this": "Bu yanıtla devam et",
+      "continued_with_both": "İki yanıtla devam edildi",
       "locked": "Sohbete devam etmek için kazanan yanıtı seçin."
     },
     "prompts": {
