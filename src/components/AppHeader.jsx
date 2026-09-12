@@ -9,6 +9,7 @@ import {
   History,
   Menu,
   MessageSquarePlus,
+  Newspaper,
   Pencil,
   Search,
   Settings,
@@ -33,6 +34,7 @@ function AppHeader({
   onImport,
   onSettings,
   onStats,
+  onChangelog,
   searchOpen = false,
   searchQuery = '',
   searchCounterText = '',
@@ -125,6 +127,7 @@ function AppHeader({
   const menuItems = [
     { label: t('chat.tooltips.export'), icon: Download, action: onExport },
     { label: t('chat.tooltips.statistics'), icon: BarChart3, action: onStats },
+    { label: t('chat.tooltips.changelog'), icon: Newspaper, action: onChangelog },
     { label: t('chat.tooltips.settings'), icon: Settings, action: onSettings },
   ]
 

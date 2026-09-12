@@ -2,7 +2,9 @@ import { GoogleGenAI } from '@google/genai'
 
 import { base64ToBytes } from './audioUtils'
 
-export const DICTATION_MODEL = 'gemini-3.1-flash-lite'
+export const DICTATION_PRIMARY_MODEL = 'gemini-3.1-flash-lite'
+export const DICTATION_FALLBACK_MODEL = 'gemini-3.5-flash-lite'
+export const DICTATION_MODEL = DICTATION_PRIMARY_MODEL
 export const TTS_PRIMARY_MODEL = 'gemini-3.1-flash-tts-preview'
 export const TTS_FALLBACK_MODEL = 'gemini-2.5-flash-preview-tts'
 export const TTS_MODEL = TTS_PRIMARY_MODEL
@@ -119,15 +121,14 @@ async function runAcrossKeys({ keys, apiVersion, signal, onKeyStatus, request, r
   throw lastError || new VoiceApiError('generation_failed')
 }
 
-export async function transcribeAudio({ wavBase64, keys, signal, onKeyStatus }) {
-  if (!wavBase64) throw new VoiceApiError('empty_audio')
+async function requestTranscriptionWithModel({ wavBase64, keys, signal, onKeyStatus, model }) {
   const response = await runAcrossKeys({
     keys,
     apiVersion: 'v1',
     signal,
     onKeyStatus,
     request: (client, requestSignal) => client.models.generateContent({
-      model: DICTATION_MODEL,
+      model,
       contents: [{
         role: 'user',
         parts: [
@@ -139,6 +140,23 @@ export async function transcribeAudio({ wavBase64, keys, signal, onKeyStatus }) 
     }),
   })
   return String(response?.text || '').trim()
+}
+
+export async function transcribeAudio({ wavBase64, keys, signal, onKeyStatus, model = null }) {
+  if (!wavBase64) throw new VoiceApiError('empty_audio')
+  if (typeof model === 'string' && model) {
+    return requestTranscriptionWithModel({ wavBase64, keys, signal, onKeyStatus, model })
+  }
+  try {
+    return await requestTranscriptionWithModel({ wavBase64, keys, signal, onKeyStatus, model: DICTATION_PRIMARY_MODEL })
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    const code = error instanceof VoiceApiError ? error.code : classifyError(error)
+    if (!isTtsFallbackableCode(code)) {
+      throw error instanceof VoiceApiError ? error : new VoiceApiError(code, error)
+    }
+    return requestTranscriptionWithModel({ wavBase64, keys, signal, onKeyStatus, model: DICTATION_FALLBACK_MODEL })
+  }
 }
 
 function extractSpeechAudio(response) {

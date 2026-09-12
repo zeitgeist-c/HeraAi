@@ -13,7 +13,9 @@ vi.mock('@google/genai', () => ({
 }))
 
 const {
+  DICTATION_FALLBACK_MODEL,
   DICTATION_MODEL,
+  DICTATION_PRIMARY_MODEL,
   TTS_FALLBACK_MODEL,
   TTS_MODEL,
   TTS_PRIMARY_MODEL,
@@ -43,6 +45,44 @@ describe('voice API', () => {
     expect(request.model).toBe(DICTATION_MODEL)
     expect(request.contents[0].parts[1]).toEqual({ inlineData: { mimeType: 'audio/wav', data: 'UklGRg==' } })
     expect(statuses).toEqual([{ keyId: 'g1', status: 'success' }])
+  })
+
+  it('falls back to 3.5 Flash Lite dictation on quota exhaustion', async () => {
+    mocks.generateContent
+      .mockRejectedValueOnce(Object.assign(new Error('429 quota exhausted'), { status: 429 }))
+      .mockResolvedValueOnce({ text: 'Quota transcript' })
+    const result = await transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] })
+    expect(result).toBe('Quota transcript')
+    expect(mocks.generateContent).toHaveBeenCalledTimes(2)
+    expect(mocks.generateContent.mock.calls[0][0].model).toBe(DICTATION_PRIMARY_MODEL)
+    expect(mocks.generateContent.mock.calls[1][0].model).toBe(DICTATION_FALLBACK_MODEL)
+    expect(DICTATION_MODEL).toBe(DICTATION_PRIMARY_MODEL)
+  })
+
+  it('pins dictation to an explicit model without retrying the primary', async () => {
+    mocks.generateContent.mockResolvedValue({ text: 'Pinned transcript' })
+    const result = await transcribeAudio({
+      wavBase64: 'UklGRg==',
+      keys: [{ id: 'g1', key: 'secret' }],
+      model: DICTATION_FALLBACK_MODEL,
+    })
+    expect(result).toBe('Pinned transcript')
+    expect(mocks.generateContent).toHaveBeenCalledTimes(1)
+    expect(mocks.generateContent.mock.calls[0][0].model).toBe(DICTATION_FALLBACK_MODEL)
+  })
+
+  it('does not fall back dictation on an invalid key or network error', async () => {
+    mocks.generateContent.mockRejectedValue(Object.assign(new Error('API key invalid'), { status: 401 }))
+    await expect(transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] }))
+      .rejects.toMatchObject({ name: 'VoiceApiError', code: 'api_key_invalid' })
+    expect(mocks.generateContent).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fall back dictation on an empty transcript', async () => {
+    mocks.generateContent.mockResolvedValue({ text: '   ' })
+    const result = await transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] })
+    expect(result).toBe('')
+    expect(mocks.generateContent).toHaveBeenCalledTimes(1)
   })
 
   it('uses the preview TTS model, v1beta and fixed voice', async () => {

@@ -168,6 +168,7 @@
             "voice_input": "Voice Input",
             "stop_recording": "Stop Recording",
             "statistics": "Stats",
+            "changelog": "Changelog",
             "export": "Export",
             "export_markdown": "Markdown",
             "copy_chat": "Copy Chat",
@@ -243,6 +244,11 @@
             "gpt_oss_120b": "GPT-OSS 120B",
             "nemotron_3_ultra": "Nemotron 3 Ultra"
         },
+        "speeds": {
+            "fast": "Fast",
+            "medium": "Medium",
+            "slow": "Slow"
+        },
         "sources_label": "Sources",
         "status": {
             "thinking": "Thinking...",
@@ -303,9 +309,13 @@
             "explain_tooltip": "Explain the content"
         }
     },
+    "changelog": {
+        "title": "Changelog",
+        "current_version": "Version {{version}} · current"
+    },
     "stats": {
         "title": "Usage Statistics",
-        "total_messages": "Total Messages",
+        "total_messages": "Prompts sent",
         "total_sessions": "Total Sessions",
         "last_7_days": "Last 7 Days",
         "activity_title": "Tool activity",
@@ -313,7 +323,39 @@
         "screenshots": "Screenshots",
         "searches": "Searches",
         "last_active": "Last Active",
-        "never": "Never"
+        "never": "Never",
+        "range": {
+            "last_7_days": "7 Days",
+            "last_30_days": "30 Days",
+            "all_time": "All Time"
+        },
+        "cards": {
+            "sessions": "Sessions",
+            "avg_duration": "Avg. response time",
+            "success_rate": "Success rate"
+        },
+        "activity": {
+            "chart_title": "Prompt activity",
+            "chart_label": "Prompt activity chart",
+            "total_suffix": "prompts",
+            "peak": "Peak: {{label}} — {{count}}"
+        },
+        "models": {
+            "title": "Models",
+            "columns": {
+                "model": "Model",
+                "attempts": "Requests",
+                "avg_duration": "Avg. time",
+                "success_rate": "Success rate"
+            },
+            "empty": "No model data for this range yet."
+        },
+        "empty": {
+            "message": "No stats yet. Send a prompt to see your usage here."
+        },
+        "legacy": {
+            "note": "Detailed prompt stats were not recorded yet in this range, so only tool usage (voice, screenshots, searches) is shown."
+        }
     },
     "mic_permission": {
         "title": "Allow microphone access",

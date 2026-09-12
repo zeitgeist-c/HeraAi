@@ -88,6 +88,7 @@ const ChatMessage = ({
   onSelectWinner,
   searchMatch = false,
   searchCurrent = false,
+  concealMeta = false,
 }) => {
   const { t } = useTranslation()
   const isBot = message.role === 'model'
@@ -218,7 +219,7 @@ const ChatMessage = ({
     onRetry?.(message, model)
   }
 
-  const renderRetryButton = (compact = false) => (
+  const renderRetryButton = () => (
     <button
       ref={retryTriggerRef}
       type="button"
@@ -228,20 +229,14 @@ const ChatMessage = ({
       aria-haspopup={hasRetryModelChoices ? 'dialog' : undefined}
       aria-expanded={hasRetryModelChoices ? retryMenuOpen : undefined}
       aria-controls={hasRetryModelChoices ? retryMenuId : undefined}
-      className={`${compact ? 'hera-icon-button relative h-7 w-7' : 'hera-compact-action relative'} ${
+      className={`hera-icon-button relative h-7 w-7 ${
         retryMenuOpen ? 'bg-primary/10 text-primary' : ''
       }`}
       disabled={retryDisabled || isPending}
     >
       <RefreshCw className="h-3.5 w-3.5" />
-      {compact && hasRetryModelChoices && (
+      {hasRetryModelChoices && (
         <ChevronDown className="absolute bottom-0.5 right-0.5 h-2 w-2 opacity-65" />
-      )}
-      {!compact && (
-        <>
-          <span>{t('chat.tooltips.retry_short')}</span>
-          {hasRetryModelChoices && <ChevronDown className="h-3 w-3 opacity-65" />}
-        </>
       )}
     </button>
   )
@@ -477,43 +472,46 @@ const ChatMessage = ({
       )}
 
       {(message.content || message.status === 'interrupted' || message.status === 'error') && (
-        <div className="relative mt-1.5 flex gap-1.5 border-t border-border/45 pt-1.5">
-          <div className="flex shrink-0 flex-col items-center gap-0.5" data-testid="response-action-rail">
+        <div className="relative mt-1.5 border-t border-border/45 pt-1.5">
+          <div
+            data-testid="response-action-pill"
+            className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-background/40 py-0.5 pl-1 pr-2"
+          >
             <button
               type="button"
               onClick={handleCopyMessage}
+              title={t('chat.tooltips.copy')}
               aria-label={t('chat.tooltips.copy')}
-              className="hera-compact-action"
+              className="hera-icon-button h-7 w-7"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-              <span>{copied ? t('chat.tooltips.copied') : t('chat.tooltips.copy')}</span>
             </button>
             {speechEligible && (
               <button
                 type="button"
                 onClick={() => onToggleSpeech?.(message)}
                 disabled={speechDisabled}
+                title={speechStatus === 'playing'
+                  ? t('chat.tooltips.stop_speech')
+                  : speechStatus === 'loading'
+                    ? t('chat.tooltips.preparing_speech')
+                    : t('chat.tooltips.read_aloud')}
                 aria-label={speechStatus === 'playing'
                   ? t('chat.tooltips.stop_speech')
                   : speechStatus === 'loading'
                     ? t('chat.tooltips.preparing_speech')
                     : t('chat.tooltips.read_aloud')}
                 aria-pressed={speechStatus !== 'idle'}
-                className="hera-compact-action"
+                className="hera-icon-button h-7 w-7"
               >
                 {speechStatus === 'loading'
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : speechStatus === 'playing'
                     ? <Square className="h-3.5 w-3.5 fill-current" />
                     : <Volume2 className="h-3.5 w-3.5" />}
-                <span>{speechStatus === 'playing'
-                  ? t('chat.tooltips.stop')
-                  : speechStatus === 'loading'
-                    ? t('chat.tooltips.preparing_speech')
-                    : t('chat.tooltips.read_aloud')}</span>
               </button>
             )}
-            {renderRetryButton()}
+            {!concealMeta && renderRetryButton()}
             {showWinnerControl && (
               <button
                 type="button"
@@ -525,31 +523,30 @@ const ChatMessage = ({
                 <span>{t('chat.comparison.continue_with_this')}</span>
               </button>
             )}
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col items-end justify-start gap-1 pt-0.5">
-            {autoChainLabel && (
+            {(usedModelLabel || message.startedAt != null) && (
+              <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border/70" />
+            )}
+            <ResponseDuration message={message} />
+            {usedModelLabel && (
               <span
-                data-testid="auto-chain"
-                className="max-w-full truncate text-right text-[10px] font-medium text-muted-foreground/70"
-                title={`${t('chat.model_used')}: ${autoChainLabel}`}
+                data-testid="message-model"
+                className="inline-flex min-h-6 min-w-0 max-w-full items-center gap-1 rounded-full border border-primary/25 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground"
+                title={`${t('chat.model_used')}: ${usedModelLabel}`}
               >
-                {autoChainLabel}
+                <Bot className="h-3 w-3 shrink-0 text-primary" />
+                <span className="truncate">{usedModelLabel}</span>
               </span>
             )}
-            <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
-              <ResponseDuration message={message} />
-              {usedModelLabel && (
-                <span
-                  data-testid="message-model"
-                  className="inline-flex min-h-6 min-w-0 max-w-full items-center gap-1 rounded-full border border-primary/25 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground"
-                  title={`${t('chat.model_used')}: ${usedModelLabel}`}
-                >
-                  <Bot className="h-3 w-3 shrink-0 text-primary" />
-                  <span className="truncate">{usedModelLabel}</span>
-                </span>
-              )}
-            </div>
           </div>
+          {autoChainLabel && (
+            <span
+              data-testid="auto-chain"
+              className="mt-1 block max-w-full truncate text-left text-[10px] font-medium text-muted-foreground/70"
+              title={`${t('chat.model_used')}: ${autoChainLabel}`}
+            >
+              {autoChainLabel}
+            </span>
+          )}
           {renderRetryMenu('left')}
         </div>
       )}
@@ -596,6 +593,7 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.onRetry === nextProps.onRetry &&
     prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
     prevProps.onSelectWinner === nextProps.onSelectWinner &&
+    prevProps.concealMeta === nextProps.concealMeta &&
     prevProps.searchMatch === nextProps.searchMatch &&
     prevProps.searchCurrent === nextProps.searchCurrent
   )
