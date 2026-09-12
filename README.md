@@ -1,104 +1,68 @@
-# HeraAi
+# HeraAi — Backend-free Chrome Side Panel assistant
 
-AI-powered Chrome extension built with React 19, Vite 7, and Tailwind CSS.
+> Türkçe için: [README.tr.md](./README.tr.md)
 
-HeraAi runs fully inside the Chrome extension. There is no Express backend and no `.env` file. Gemini, OpenRouter, Ollama Cloud, and Tavily API keys are added from the extension settings and stored locally in `chrome.storage.local`.
+Private AI assistant living in Chrome's Side Panel — no backend. Chat with Gemini, OpenRouter Free, and Ollama Cloud, research the web with Tavily, crop screenshots, attach files, and talk by voice. Keys stay in `chrome.storage.local`.
 
-## Architecture
+![HeraAi screenshots](./docs/screenshots/)
 
-```
-Chrome Extension
-  ├─ React side panel UI
-  ├─ chrome.storage.local API key storage
-  ├─ Provider adapters for Gemini, OpenRouter Free, and Ollama Cloud
-  └─ Direct Tavily API calls for web research
-```
+> Screenshots are being added from a clean install (no sample data). The folder above will hold them.
 
-## Prerequisites
+## Providers and models
 
-- Node.js 18+
-- npm 9+
-- Chrome browser
-- An API key for at least one AI provider: Gemini, OpenRouter, or Ollama Cloud
-- Tavily API key only if you want Web Research mode
+- **Gemini** (5 models) — streaming chat + multimodal, image/PDF inline, public-URL reading via URL Context.
+- **OpenRouter Free** (2 models) — SSE streaming chat + multimodal.
+- **Ollama Cloud** — Nemotron 3 Ultra, GPT-OSS 120B via NDJSON streaming.
+- **Tavily** — web search + page extraction fallback when URL Context can't reach a page.
+- **Key fallback** — primary-first with automatic failover, cooldown, and retry clock.
 
-## Setup
+## Features
+
+- **Web Research mode** — globe button; Tavily search/extract with Gemini URL Context first.
+- **Screen crop** — `captureVisibleTab` + canvas overlay; crops stored in `heraai-attachments` IndexedDB (not on `chrome://` pages).
+- **File attachments** — images (Gemini/OpenRouter), PDF + audio Gemini-only, Office text extraction.
+- **Voice** — Gemini-only STT/TTS.
+- **Sessions** — history overlay, chat search, import/export.
+- **Compare + auto-route** — model comparison panel and automatic provider routing.
+- **Bilingual UI** — TR/EN via i18next; light/dark/system themes; stats and response-time display.
+- **Background** — service worker + offscreen generation worker + context menus.
+
+## Install
 
 ```bash
 npm install
-npm run dev
-```
-
-For a production extension build:
-
-```bash
 npm run build
 ```
 
-Load the generated `dist/` folder as an unpacked Chrome extension.
+Load `dist/` in Chrome as an unpacked extension, open the Side Panel, go to Settings, and add at least one provider key (+ Tavily for Web Research).
 
-To create a single distributable file for sharing:
-
-```bash
-npm run package
-```
-
-This creates `release/HeraAi-<version>.zip` using the version from `manifest.json`. Share that zip with the target machine, then unzip it and load the unpacked extension folder in Chrome.
-
-## API Keys
-
-1. Open the HeraAi side panel.
-2. Click Settings.
-3. Add at least one key for the provider you want to use.
-4. Optional: add a Tavily API key for Web Research mode.
-5. Save settings.
-
-Keys are stored only in trusted extension contexts in `chrome.storage.local` on this device (`chrome.storage.sync` is never used). They are not encrypted, and real values are masked in the UI. Add as many keys as you want for each provider; the first key becomes primary and the rest are fallback keys.
-
-Fallback behavior is primary-first, not round-robin. Before the first response token, HeraAi automatically tries the next key from the same provider after credential/permission, quota/rate-limit, timeout/network, or temporary service errors. It never switches provider or moves OpenRouter to a paid model automatically, and it never changes keys after a partial response begins.
-
-The model selector contains five Gemini models, two OpenRouter models: `Free` (`openrouter/free`) and `Nemotron 3 Super` (`nvidia/nemotron-3-super-120b-a12b:free`), and two Ollama Cloud models: `Nemotron 3 Ultra` (`nemotron-3-ultra`) and `GPT-OSS 120B` (`gpt-oss:120b`). OpenRouter reports the actual routed model on each answer. API-key tests use minimal real requests; Ollama verifies access with a one-token `gpt-oss:20b` Cloud request. Chats use the selected Ollama model directly. PDF attachments and voice features remain Gemini-only. Images work with Gemini and OpenRouter Free; extracted text documents also work with the text-only Ollama models.
-
-If every key for a required provider is in cooldown at the same time, the request is blocked and HeraAi shows the earliest retry time instead of failing silently.
-
-## Web Research Mode
-
-Use the globe button in the chat input area.
-
-- Off: the selected model answers from the chat context.
-- On, with no URL: Tavily searches the web, then the selected model writes one final answer using the results and sources.
-- On, with public URLs: Gemini models try Gemini URL Context first; OpenRouter and Ollama require Tavily Extract.
-
-Tavily is only contacted when Web Research is on. Search queries are prepared locally without an extra model call. General search requires Tavily; exact public URL reading can work without Tavily only when a Gemini model successfully uses URL Context.
-
-## Personal Use Notice
-
-HeraAi is intended for personal or local use. API keys live in the browser on the machine where they are entered. Do not embed your own API key in a packaged distribution or share it with others; each user should add their own keys from Settings.
-
-## Available Scripts
+## Development
 
 ```bash
-npm run dev       # Start Vite development server
-npm run build     # Build the Chrome extension
-npm run package   # Build and create a single zip package
-npm run preview   # Preview production build
-npm run lint      # Run ESLint
-npm run test      # Run Vitest in watch mode
-npm run test:run  # Run Vitest once
+npm install
+npm run dev      # HMR dev server
+npm run preview  # preview production build
+npm run lint     # eslint — run before committing
+npm run test     # vitest + jsdom (chrome APIs mocked)
+npm run package  # release/HeraAi-<version>.zip (currently 1.9.2)
 ```
 
-## Project Structure
+## Project structure
 
+```text
+manifest.json        MV3 (sidePanel, storage, activeTab, scripting, contextMenus, offscreen)
+src/App.jsx          Side Panel React app
+src/background/      service worker
+src/offscreen/       generation worker
+src/components/      Settings, ModelSelector, ChatMessage, History, Comparison, Stats, ...
+src/lib/             providerApi, models, keyManager, fileParsers, voiceApi, autoRouter, ...
+src/locales/         en.json, tr.json
 ```
-src/
-  App.jsx                  Main side panel application
-  background/              Chrome extension service worker
-  components/              React UI components
-  lib/api.js               Provider coordination and Tavily research
-  lib/providerApi.js       OpenRouter SSE and Ollama NDJSON adapters
-  lib/models.js            Provider-aware model catalog
-  lib/keyManager.js        Local API key storage helpers
-  locales/                 i18n translations
-manifest.json              Chrome extension manifest
-vite.config.js             Vite + CRX config
-```
+
+## Contributing
+
+New UI strings need both `en.json` and `tr.json` keys; map features to test cases. See [.github/PULL_REQUEST_TEMPLATE.md](./.github/PULL_REQUEST_TEMPLATE.md).
+
+## License
+
+See [LICENSE](./LICENSE) (pending — to be confirmed).
