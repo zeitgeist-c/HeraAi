@@ -2,6 +2,20 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.9.4',
+    date: '2026-09-19',
+    changes: {
+      tr: [
+        'Güvenlik: yalnızca eklentinin kendi bağlamından gelen mesajlar işlenir',
+        'API anahtarı artık URL sorgusunda değil, istek başlığında gönderilir',
+      ],
+      en: [
+        'Security: only messages from the extension contexts are processed',
+        'API key is now sent in the request header instead of the URL query',
+      ],
+    },
+  },
+  {
     version: '1.9.3',
     date: '2026-09-12',
     changes: {
