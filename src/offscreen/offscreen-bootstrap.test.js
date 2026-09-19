@@ -19,6 +19,7 @@ class FakeWorker {
 function createRuntime() {
   let listener = null
   return {
+    id: 'test-extension-id',
     sendMessage: vi.fn().mockResolvedValue({ ok: true }),
     onMessage: {
       addListener: vi.fn(nextListener => { listener = nextListener }),
@@ -26,14 +27,14 @@ function createRuntime() {
         if (listener === nextListener) listener = null
       }),
     },
-    getListener: () => listener,
+    getListener: () => (message, sender, sendResponse) => listener(message, sender || { id: 'test-extension-id' }, sendResponse),
   }
 }
 
 function dispatchRuntime(runtime, message) {
   let response
   const sendResponse = vi.fn(value => { response = value })
-  const keepChannelOpen = runtime.getListener()(message, {}, sendResponse)
+  const keepChannelOpen = runtime.getListener()(message, { id: runtime.id }, sendResponse)
   return { keepChannelOpen, response, sendResponse }
 }
 
@@ -48,6 +49,19 @@ function serviceWorkerCommand(message) {
 describe('offscreen bootstrap bridge', () => {
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('rejects messages whose sender is not this extension', () => {
+    const runtime = createRuntime()
+    const bridge = createOffscreenBridge({
+      runtime,
+      createWorker: () => new FakeWorker(),
+    })
+    expect(bridge.mount()).toBe(true)
+    expect(runtime.getListener()(
+      serviceWorkerCommand({ type: 'OFFSCREEN_PROBE' }),
+      { id: 'baska-bir-eklenti' },
+    )).toBe(false)
   })
 
   it('starts only resolved jobs and forwards worker protocol messages to the service worker', () => {

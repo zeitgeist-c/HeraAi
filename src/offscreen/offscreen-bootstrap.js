@@ -271,7 +271,9 @@ export function createOffscreenBridge({
     return null
   }
 
-  const runtimeListener = (message, _sender, sendResponse) => {
+  const runtimeListener = (message, sender, sendResponse) => {
+    // Guvenlik: yalnizca bu eklentinin kendi baglamlarindan gelen mesajlar islenir
+    if (!sender || sender.id !== runtime.id) return false
     const response = handleRuntimeMessage(message)
     if (response == null) return false
     sendResponse?.(response)

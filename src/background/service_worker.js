@@ -1882,7 +1882,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Guvenlik: yalnizca bu eklentinin kendi baglamlarindan gelen mesajlar islenir
+  if (!sender || sender.id !== chrome.runtime.id) return;
+
   if (message?.type === 'HERAAI_CROP_DONE' || message?.type === 'HERAAI_CROP_CANCELLED') {
     void broadcastRuntimeMessage(message);
     return false;

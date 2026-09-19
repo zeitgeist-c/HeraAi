@@ -410,10 +410,11 @@ async function attemptRouterCall({ routerModel, apiKey, prompt, fetchImpl }) {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), ROUTER_REQUEST_TIMEOUT_MS)
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${routerModel}:generateContent?key=${encodeURIComponent(apiKey)}`
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${routerModel}:generateContent`
     const response = await fetchImpl(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Guvenlik: API anahtari URL sorgusu yerine baslikta gonderilir (log/proxy sizintisi onlenir)
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
