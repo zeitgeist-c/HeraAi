@@ -1,5 +1,9 @@
 import '@testing-library/jest-dom'
 import { vi } from 'vitest'
+import { configure } from '@testing-library/react'
+
+// Yüklü/soğuk koşularda 1 sn'lik varsayılan bekleme flaky kırılma üretiyordu (Bulgu #5).
+configure({ asyncUtilTimeout: 5000 })
 
 global.chrome = {
   storage: {
@@ -42,6 +46,7 @@ global.chrome = {
   },
   windows: {
     getAll: vi.fn(),
+    getCurrent: vi.fn(),
     create: vi.fn(),
     onRemoved: {
       addListener: vi.fn(),

@@ -22,12 +22,12 @@ function isPrivateIpv4(hostname) {
 
 function isPrivateHostname(hostname) {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const isIpv6Literal = host.includes(':')
   return host === 'localhost'
     || host.endsWith('.localhost')
     || host === '::1'
-    || host.startsWith('fe80:')
-    || host.startsWith('fc')
-    || host.startsWith('fd')
+    || (isIpv6Literal && host.startsWith('fe80:'))
+    || (isIpv6Literal && (host.startsWith('fc') || host.startsWith('fd')))
     || isPrivateIpv4(host)
 }
 

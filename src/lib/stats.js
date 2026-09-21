@@ -199,19 +199,29 @@ async function ensureV2() {
 }
 
 /** Record one user prompt: lifetime + today prompt counters and lastActive. */
+/** Aynı storage anahtarına yazan işlemleri sıraya alır (eşzamanlı okuma-yazma kaybını önler). */
+let statsWriteChain = Promise.resolve()
+function serializeStatsWrite(task) {
+  const result = statsWriteChain.then(task, task)
+  statsWriteChain = result.catch(() => {})
+  return result
+}
+
 export async function recordPromptStarted() {
   if (!getChromeStorage()) return;
-  try {
-    const { stats } = await ensureV2();
-    const nowMs = Date.now();
-    const day = ensureDay(stats, toDayKey(new Date(nowMs)));
-    stats.lifetime.prompts += 1;
-    day.prompts += 1;
-    stats.lastActive = nowMs;
-    await storageSet({ stats });
-  } catch {
-    // never throw
-  }
+  return serializeStatsWrite(async () => {
+    try {
+      const { stats } = await ensureV2();
+      const nowMs = Date.now();
+      const day = ensureDay(stats, toDayKey(new Date(nowMs)));
+      stats.lifetime.prompts += 1;
+      day.prompts += 1;
+      stats.lastActive = nowMs;
+      await storageSet({ stats });
+    } catch {
+      // never throw
+    }
+  });
 }
 
 /**
@@ -223,8 +233,9 @@ export async function recordPromptStarted() {
  */
 export async function recordGenerationResults(results) {
   if (!getChromeStorage()) return;
-  try {
-    const { stats } = await ensureV2();
+  return serializeStatsWrite(async () => {
+    try {
+      const { stats } = await ensureV2();
     if (!Array.isArray(results) || results.length === 0) return;
     if (!Array.isArray(stats.recentFinalizedIds)) stats.recentFinalizedIds = [];
     const nowMs = Date.now();
@@ -276,26 +287,29 @@ export async function recordGenerationResults(results) {
     }
 
     await storageSet({ stats });
-  } catch {
-    // never throw
-  }
+    } catch {
+      // never throw
+    }
+  });
 }
 
 /** Record one tool usage ('voice' | 'screenshot' | 'search'). */
 export async function recordToolUsage(tool) {
   if (!getChromeStorage()) return;
-  try {
-    const { stats } = await ensureV2();
-    if (!TOOLS.includes(tool)) return;
-    const nowMs = Date.now();
-    const day = ensureDay(stats, toDayKey(new Date(nowMs)));
-    stats.lifetime.tools[tool] += 1;
-    day.tools[tool] += 1;
-    stats.lastActive = nowMs;
-    await storageSet({ stats });
-  } catch {
-    // never throw
-  }
+  return serializeStatsWrite(async () => {
+    try {
+      const { stats } = await ensureV2();
+      if (!TOOLS.includes(tool)) return;
+      const nowMs = Date.now();
+      const day = ensureDay(stats, toDayKey(new Date(nowMs)));
+      stats.lifetime.tools[tool] += 1;
+      day.tools[tool] += 1;
+      stats.lastActive = nowMs;
+      await storageSet({ stats });
+    } catch {
+      // never throw
+    }
+  });
 }
 
 function startOfDay(date) {
