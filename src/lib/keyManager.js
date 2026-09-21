@@ -34,7 +34,7 @@ function readStorage(key) {
 function writeStorage(key, data) {
   return new Promise((resolve) => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.set({ [key]: data }, resolve);
+      chrome.storage.local.set({ [key]: data, syncVaultUpdatedAt: Date.now() }, resolve);
     } else {
       localStorage.setItem(key, JSON.stringify(data));
       resolve();
@@ -84,6 +84,7 @@ export async function addKey(provider, rawKey) {
     lastErrorType: null,
     cooldownUntil: null,
     failCount: 0,
+    updatedAt: Date.now(),
   };
 
   entries.push(entry);
@@ -105,6 +106,19 @@ export async function removeKey(provider, id) {
   }
 
   await writeStorage(storageKey, entries);
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    const tombstoneKey = `${storageKey}:${id}`;
+    await new Promise((resolve) => {
+      chrome.storage.local.get(['syncKeyTombstones'], (stored) => {
+        chrome.storage.local.set({
+          syncKeyTombstones: {
+            ...(stored?.syncKeyTombstones || {}),
+            [tombstoneKey]: Date.now(),
+          },
+        }, resolve);
+      });
+    });
+  }
 }
 
 export async function setPrimary(provider, id) {
@@ -115,9 +129,11 @@ export async function setPrimary(provider, id) {
   for (const entry of entries) {
     if (entry.id === id) {
       entry.isPrimary = true;
+      entry.updatedAt = Date.now();
       found = true;
     } else {
       entry.isPrimary = false;
+      entry.updatedAt = Date.now();
     }
   }
 
@@ -138,6 +154,7 @@ export async function updateKeyMetadata(provider, id, updates) {
       entry[field] = updates[field];
     }
   }
+  entry.updatedAt = Date.now();
 
   await writeStorage(storageKey, entries);
 }

@@ -11,12 +11,17 @@ import {
   ShieldAlert,
   ChevronDown,
   ExternalLink,
+  Cloud,
+  RefreshCw,
+  LockKeyhole,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { notifyError, notifySuccess } from '../lib/notify'
 import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
+import { isGoogleDriveSyncConfigured } from '../lib/googleDriveClient'
+import { synchronizeWithGoogleDrive } from '../lib/syncManager'
 
 const AVAILABLE_LANGUAGES = [
   { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
@@ -66,7 +71,7 @@ function friendlyTestMessage(t, errorType) {
   }
 }
 
-function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
+function SettingsPanel({ onSave, currentConfig, onClose, currentModel, onSyncApplied }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState('api')
 
@@ -92,6 +97,11 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
   const [showOllamaInput, setShowOllamaInput] = useState(false)
   const [expandedProviders, setExpandedProviders] = useState(['gemini'])
+  const [syncPassphrase, setSyncPassphrase] = useState('')
+  const [showSyncPassphrase, setShowSyncPassphrase] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState(null)
+  const syncConfigured = isGoogleDriveSyncConfigured()
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -106,7 +116,39 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       setOllamaKeys(await getKeys('ollama'))
     }
     load()
+    try {
+      chrome.storage.local.get(['syncLastSuccessAt'], result => {
+        setLastSyncAt(result?.syncLastSuccessAt || null)
+      })
+    } catch {
+      // Sync status is optional; settings remain usable if it cannot be read.
+    }
   }, [])
+
+  const handleSync = async () => {
+    if (syncPassphrase.length < 8) {
+      notifyError(t('setup.sync.passphrase_short'))
+      return
+    }
+    setIsSyncing(true)
+    try {
+      const result = await synchronizeWithGoogleDrive(syncPassphrase)
+      setLastSyncAt(result.syncedAt)
+      notifySuccess(t('setup.sync.success', { count: result.sessions }))
+      onSyncApplied?.()
+    } catch (error) {
+      const known = [
+        'sync_not_configured',
+        'sync_passphrase_invalid',
+        'sync_sign_in_failed',
+        'sync_version_unsupported',
+      ]
+      const key = known.includes(error?.message) ? error.message : 'sync_failed'
+      notifyError(t(`setup.sync.errors.${key}`))
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
   const refreshKeys = async (provider) => {
     if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
@@ -242,7 +284,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       showSources,
     }
 
-    chrome.storage.local.set(newConfig, () => {
+    chrome.storage.local.set({ ...newConfig, syncSettingsUpdatedAt: Date.now() }, () => {
       onSave(newConfig)
       notifySuccess(t('setup.api.saved_success'))
     })
@@ -471,6 +513,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           >
             <Sparkles className="h-3.5 w-3.5" /> {t('setup.tabs.general')}
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('sync')}
+            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'sync' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <Cloud className="h-3.5 w-3.5" /> {t('setup.tabs.sync')}
+          </button>
         </div>
 
         <div className="hera-section-card min-h-[300px] shrink-0 p-3.5">
@@ -596,16 +645,77 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               </div>
             </div>
           )}
+
+          {activeTab === 'sync' && (
+            <div className="hera-fade-in flex flex-col gap-4">
+              <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/[0.06] p-3">
+                <Cloud className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold">{t('setup.sync.title')}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t('setup.sync.description')}</p>
+                </div>
+              </div>
+
+              {!syncConfigured && (
+                <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                  {t('setup.sync.not_configured')}
+                </div>
+              )}
+
+              <label className="flex flex-col gap-2">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <LockKeyhole className="h-3.5 w-3.5" /> {t('setup.sync.passphrase_label')}
+                </span>
+                <span className="relative">
+                  <input
+                    type={showSyncPassphrase ? 'text' : 'password'}
+                    value={syncPassphrase}
+                    onChange={event => setSyncPassphrase(event.target.value)}
+                    placeholder={t('setup.sync.passphrase_placeholder')}
+                    autoComplete="off"
+                    className="h-10 w-full rounded-xl border border-input bg-background/60 px-3 pr-10 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSyncPassphrase(value => !value)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
+                    aria-label={showSyncPassphrase ? t('setup.keys.hide_key') : t('setup.keys.show_key')}
+                  >
+                    {showSyncPassphrase ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </span>
+                <span className="text-[10px] leading-relaxed text-muted-foreground">{t('setup.sync.passphrase_notice')}</span>
+              </label>
+
+              <button
+                type="button"
+                disabled={!syncConfigured || isSyncing}
+                onClick={handleSync}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? t('setup.sync.syncing') : t('setup.sync.sync_now')}
+              </button>
+
+              {lastSyncAt && (
+                <p className="text-center text-[10px] text-muted-foreground">
+                  {t('setup.sync.last_sync', { date: new Date(lastSyncAt).toLocaleString() })}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
-        <button
-          type="button"
-          onClick={handleSave}
-          className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
-        >
-          <Save className="h-4 w-4" />
-          {t('setup.api.save_btn')}
-        </button>
+        {activeTab !== 'sync' && (
+          <button
+            type="button"
+            onClick={handleSave}
+            className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
+          >
+            <Save className="h-4 w-4" />
+            {t('setup.api.save_btn')}
+          </button>
+        )}
       </div>
     </div>
   )

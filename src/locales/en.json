@@ -4,7 +4,8 @@
         "tabs": {
             "api": "API Management",
             "general": "General Settings",
-            "ai": "Artificial Intelligence"
+            "ai": "Artificial Intelligence",
+            "sync": "Sync"
         },
         "api": {
             "active": "Active",
@@ -81,6 +82,26 @@
         "ai": {
             "system_prompt_title": "System Prompt (Role)",
             "system_prompt_placeholder": "Example: You are a senior software architect. Always explain the code clearly and give concise answers."
+        },
+        "sync": {
+            "title": "Google Drive Sync",
+            "description": "Chats, attachments, statistics, settings, and API keys are merged across browsers using the same Google account.",
+            "not_configured": "Google connection is not configured yet. A Google OAuth client ID must be added to the distribution package.",
+            "passphrase_label": "Sync passphrase",
+            "passphrase_placeholder": "At least 8 characters",
+            "passphrase_notice": "This passphrase is used only for encryption on your device and is never sent to Google. Enter the same passphrase in other browsers. Cloud data cannot be opened if it is forgotten.",
+            "passphrase_short": "The sync passphrase must contain at least 8 characters.",
+            "sync_now": "Sync with Google",
+            "syncing": "Syncing...",
+            "last_sync": "Last successful sync: {{date}}",
+            "success": "Sync complete. {{count}} chats were merged.",
+            "errors": {
+                "sync_not_configured": "Google connection is not configured yet.",
+                "sync_passphrase_invalid": "The sync passphrase is incorrect or the cloud data could not be opened.",
+                "sync_sign_in_failed": "Could not connect to the Google account.",
+                "sync_version_unsupported": "The cloud data version is not compatible with this HeraAi version.",
+                "sync_failed": "Sync could not be completed. Check your connection and try again."
+            }
         }
     },
     "chat": {

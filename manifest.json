@@ -11,7 +11,8 @@
         "activeTab",
         "scripting",
         "contextMenus",
-        "offscreen"
+        "offscreen",
+        "identity"
     ],
     "host_permissions": [
         "<all_urls>",
@@ -19,7 +20,8 @@
         "https://api.tavily.com/*",
         "https://html.duckduckgo.com/*",
         "https://openrouter.ai/*",
-        "https://ollama.com/*"
+        "https://ollama.com/*",
+        "https://www.googleapis.com/*"
     ],
     "background": {
         "service_worker": "src/background/service_worker.js",
