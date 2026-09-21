@@ -25,6 +25,12 @@ import {
   getMessageDisplayContent,
   isHiddenPromptAutoTitle,
 } from '../lib/messageDisplay.js';
+import {
+  AUTH_ERROR_CODES,
+  getCurrentAuthUser,
+  signInWithGoogle,
+  signOutFromGoogle,
+} from '../lib/authService.js';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const OFFSCREEN_REASON = 'WORKERS';
@@ -1791,6 +1797,32 @@ async function handleGetState() {
   };
 }
 
+const AUTH_REQUEST_TYPES = new Set(['AUTH_SIGN_IN', 'AUTH_SIGN_OUT', 'AUTH_GET_STATE']);
+
+/**
+ * Kimlik dogrulama istekleri generation kuyruguna girmez; dogrudan yanitlanir.
+ * Hata kodlari yalnizca authService'in tanimladigi sinirli kume ile disari cikar.
+ */
+async function handleAuthRequest(message) {
+  try {
+    if (message.type === 'AUTH_GET_STATE') {
+      return { ok: true, user: getCurrentAuthUser() };
+    }
+    if (message.type === 'AUTH_SIGN_IN') {
+      const user = await signInWithGoogle();
+      return { ok: true, user: user || null };
+    }
+    if (message.type === 'AUTH_SIGN_OUT') {
+      await signOutFromGoogle();
+      return { ok: true, user: null };
+    }
+    return { ok: false, errorCode: 'auth_unknown_request', user: null };
+  } catch (error) {
+    const code = AUTH_ERROR_CODES.has(error?.code) ? error.code : 'auth_failed';
+    return { ok: false, errorCode: code, user: null };
+  }
+}
+
 function handleProtocolMessage(message) {
   switch (message.type) {
     case 'HERA_GENERATION_START':
@@ -1892,6 +1924,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (!message?.type || message.forwardedBy === 'service_worker') return false;
+
+  if (AUTH_REQUEST_TYPES.has(message.type)) {
+    handleAuthRequest(message)
+      .then(
+        response => sendResponse(response),
+        error => {
+          console.error('Auth request error', error);
+          sendResponse({ ok: false, errorCode: 'auth_failed', user: null });
+        },
+      );
+    return true;
+  }
 
   const supportedTypes = new Set([
     'HERA_GENERATION_START',

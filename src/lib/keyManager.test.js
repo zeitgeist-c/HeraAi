@@ -1,37 +1,33 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
+import { DB_NAMES, VAULT_STORES, idbGetAll } from './idb'
 import {
-  resolveKeysForRequest,
-  getKeys,
   addKey,
+  getKeys,
+  resolveKeysForRequest,
   setPrimary,
   updateKeyMetadata,
 } from './keyManager'
+import { openVaultDatabase, resetDefaultVault } from './keyVault'
 
-describe('keyManager', () => {
-  let currentStorage = {}
-
-  beforeEach(() => {
-    currentStorage = {}
-
-    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
-      const result = {}
-      for (const key of keys) {
-        if (currentStorage[key] !== undefined) result[key] = currentStorage[key]
-      }
-      if (typeof callback === 'function') callback(result)
-      return Promise.resolve(result)
-    })
-
-    global.chrome.storage.local.set.mockImplementation((data, callback) => {
-      Object.assign(currentStorage, data)
-      if (typeof callback === 'function') callback()
-      return Promise.resolve(data)
-    })
+async function veritabaniSil() {
+  await new Promise((resolve) => {
+    const istek = globalThis.indexedDB.deleteDatabase(DB_NAMES.vault)
+    istek.onsuccess = () => resolve()
+    istek.onerror = () => resolve()
+    istek.onblocked = () => resolve()
   })
+}
 
+/** Aşama 6 sonrası tek kaynak şifreli kasadır; her test temiz kasayla başlar. */
+beforeEach(async () => {
+  resetDefaultVault()
+  await veritabaniSil()
+})
+
+describe('keyManager (sifreli kasa uzerinden)', () => {
   describe('resolveKeysForRequest', () => {
-    it('returns an empty pool with no cooldown when the store has no keys', async () => {
+    it('returns an empty pool with no cooldown when the vault has no keys', async () => {
       const result = await resolveKeysForRequest('gemini')
 
       expect(result).toEqual({
@@ -54,10 +50,10 @@ describe('keyManager', () => {
     })
 
     it('orders the primary key first then the other keys by createdAt', async () => {
-      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A')
-      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B')
-      const entries = currentStorage.geminiApiKeys
-      const keyBId = entries.find((e) => e.key.endsWith('-B')).id
+      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A', { createdAt: 1000 })
+      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B', { createdAt: 2000 })
+      const entries = await getKeys('gemini')
+      const keyBId = entries.find((e) => e.masked.endsWith('-B')).id
       await setPrimary('gemini', keyBId)
 
       const result = await resolveKeysForRequest('gemini')
@@ -69,10 +65,10 @@ describe('keyManager', () => {
     })
 
     it('skips keys that are still in cooldown and keeps the rest available', async () => {
-      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A')
-      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B')
-      const entries = currentStorage.geminiApiKeys
-      const keyAId = entries.find((e) => e.key.endsWith('-A')).id
+      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A', { createdAt: 1000 })
+      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B', { createdAt: 2000 })
+      const entries = await getKeys('gemini')
+      const keyAId = entries.find((e) => e.masked.endsWith('-A')).id
       await updateKeyMetadata('gemini', keyAId, {
         cooldownUntil: Date.now() + 60000,
         lastErrorAt: Date.now(),
@@ -86,11 +82,11 @@ describe('keyManager', () => {
     })
 
     it('returns allInCooldown=true with the earliest cooldown end when every key is in cooldown', async () => {
-      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A')
-      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B')
-      const entries = currentStorage.geminiApiKeys
-      const keyAId = entries.find((e) => e.key.endsWith('-A')).id
-      const keyBId = entries.find((e) => e.key.endsWith('-B')).id
+      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A', { createdAt: 1000 })
+      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B', { createdAt: 2000 })
+      const entries = await getKeys('gemini')
+      const keyAId = entries.find((e) => e.masked.endsWith('-A')).id
+      const keyBId = entries.find((e) => e.masked.endsWith('-B')).id
       const earliest = Date.now() + 30000
       const later = Date.now() + 120000
       await updateKeyMetadata('gemini', keyAId, { cooldownUntil: later })
@@ -107,23 +103,23 @@ describe('keyManager', () => {
   describe('maskKey via addKey', () => {
     it('masks the key with the first 4 and last 4 characters only', async () => {
       await addKey('gemini', 'AIzaSyABCDEF1234567890xyz9')
-      const [entry] = currentStorage.geminiApiKeys
+      const [entry] = await getKeys('gemini')
       expect(entry.masked).toBe('AIza...xyz9')
     })
 
     it('masks tavily keys with the same first 4 / last 4 rule', async () => {
       await addKey('tavily', 'tvly-abcdefghij-AbC3')
-      const [entry] = currentStorage.tavilyApiKeys
+      const [entry] = await getKeys('tavily')
       expect(entry.masked).toBe('tvly...AbC3')
     })
 
     it('keeps OpenRouter and Ollama keys in separate provider pools', async () => {
-      await addKey('openrouter', 'sk-or-v1-abcdefghijklm1234')
+      await addKey('openrouter', '«redacted:sk-…»')
       await addKey('ollama', 'ollama-abcdefghijklm5678')
 
-      expect(currentStorage.openRouterApiKeys).toHaveLength(1)
-      expect(currentStorage.ollamaApiKeys).toHaveLength(1)
-      expect((await resolveKeysForRequest('openrouter')).keys[0].key).toBe('sk-or-v1-abcdefghijklm1234')
+      expect(await getKeys('openrouter')).toHaveLength(1)
+      expect(await getKeys('ollama')).toHaveLength(1)
+      expect((await resolveKeysForRequest('openrouter')).keys[0].key).toBe('«redacted:sk-…»')
       expect((await resolveKeysForRequest('ollama')).keys[0].key).toBe('ollama-abcdefghijklm5678')
       expect(await getKeys('openrouter')).toEqual([
         expect.not.objectContaining({ key: expect.anything() }),
@@ -133,13 +129,13 @@ describe('keyManager', () => {
 
   describe('getKeys ordering', () => {
     it('returns metadata with primary first then createdAt ascending', async () => {
-      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A')
-      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B')
-      await addKey('gemini', 'AIza-cccccccccccccccccc-C')
-      const entries = currentStorage.geminiApiKeys
-      const keyAId = entries.find((e) => e.key.endsWith('-A')).id
-      const keyBId = entries.find((e) => e.key.endsWith('-B')).id
-      const keyCId = entries.find((e) => e.key.endsWith('-C')).id
+      await addKey('gemini', 'AIza-aaaaaaaaaaaaaaaaaa-A', { createdAt: 1000 })
+      await addKey('gemini', 'AIza-bbbbbbbbbbbbbbbbbb-B', { createdAt: 2000 })
+      await addKey('gemini', 'AIza-cccccccccccccccccc-C', { createdAt: 3000 })
+      const entries = await getKeys('gemini')
+      const keyAId = entries.find((e) => e.masked.endsWith('-A')).id
+      const keyBId = entries.find((e) => e.masked.endsWith('-B')).id
+      const keyCId = entries.find((e) => e.masked.endsWith('-C')).id
       await setPrimary('gemini', keyCId)
 
       const keys = await getKeys('gemini')
@@ -153,6 +149,23 @@ describe('keyManager', () => {
       const keys = await getKeys('gemini')
 
       expect(keys[0]).not.toHaveProperty('key')
+    })
+  })
+
+  describe('Asama 6 — acik metin kalmadi', () => {
+    it('hicbir kayit diskte ham anahtar tasimaz', async () => {
+      await addKey('gemini', 'AIzaSySECRET-do-not-leak-12345')
+      await addKey('tavily', 'tvly-SECRET-tavily-1234567890')
+
+      const db = await openVaultDatabase()
+      const kayitlar = await idbGetAll(db, VAULT_STORES.keys)
+      db.close()
+      const disaVuran = JSON.stringify(kayitlar)
+
+      expect(kayitlar).toHaveLength(2)
+      expect(disaVuran).not.toContain('AIzaSySECRET')
+      expect(disaVuran).not.toContain('tvly-SECRET')
+      expect(kayitlar.every((k) => k.ciphertext?.ciphertext)).toBe(true)
     })
   })
 })

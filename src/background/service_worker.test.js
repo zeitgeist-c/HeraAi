@@ -10,6 +10,25 @@ const keyManagerMocks = vi.hoisted(() => ({
 
 vi.mock('../lib/keyManager.js', () => keyManagerMocks);
 
+const authServiceMocks = vi.hoisted(() => ({
+  AUTH_ERROR_CODES: new Set([
+    'firebase_not_configured',
+    'google_oauth_not_configured',
+    'identity_unavailable',
+    'auth_cancelled',
+    'auth_flow_failed',
+    'auth_state_mismatch',
+    'auth_nonce_mismatch',
+    'auth_token_missing',
+    'auth_token_invalid',
+  ]),
+  getCurrentAuthUser: vi.fn(),
+  signInWithGoogle: vi.fn(),
+  signOutFromGoogle: vi.fn(),
+}));
+
+vi.mock('../lib/authService.js', () => authServiceMocks);
+
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
@@ -1787,5 +1806,78 @@ describe('background comparison coordinator', () => {
       hasKey: false,
     });
     expect(JSON.stringify(response)).not.toContain('g1');
+  });
+});
+
+describe('background auth bridge', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    keyManagerMocks.getKeys.mockResolvedValue([]);
+    keyManagerMocks.resolveKeysForRequest.mockResolvedValue({
+      keys: [],
+      allInCooldown: false,
+      earliestCooldownEnd: null,
+    });
+    authServiceMocks.getCurrentAuthUser.mockReturnValue(null);
+    authServiceMocks.signInWithGoogle.mockResolvedValue({ uid: 'uid-1', email: 'user@example.com' });
+    authServiceMocks.signOutFromGoogle.mockResolvedValue(undefined);
+    delete globalThis.clients;
+  });
+
+  it('AUTH_SIGN_IN isteğini generation kuyruğuna sokmadan yanıtlar', async () => {
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, { type: 'AUTH_SIGN_IN' });
+
+    expect(authServiceMocks.signInWithGoogle).toHaveBeenCalledTimes(1);
+    expect(response).toEqual({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } });
+    expect(mock.chrome.offscreen.createDocument).not.toHaveBeenCalled();
+  });
+
+  it('AUTH_GET_STATE mevcut oturum bilgisini döner', async () => {
+    authServiceMocks.getCurrentAuthUser.mockReturnValue({ uid: 'uid-7', email: 'a@b.com' });
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, { type: 'AUTH_GET_STATE' });
+
+    expect(response).toEqual({ ok: true, user: { uid: 'uid-7', email: 'a@b.com' } });
+  });
+
+  it('AUTH_SIGN_OUT oturumu kapatır', async () => {
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, { type: 'AUTH_SIGN_OUT' });
+
+    expect(authServiceMocks.signOutFromGoogle).toHaveBeenCalledTimes(1);
+    expect(response).toEqual({ ok: true, user: null });
+  });
+
+  it('bilinmeyen hata ayrıntısını auth_failed koduyla sınırlar', async () => {
+    authServiceMocks.signInWithGoogle.mockRejectedValue(
+      Object.assign(new Error('firestore/internal detail'), { code: 'internal_provider_error' }),
+    );
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, { type: 'AUTH_SIGN_IN' });
+
+    expect(response).toEqual({ ok: false, errorCode: 'auth_failed', user: null });
+    expect(JSON.stringify(response)).not.toContain('internal detail');
+  });
+
+  it('bilinen hata kodunu olduğu gibi iletir', async () => {
+    authServiceMocks.signInWithGoogle.mockRejectedValue(
+      Object.assign(new Error('auth_cancelled'), { code: 'auth_cancelled' }),
+    );
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, { type: 'AUTH_SIGN_IN' });
+
+    expect(response).toEqual({ ok: false, errorCode: 'auth_cancelled', user: null });
   });
 });
