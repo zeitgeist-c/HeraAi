@@ -43,7 +43,6 @@ import {
   putAttachment,
 } from './lib/attachmentStore'
 import { exportSessions, exportSessionMarkdown, importSessions, sessionToMarkdown } from './lib/importExport'
-import { recordSessionTombstones } from './lib/syncManager'
 import { findChatMatchIds } from './lib/chatSearch'
 import {
   extractPublicUrls,
@@ -2985,7 +2984,6 @@ function App() {
       })
       const result = await trackStructuralStorageWrite(queuedWrite)
       if (!result) return
-      await recordSessionTombstones(id)
 
       const remainingSessionIds = new Set(result.nextSessions.map(session => session?.id))
       pendingSessionMetadataRef.current.forEach((_pendingMetadata, pendingSessionId) => {
@@ -3074,10 +3072,6 @@ function App() {
           })
         const preservedSessions = sourceSessions.filter(session => session?.isStarred === true)
         const deletedCount = sourceSessions.length - preservedSessions.length
-        const deletedSessionIds = sourceSessions
-          .filter(session => session?.isStarred !== true)
-          .map(session => session?.id)
-          .filter(Boolean)
 
         let nextSessions = preservedSessions
         let nextActiveSessionId = currentActiveSessionId
@@ -3116,7 +3110,6 @@ function App() {
         })
         return {
           deletedCount,
-          deletedSessionIds,
           nextActiveSessionId,
           nextMessages,
           nextSessions,
@@ -3131,7 +3124,6 @@ function App() {
         console.error('Chrome bulk session deletion failed', error)
       })
       const result = await trackStructuralStorageWrite(queuedWrite)
-      await recordSessionTombstones(result.deletedSessionIds)
 
       const remainingSessionIds = new Set(result.nextSessions.map(session => session?.id))
       pendingSessionMetadataRef.current.forEach((_pendingMetadata, pendingSessionId) => {
@@ -4691,20 +4683,13 @@ function App() {
     setSelectedProvider(nextProvider)
     setModelSelectionMode('manual')
     if (chrome && chrome.storage) {
-      chrome.storage.local.set({
-        selectedModel: nextModel,
-        selectedProvider: nextProvider,
-        modelSelectionMode: 'manual',
-        syncSettingsUpdatedAt: Date.now(),
-      })
+      chrome.storage.local.set({ selectedModel: nextModel, selectedProvider: nextProvider, modelSelectionMode: 'manual' })
     }
   }
 
   const handleAutoModelSelect = () => {
     setModelSelectionMode('auto')
-    if (chrome && chrome.storage) {
-      chrome.storage.local.set({ modelSelectionMode: 'auto', syncSettingsUpdatedAt: Date.now() })
-    }
+    if (chrome && chrome.storage) chrome.storage.local.set({ modelSelectionMode: 'auto' })
   }
 
   const comparisonCandidates = localizedModelCatalog.map(model => {
@@ -4738,9 +4723,7 @@ function App() {
   const startComparison = pair => {
     setComparisonModelKeys(pair)
     setShowComparison(false)
-    if (chrome?.storage?.local) {
-      void chrome.storage.local.set({ comparisonModelKeys: pair, syncSettingsUpdatedAt: Date.now() })
-    }
+    if (chrome?.storage?.local) void chrome.storage.local.set({ comparisonModelKeys: pair })
     void handleSend(null, { comparisonModelKeys: pair })
   }
 
@@ -4834,7 +4817,6 @@ function App() {
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
               setShowSettings(false)
             }}
-            onSyncApplied={() => window.location.reload()}
           />
         </div>
       )}
