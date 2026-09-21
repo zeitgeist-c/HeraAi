@@ -47,6 +47,16 @@ npm run test     # vitest + jsdom (chrome APIs mocked)
 npm run package  # release/HeraAi-<version>.zip (currently 1.9.2)
 ```
 
+### Configure Google Drive sync
+
+1. Enable the Drive API in Google Cloud Console.
+2. Create an OAuth 2.0 client with the **Chrome Extension** application type.
+3. Use `pldmkijahkhpacdjflkkgipnkcgehfoj` as the extension application ID.
+4. Copy `.env.example` to `.env.local` and set `VITE_GOOGLE_OAUTH_CLIENT_ID` to the real client ID.
+5. Rebuild the distribution package.
+
+Sync requests only the `drive.appdata` scope. The cloud snapshot, attachments, and API keys are encrypted with AES-GCM using the user's sync passphrase. The passphrase is neither stored nor sent to Google.
+
 ## Project structure
 
 ```text

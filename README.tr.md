@@ -47,6 +47,16 @@ npm run test     # vitest + jsdom (chrome API'leri taklit)
 npm run package  # release/HeraAi-<sürüm>.zip (şu an 1.9.2)
 ```
 
+### Google Drive senkronizasyonunu yapılandırma
+
+1. Google Cloud Console'da Drive API'yi etkinleştirin.
+2. Türü **Chrome Extension** olan bir OAuth 2.0 istemcisi oluşturun.
+3. Uygulama kimliği olarak `pldmkijahkhpacdjflkkgipnkcgehfoj` değerini kullanın.
+4. `.env.example` dosyasını `.env.local` adıyla kopyalayın ve gerçek istemci kimliğini `VITE_GOOGLE_OAUTH_CLIENT_ID` değerine yazın.
+5. Dağıtım paketini yeniden oluşturun.
+
+Senkronizasyon yalnızca `drive.appdata` kapsamını ister. Bulut anlık görüntüsü, ekler ve API anahtarları kullanıcının senkronizasyon parolasıyla AES-GCM kullanılarak şifrelenir. Parola kaydedilmez veya Google'a gönderilmez.
+
 ## Proje yapısı
 
 ```text

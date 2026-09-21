@@ -4,7 +4,8 @@
     "tabs": {
       "api": "API Yönetimi",
       "general": "Genel Ayarlar",
-      "ai": "Yapay Zeka"
+      "ai": "Yapay Zeka",
+      "sync": "Senkronizasyon"
     },
     "api": {
       "active": "Aktif",
@@ -81,6 +82,26 @@
     "ai": {
       "system_prompt_title": "Sistem Komutu (System Prompt)",
       "system_prompt_placeholder": "Örneğin: Sen kıdemli bir yazılım mimarısın. Her zaman kodu açıklayarak kısa ve net cevaplar ver."
+    },
+    "sync": {
+      "title": "Google Drive Senkronizasyonu",
+      "description": "Sohbetler, ek dosyalar, istatistikler, ayarlar ve API anahtarları aynı Google hesabındaki tarayıcılar arasında birleştirilir.",
+      "not_configured": "Google bağlantısı henüz yapılandırılmamış. Dağıtım paketine bir Google OAuth istemci kimliği eklenmelidir.",
+      "passphrase_label": "Senkronizasyon parolası",
+      "passphrase_placeholder": "En az 8 karakter",
+      "passphrase_notice": "Bu parola yalnızca cihazınızda şifreleme için kullanılır ve Google'a gönderilmez. Diğer tarayıcılarda aynı parolayı girin. Unutulursa bulut verisi açılamaz.",
+      "passphrase_short": "Senkronizasyon parolası en az 8 karakter olmalıdır.",
+      "sync_now": "Google ile senkronize et",
+      "syncing": "Senkronize ediliyor...",
+      "last_sync": "Son başarılı senkronizasyon: {{date}}",
+      "success": "Senkronizasyon tamamlandı. {{count}} sohbet birleştirildi.",
+      "errors": {
+        "sync_not_configured": "Google bağlantısı henüz yapılandırılmamış.",
+        "sync_passphrase_invalid": "Senkronizasyon parolası yanlış veya bulut verisi açılamadı.",
+        "sync_sign_in_failed": "Google hesabıyla bağlantı kurulamadı.",
+        "sync_version_unsupported": "Bulut verisinin sürümü bu HeraAi sürümüyle uyumlu değil.",
+        "sync_failed": "Senkronizasyon tamamlanamadı. Bağlantınızı kontrol edip tekrar deneyin."
+      }
     }
   },
   "chat": {
