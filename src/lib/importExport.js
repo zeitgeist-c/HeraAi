@@ -42,11 +42,17 @@ export const exportSessions = (sessions) => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `heraai-export-${new Date().toISOString().split('T')[0]}.json`
+  a.download = `heraai-export-${localDateStamp()}.json`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+function localDateStamp() {
+  const d = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 export function sessionToMarkdown(session) {
@@ -71,7 +77,7 @@ export function exportSessionMarkdown(session) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `heraai-${new Date().toISOString().split('T')[0]}.md`
+  anchor.download = `heraai-${localDateStamp()}.md`
   document.body.appendChild(anchor)
   anchor.click()
   document.body.removeChild(anchor)

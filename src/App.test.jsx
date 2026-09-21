@@ -409,6 +409,7 @@ describe('HeraAi App', () => {
       return { ok: true };
     });
     global.chrome.windows.getAll.mockResolvedValue([{ id: 1, type: 'normal' }]);
+    global.chrome.windows.getCurrent.mockResolvedValue({ id: 1, type: 'normal' });
     global.chrome.tabs.query.mockResolvedValue([{ id: 1, url: 'https://example.com/article' }]);
     global.chrome.tabs.captureVisibleTab.mockResolvedValue('data:image/png;base64,visible-tab');
     global.chrome.scripting.executeScript.mockResolvedValue([{

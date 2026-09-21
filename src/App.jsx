@@ -4263,14 +4263,14 @@ function App() {
     setIsCropActive(true)
 
     try {
-      const windows = await chrome.windows.getAll()
+      // Kırpma katmanı, ekran görüntüsünü alan pencereyle (currentWindow) aynı olmalı;
+      // ilk 'normal' pencereyi seçmek çok pencereli durumda koordinat kayması yaratıyordu.
+      const targetWindow = await chrome.windows.getCurrent()
       if (
         cropOperation.cancelRequested
         || !mountedRef.current
         || cropTargetRef.current !== cropOperation
       ) return
-
-      const targetWindow = windows.find(w => w.type === 'normal')
       
       if (!targetWindow) {
         notifyError(t('chat.screenshot_no_tab'));
