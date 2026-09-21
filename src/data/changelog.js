@@ -2,6 +2,28 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.0',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'Uçtan uca şifreli bulut eşitleme: sohbet, ayar, istatistik ve API anahtarları cihazlar arasında şifreli taşınır',
+        'API anahtarları artık açık metin tutulmaz; şifreli kasada saklanır',
+        'Kurtarma kodu ile ikinci cihaz kurulumu ve 7 günlük geri dönüş noktaları',
+        'Anahtarları sırayla kullan modu ve sağlık takibi (bekleme, geçersiz, duraklatıldı)',
+        '3 MiB\'a kadar ek dosyalar şifreli parçalarla eşitlenir; büyük ekler cihazda kalır',
+        'Çevrimdışıyken çalışmaya devam edilir; bağlantı gelince kuyruk kendiliğinden eşitlenir',
+      ],
+      en: [
+        'End-to-end encrypted cloud sync: chats, settings, stats and API keys travel encrypted',
+        'API keys are no longer stored in plain text; they live in an encrypted vault',
+        'Second-device setup with a recovery code and 7-day restore points',
+        'Balanced key rotation mode with health tracking (cooldown, invalid, paused)',
+        'Attachments up to 3 MiB sync in encrypted chunks; larger ones stay on the device',
+        'Works offline; the queue syncs itself once the connection returns',
+      ],
+    },
+  },
+  {
     version: '1.9.4',
     date: '2026-09-19',
     changes: {

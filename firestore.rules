@@ -1,0 +1,74 @@
+rules_version = '2';
+
+// HeraAi 1.10.0 — Firestore güvenlik kuralları (Aşama 5).
+//
+// İlke: şifreleme istemcide yapılır, burada ise yalnızca "kendi verine eriş"
+// kuralı zorlanır. Tanımlanmamış her yol kapalıdır; yeni bir koleksiyon
+// bilinçli olarak buraya eklenmeden erişilemez.
+//
+// `entities` belgelerinde sunucu yalnızca opak kimlik, tür, sürüm damgası ve
+// şifreli yükü görür; `ciphertextSize` sınırı 1 MiB belge limitinin altında
+// kalarak kota israfını engeller.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Tanımlanmamış tüm yollar varsayılan olarak kapalıdır.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId} {
+
+      // Yalnızca kimliği doğrulanmış kullanıcı kendi dizinine erişebilir.
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      match /account/root {
+        allow read: if isOwner();
+        allow create, update: if isOwner()
+          && request.resource.data.schemaVersion is int
+          && request.resource.data.recoveryEnvelope is map;
+        allow delete: if false;
+      }
+
+      match /devices/{deviceId} {
+        allow read: if isOwner();
+        allow create, update: if isOwner()
+          && request.resource.data.deviceId == deviceId;
+        allow delete: if isOwner();
+      }
+
+      match /entities/{entityId} {
+        allow read: if isOwner();
+        allow create, update: if isOwner()
+          && request.resource.data.ownerUid == userId
+          && request.resource.data.entityType in ['setting', 'session', 'message', 'message_batch', 'api_key', 'stats_day', 'tombstone']
+          && request.resource.data.ciphertextSize <= 800000; // ~780 KiB üst sınır
+        allow delete: if isOwner();
+
+        // Geçmiş sürümler: yetim kalmasın diye ana belgeyle aynı sahiplikte.
+        match /revisions/{revisionId} {
+          allow read, write: if isOwner();
+        }
+      }
+
+      match /blobs/{blobId} {
+        allow read, write: if isOwner();
+
+        match /chunks/{chunkIndex} {
+          allow read: if isOwner();
+          allow create, update: if isOwner()
+            && request.resource.data.chunkSize <= 750000; // ~730 KiB üst sınır
+          allow delete: if isOwner();
+        }
+      }
+
+      // Çevrimdışı yedekler (plan §7 koleksiyon listesi).
+      match /backups/{backupId} {
+        allow read, write: if isOwner();
+      }
+    }
+  }
+}

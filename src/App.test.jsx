@@ -4,6 +4,14 @@ import toast from 'react-hot-toast';
 
 import App from './App';
 import * as api from './lib/api';
+import {
+  addKey as vaultAddKey,
+  getKeys as vaultGetKeys,
+  getRawKey as vaultGetRawKey,
+  updateKeyMetadata as vaultUpdateKeyMetadata,
+} from './lib/keyManager';
+import { openVaultDatabase, resetDefaultVault } from './lib/keyVault';
+import { VAULT_STORES, idbClear } from './lib/idb';
 import * as audioUtils from './lib/audioUtils';
 import * as voiceApi from './lib/voiceApi';
 import i18n from './i18n';
@@ -178,9 +186,107 @@ describe('HeraAi App', () => {
     });
   };
 
-  const readStorage = keys => new Promise(resolve => {
-    global.chrome.storage.local.get(keys, result => resolve(result || {}));
-  });
+  // Aşama 6 köprüsü — üretimde anahtarlar şifreli kasada (IndexedDB) tutulur.
+  // Testler `chrome.storage.local` arayüzünü kullandığı için iki yön kurulur:
+  // tohumlanan anahtarlar kasaya yazılır, okumalar kasadan yapılır.
+  const API_KEY_FIELDS = {
+    geminiApiKeys: 'gemini',
+    tavilyApiKeys: 'tavily',
+    openRouterApiKeys: 'openrouter',
+    ollamaApiKeys: 'ollama',
+  };
+
+  const KEY_METADATA_FIELDS = [
+    'lastUsedAt', 'lastSuccessAt', 'lastErrorAt', 'lastErrorType', 'cooldownUntil', 'failCount',
+  ];
+
+  const tohumlananlar = new Set();
+
+  const KASA_PROVIDERS = Object.values(API_KEY_FIELDS);
+
+  /** Kasadaki kayıtlar: maskeli metadata + çözülmüş ham anahtar. */
+  const readVaultKeys = async (provider) => {
+    const metadata = await vaultGetKeys(provider);
+    const ham = [];
+    for (const kayit of metadata) {
+      ham.push({ ...kayit, key: await vaultGetRawKey(provider, kayit.id) });
+    }
+    return ham;
+  };
+
+  const kasaOnbellek = new Map();
+  let aynalamaSozu = null;
+
+  /**
+   * Kasayı arka planda aynalar. `waitFor` senkron okuduğu için `kasaOku`
+   * önbellekten döner; tazeleme bir sonraki denemede görünür olur.
+   */
+  const kasaAynala = () => {
+    if (aynalamaSozu) return aynalamaSozu;
+    aynalamaSozu = (async () => {
+      for (const provider of KASA_PROVIDERS) {
+        kasaOnbellek.set(provider, await readVaultKeys(provider));
+      }
+    })().finally(() => {
+      aynalamaSozu = null;
+    });
+    return aynalamaSozu;
+  };
+
+  const kasaOku = (provider) => {
+    void kasaAynala();
+    return kasaOnbellek.get(provider) || [];
+  };
+
+  const seedVaultKeys = async (provider, kayitlar) => {
+    for (const kayit of kayitlar) {
+      if (!kayit || typeof kayit.key !== 'string' || !kayit.key.trim()) continue;
+      const imza = `${provider}:${kayit.id}`;
+      if (tohumlananlar.has(imza)) continue;
+      tohumlananlar.add(imza);
+      try {
+        await vaultAddKey(provider, kayit.key, {
+          id: kayit.id,
+          isPrimary: kayit.isPrimary,
+          createdAt: kayit.createdAt ?? null,
+        });
+      } catch (error) {
+        if (error?.message !== 'key_duplicate_error') throw error;
+        continue;
+      }
+      const meta = {};
+      for (const alan of KEY_METADATA_FIELDS) {
+        if (kayit[alan] !== undefined) meta[alan] = kayit[alan];
+      }
+      if (Object.keys(meta).length > 0) await vaultUpdateKeyMetadata(provider, kayit.id, meta);
+    }
+  };
+
+  /**
+   * Kasa kayıtlarını temizler ama cihaz anahtarını korur: anahtar da silinirse
+   * uçuştaki işlemlerle yarışıp çözülemeyen kayıtlar bırakırdı.
+   */
+  const kasaTemizle = async () => {
+    try {
+      const db = await openVaultDatabase();
+      await idbClear(db, VAULT_STORES.keys);
+      await idbClear(db, VAULT_STORES.syncQueue);
+      db.close();
+    } catch {
+      // Kasa henüz oluşmamışsa yoksayılır.
+    }
+  };
+
+  const readStorage = async keys => {
+    const alanlar = Array.isArray(keys) ? keys : [keys];
+    const sonuc = await new Promise(resolve => {
+      global.chrome.storage.local.get(alanlar, result => resolve(result || {}));
+    });
+    for (const alan of alanlar) {
+      if (API_KEY_FIELDS[alan]) sonuc[alan] = await readVaultKeys(API_KEY_FIELDS[alan]);
+    }
+    return sonuc;
+  };
 
   const nextBridgeEvent = (iterator, signal) => new Promise((resolve, reject) => {
     const handleAbort = () => {
@@ -288,8 +394,16 @@ describe('HeraAi App', () => {
     generationControllers.delete(message.jobId);
   };
 
-  beforeEach(() => {
+  afterEach(() => {
+    resetDefaultVault();
+  });
+
+  beforeEach(async () => {
     vi.clearAllMocks();
+    resetDefaultVault();
+    await kasaTemizle();
+    tohumlananlar.clear();
+    kasaOnbellek.clear();
     storageListeners = [];
     runtimeListeners = [];
     generationControllers = new Map();
@@ -298,9 +412,7 @@ describe('HeraAi App', () => {
       configurable: true,
       get: () => documentVisibility,
     });
-    currentStorage = {
-      theme: 'light',
-    };
+    currentStorage = { theme: 'light' };
 
     global.chrome.storage.local.get.mockImplementation((keys, callback) => {
       if (typeof callback === 'function') callback(currentStorage);
@@ -441,6 +553,10 @@ describe('HeraAi App', () => {
     await waitFor(() => {
       expect(currentStorage.systemInstruction).toBe(DEFAULT_SYSTEM_INSTRUCTION);
       expect(currentStorage.systemInstructionDefaultVersion).toBe(SYSTEM_INSTRUCTION_DEFAULT_VERSION);
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('button[aria-haspopup="menu"]')).toBeInTheDocument();
     });
 
     openSettingsPanel();
@@ -2364,7 +2480,7 @@ describe('HeraAi App', () => {
     fireEvent.click(addBtn);
 
     await waitFor(() => {
-      expect(currentStorage.geminiApiKeys).toHaveLength(1);
+      expect(kasaOku('gemini')).toHaveLength(1);
     });
 
     const saveBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-save'));
@@ -2742,7 +2858,7 @@ describe('HeraAi App', () => {
     fireEvent.click(addButtons[3]);
 
     await waitFor(() => {
-      expect(currentStorage.tavilyApiKeys).toHaveLength(1);
+      expect(kasaOku('tavily')).toHaveLength(1);
     });
 
     const testButtons = await waitFor(() => {
@@ -2756,14 +2872,14 @@ describe('HeraAi App', () => {
     fireEvent.click(testButtons[0]);
 
     await waitFor(() => {
-      const entry = currentStorage.tavilyApiKeys[0];
+      const entry = kasaOku('tavily')[0];
       expect(entry.lastErrorType).toBe('quota_exceeded');
       expect(entry.lastErrorAt).toBeGreaterThan(0);
     });
   });
 
   it('keeps the optimistic user message visible while blocking a cooldown request', async () => {
-    currentStorage.geminiApiKeys = [{
+    await seedVaultKeys('gemini', [{
       id: 'k1',
       key: 'AIza-cooldown-aaaaaaaaaaaa',
       masked: 'AIza...aaaa',
@@ -2775,7 +2891,7 @@ describe('HeraAi App', () => {
       lastErrorType: 'rate_limited',
       cooldownUntil: Date.now() + 90000,
       failCount: 1,
-    }];
+    }]);
 
     render(<App />);
 
@@ -2794,10 +2910,10 @@ describe('HeraAi App', () => {
     api.testKey.mockResolvedValue({ success: true, provider: 'gemini' });
     currentStorage.selectedModel = 'gemini-3.6-flash';
 
-    currentStorage.geminiApiKeys = [
+    await seedVaultKeys('gemini', [
       { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
       { id: 'k2', key: 'AIza-bbbbbbbbbbbbbb-key2', masked: 'AIza...key2', isPrimary: false, createdAt: 2000 },
-    ];
+    ]);
 
     render(<App />);
 
@@ -2809,7 +2925,11 @@ describe('HeraAi App', () => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
-    const testAllBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.match(/Test All|Tümünü Test Et/i));
+    const testAllBtn = await waitFor(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent?.match(/Test All|Tümünü Test Et/i));
+      expect(btn).toBeTruthy();
+      return btn;
+    });
     fireEvent.click(testAllBtn);
 
     await waitFor(() => {
@@ -2830,10 +2950,10 @@ describe('HeraAi App', () => {
   });
 
   it('moves a chosen Gemini key above the previous primary when clicking Set as Primary', async () => {
-    currentStorage.geminiApiKeys = [
+    await seedVaultKeys('gemini', [
       { id: 'k1', key: 'AIza-aaaaaaaaaaaaa-key1', masked: 'AIza...key1', isPrimary: true, createdAt: 1000 },
       { id: 'k2', key: 'AIza-bbbbbbbbbbbbbb-key2', masked: 'AIza...key2', isPrimary: false, createdAt: 2000 },
-    ];
+    ]);
 
     render(<App />);
 
@@ -3018,8 +3138,10 @@ describe('HeraAi App', () => {
     currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
-    await waitFor(() => expect(currentStorage.selectedProvider).toBe('gemini'));
-    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.6 Flash');
+    await waitFor(() => {
+      expect(currentStorage.selectedProvider).toBe('gemini');
+      expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.6 Flash');
+    });
   });
 
   it('migrates a retired MiniMax selection to Nemotron', async () => {
@@ -4851,6 +4973,9 @@ describe('HeraAi App', () => {
     fireEvent.change(document.querySelector('textarea'), { target: { value: 'Keep my live chunk' } });
     fireEvent.click(getSendButton());
     await waitFor(() => expect(currentStorage.activeGeneration?.status).toBe('running'));
+    // Kasa (IndexedDB) okuması bitmeden sahte zamanlayıcı açılırsa istek akışı
+    // hiç başlamaz; bu yüzden çağrı doğrulanır.
+    await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
     global.chrome.storage.local.set.mockClear();
 
     vi.useFakeTimers();
@@ -4858,6 +4983,9 @@ describe('HeraAi App', () => {
       await act(async () => {
         controlled.push({ event: 'chunk', data: { text: 'Protected live chunk' } });
         await Promise.resolve();
+        // Kasa (IndexedDB) okuması setImmediate kullanır; sahte zamanlayıcı
+        // sıfır süreyle ilerletilir, debounce süresi dolmaz.
+        await vi.advanceTimersByTimeAsync(0);
         await Promise.resolve();
         await Promise.resolve();
       });
@@ -5243,7 +5371,7 @@ describe('HeraAi App', () => {
   });
 
   it('records dictation, appends the transcript, and never sends it automatically', async () => {
-    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
     const tracks = [{ stop: vi.fn() }];
     Object.defineProperty(navigator, 'permissions', {
       configurable: true,
@@ -5283,7 +5411,7 @@ describe('HeraAi App', () => {
   });
 
   it('cancels a pending microphone request when the permission window closes', async () => {
-    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
     let removedListener;
     Object.defineProperty(navigator, 'permissions', {
       configurable: true,
@@ -5310,7 +5438,7 @@ describe('HeraAi App', () => {
   });
 
   it('reads a completed assistant message with one Web Audio source', async () => {
-    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
     currentStorage.sessions = [{
       id: 'speech-session',
       title: 'Speech',
@@ -5412,7 +5540,7 @@ describe('HeraAi App', () => {
   });
 
   it('pins the remaining read-aloud chunks to the fallback TTS model', async () => {
-    currentStorage.geminiApiKeys = [{ id: 'g1', key: 'secret', isPrimary: true }];
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
     const longAnswer = `${'A clear spoken sentence. '.repeat(120)}`;
     currentStorage.sessions = [{
       id: 'speech-pin-session',

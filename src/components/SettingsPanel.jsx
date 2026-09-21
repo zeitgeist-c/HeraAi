@@ -100,19 +100,29 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
 
   useEffect(() => {
     async function load() {
-      setGeminiKeys(await getKeys('gemini'))
-      setTavilyKeys(await getKeys('tavily'))
-      setOpenRouterKeys(await getKeys('openrouter'))
-      setOllamaKeys(await getKeys('ollama'))
+      // Kasa erişilemezse (ör. sekme kapanırken IndexedDB kesilirse) arayüz
+      // çökmemeli: liste boş kalır, hata konsola düşer.
+      try {
+        setGeminiKeys(await getKeys('gemini'))
+        setTavilyKeys(await getKeys('tavily'))
+        setOpenRouterKeys(await getKeys('openrouter'))
+        setOllamaKeys(await getKeys('ollama'))
+      } catch (error) {
+        console.error('key_vault_load_failed', error)
+      }
     }
     load()
   }, [])
 
   const refreshKeys = async (provider) => {
-    if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
-    else if (provider === 'tavily') setTavilyKeys(await getKeys('tavily'))
-    else if (provider === 'openrouter') setOpenRouterKeys(await getKeys('openrouter'))
-    else if (provider === 'ollama') setOllamaKeys(await getKeys('ollama'))
+    try {
+      if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
+      else if (provider === 'tavily') setTavilyKeys(await getKeys('tavily'))
+      else if (provider === 'openrouter') setOpenRouterKeys(await getKeys('openrouter'))
+      else if (provider === 'ollama') setOllamaKeys(await getKeys('ollama'))
+    } catch (error) {
+      console.error('key_vault_refresh_failed', error)
+    }
   }
 
   const handleAddKey = async (provider) => {
