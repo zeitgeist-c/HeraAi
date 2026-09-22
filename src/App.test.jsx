@@ -2988,6 +2988,26 @@ describe('HeraAi App', () => {
     });
   });
 
+  it('keeps large API key pools inside a compact scrollable list', async () => {
+    await seedVaultKeys('gemini', Array.from({ length: 12 }, (_, index) => ({
+      id: `key-${index + 1}`,
+      key: `AIza-${String(index + 1).padStart(2, '0')}-aaaaaaaaaaaa`,
+      masked: `AIza...${String(index + 1).padStart(2, '0')}`,
+      isPrimary: index === 0,
+      createdAt: 1000 + index,
+    })));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    openSettingsPanel();
+
+    const keyList = await screen.findByTestId('gemini-key-list');
+    expect(keyList).toHaveClass('max-h-64', 'overflow-y-auto');
+    expect(within(keyList).getAllByTestId('api-key-row')).toHaveLength(12);
+    expect(within(keyList).getAllByRole('button', { name: /Test|Test Et/i })).toHaveLength(12);
+    expect(within(keyList).getAllByRole('button', { name: /Delete|Sil/i })).toHaveLength(12);
+  });
+
   it('shows the Pending status pill for a freshly added Gemini key', async () => {
     render(<App />);
 

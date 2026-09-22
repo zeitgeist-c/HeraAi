@@ -2,6 +2,18 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.4',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'Çok sayıda API anahtarı için kompakt, simge tabanlı ve bağımsız kaydırılabilir anahtar listesi eklendi',
+      ],
+      en: [
+        'Added a compact, icon-based, independently scrollable key list for large API-key pools',
+      ],
+    },
+  },
+  {
     version: '1.10.3',
     date: '2026-09-22',
     changes: {
