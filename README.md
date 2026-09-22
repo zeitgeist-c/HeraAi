@@ -46,7 +46,7 @@ npm run dev      # HMR dev server
 npm run preview  # preview production build
 npm run lint     # eslint — run before committing
 npm run test     # vitest + jsdom (chrome APIs mocked)
-npm run package  # release/HeraAi-<version>.zip (currently 1.10.2)
+npm run package  # release/HeraAi-<version>.zip (currently 1.10.3)
 ```
 
 ## Project structure

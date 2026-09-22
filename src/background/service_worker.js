@@ -41,6 +41,7 @@ import {
   installCloudSyncListeners,
   linkCloudSyncDevice,
   listCloudSyncDevices,
+  regenerateCloudRecoveryCode,
   revokeCloudSyncDevice,
   runCloudSync,
   setCloudSyncPaused,
@@ -1824,6 +1825,7 @@ const SYNC_REQUEST_TYPES = new Set([
   'SYNC_DISCONNECT',
   'SYNC_EXPORT_BACKUP',
   'SYNC_IMPORT_BACKUP',
+  'SYNC_REGENERATE_RECOVERY',
 ]);
 
 /**
@@ -1875,6 +1877,8 @@ async function handleSyncRequest(message) {
         return { ok: true, backup: await exportEncryptedBackup() };
       case 'SYNC_IMPORT_BACKUP':
         return { ok: true, ...(await importEncryptedBackup(message.backup)) };
+      case 'SYNC_REGENERATE_RECOVERY':
+        return { ok: true, ...(await regenerateCloudRecoveryCode()) };
       default:
         return { ok: false, errorCode: 'sync_unknown_request' };
     }

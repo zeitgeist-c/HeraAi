@@ -26,6 +26,11 @@
             "save_recovery_title": "Save your recovery code now",
             "save_recovery_description": "This code is shown only now. Without it, you cannot link another browser.",
             "copied": "Recovery code copied.",
+            "recovery_management_title": "Recovery code",
+            "recovery_management_description": "If this device is linked, you can create a new recovery code. Creating one invalidates any previous code.",
+            "regenerate_recovery": "Create a new recovery code",
+            "regenerate_recovery_confirm": "Create a new recovery code? Any previous recovery code will become invalid.",
+            "recovery_regenerated": "A new recovery code was created. Store it somewhere safe.",
             "status_active": "Sync active",
             "status_paused": "Sync paused",
             "last_sync": "Last sync",
@@ -91,7 +96,6 @@
             "add_failed": "Failed to add key",
             "last_used": "Last used",
             "cooldown_until": "Cooldown until",
-            "security_warning": "API keys are stored in this browser's local storage on this device only. Suitable for personal use. Do not share your keys with anyone.",
             "show_key": "Show",
             "hide_key": "Hide",
             "status_success": "Success",
@@ -103,7 +107,6 @@
             "pause": "Pause key",
             "resume": "Resume key",
             "usage_mode_title": "API key usage mode",
-            "usage_mode_description": "This applies to every provider, while Gemini, Tavily, OpenRouter, and Ollama keys remain isolated within their own pools.",
             "usage_mode_primary": "Use primary keys",
             "usage_mode_balanced": "Rotate healthy keys",
             "last_error": "Last error: {{minutes}} min ago",
@@ -116,8 +119,7 @@
             "test_service_unavailable": "The provider is temporarily unavailable. Please retry shortly.",
             "test_billing_required": "This model requires billing or project access.",
             "test_permission_denied": "This API key does not have permission to use the selected model.",
-            "test_unknown": "Test failed",
-            "test_usage_warning": "Key tests send a small real request and may use a small amount of quota or search credit."
+            "test_unknown": "Test failed"
         },
         "general": {
             "theme_title": "Appearance Theme",
@@ -128,8 +130,7 @@
             "accent_color": "Accent Color",
             "custom_accent_color": "Custom accent color",
             "sources_title": "Show Sources",
-            "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged.",
-            "voice_api_notice": "Voice features use your Gemini API key and may incur API usage. Audio is processed in memory and is not saved."
+            "sources_description": "Show clickable source cards below research answers. Citation markers in the answer remain unchanged."
         },
         "ai": {
             "system_prompt_title": "System Prompt (Role)",

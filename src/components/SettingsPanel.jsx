@@ -8,7 +8,6 @@ import {
   Key,
   Eye,
   EyeOff,
-  ShieldAlert,
   ChevronDown,
   ExternalLink,
   Pause,
@@ -403,9 +402,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
             {t('setup.keys.add_btn')}
           </button>
         </div>
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
-          {t('setup.keys.test_usage_warning')}
-        </p>
         {keysList.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('setup.keys.no_keys')}</p>
         ) : (
@@ -522,13 +518,16 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         <div className="hera-section-card min-h-[300px] shrink-0 p-3.5">
           {activeTab === 'api' && (
             <div className="hera-fade-in flex flex-col gap-4">
-              <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-amber-700 dark:text-amber-300">
-                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                <p className="text-[11px] leading-relaxed">{t('setup.keys.security_warning')}</p>
+              <div className="flex flex-col gap-2">
+                {KEY_PROVIDERS.map(({ id }) => renderProviderCard(id))}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="hera-fade-in flex flex-col gap-5">
               <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-3">
                 <p className="text-xs font-semibold text-foreground">{t('setup.keys.usage_mode_title')}</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t('setup.keys.usage_mode_description')}</p>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {[
                     ['primary', t('setup.keys.usage_mode_primary')],
@@ -550,14 +549,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                   ))}
                 </div>
               </div>
-              <div className="flex flex-col gap-2">
-                {KEY_PROVIDERS.map(({ id }) => renderProviderCard(id))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'settings' && (
-            <div className="hera-fade-in flex flex-col gap-5">
               <div className="flex flex-col gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   {t('setup.general.theme_title')}
@@ -647,10 +638,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                   />
                 </button>
               </div>
-
-              <p className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-[11px] leading-relaxed text-muted-foreground">
-                {t('setup.general.voice_api_notice')}
-              </p>
 
               <div className="flex flex-col gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
