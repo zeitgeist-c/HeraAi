@@ -11,12 +11,16 @@ import {
   ShieldAlert,
   ChevronDown,
   ExternalLink,
+  Pause,
+  Play,
+  Cloud,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { notifyError, notifySuccess } from '../lib/notify'
 import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
+import SyncPanel from './SyncPanel'
 
 const AVAILABLE_LANGUAGES = [
   { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
@@ -32,6 +36,9 @@ const KEY_PROVIDERS = [
 
 function computeStatus(key) {
   const now = Date.now()
+  if (key.status === 'paused') return 'paused'
+  if (key.status === 'invalid') return 'invalid'
+  if (key.status === 'cooldown' && key.cooldownUntil && key.cooldownUntil > now) return 'rate_limited'
   if (key.lastErrorType === 'rate_limited' && key.cooldownUntil && key.cooldownUntil > now) return 'rate_limited'
   if (key.lastErrorType === 'quota_exceeded') return 'quota_exceeded'
   if (key.lastErrorType === 'invalid') return 'invalid'
@@ -48,6 +55,7 @@ function statusPillClasses(status) {
   if (status === 'rate_limited') return 'bg-amber-500/10 text-amber-500 border-amber-500/20'
   if (status === 'quota_exceeded') return 'bg-red-500/10 text-red-500 border-red-500/20'
   if (status === 'invalid') return 'bg-red-500/10 text-red-500 border-red-500/20'
+  if (status === 'paused') return 'bg-slate-500/10 text-slate-500 border-slate-500/20'
   return 'bg-secondary text-muted-foreground border-border'
 }
 
@@ -76,6 +84,9 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
   const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
   const [showSources, setShowSources] = useState(currentConfig?.showSources === true)
+  const [apiKeyUsageMode, setApiKeyUsageMode] = useState(
+    currentConfig?.apiKeyUsageMode === 'balanced_rotation' ? 'balanced_rotation' : 'primary',
+  )
 
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
@@ -165,6 +176,14 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     await refreshKeys(provider)
   }
 
+  const handleTogglePaused = async (provider, key) => {
+    await updateKeyMetadata(provider, key.id, {
+      status: key.status === 'paused' ? 'ready' : 'paused',
+      ...(key.status === 'paused' ? { cooldownUntil: null, failCount: 0 } : {}),
+    })
+    await refreshKeys(provider)
+  }
+
   const applyTestResult = async (provider, id, result) => {
     if (result.success) {
       await updateKeyMetadata(provider, id, {
@@ -250,6 +269,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       customPrimaryColor,
       language: selectedLanguage,
       showSources,
+      apiKeyUsageMode,
     }
 
     chrome.storage.local.set(newConfig, () => {
@@ -297,6 +317,15 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           >
             {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
             {testing ? t('setup.keys.testing') : t('setup.keys.test_btn')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTogglePaused(provider, key)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 hover:bg-secondary/60"
+            title={key.status === 'paused' ? t('setup.keys.resume') : t('setup.keys.pause')}
+            aria-label={key.status === 'paused' ? t('setup.keys.resume') : t('setup.keys.pause')}
+          >
+            {key.status === 'paused' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
           </button>
           {!key.isPrimary && (
             <button
@@ -481,6 +510,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           >
             <Sparkles className="h-3.5 w-3.5" /> {t('setup.tabs.general')}
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('sync')}
+            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'sync' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <Cloud className="h-3.5 w-3.5" /> {t('setup.tabs.sync')}
+          </button>
         </div>
 
         <div className="hera-section-card min-h-[300px] shrink-0 p-3.5">
@@ -489,6 +525,30 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-amber-700 dark:text-amber-300">
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                 <p className="text-[11px] leading-relaxed">{t('setup.keys.security_warning')}</p>
+              </div>
+              <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-3">
+                <p className="text-xs font-semibold text-foreground">{t('setup.keys.usage_mode_title')}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t('setup.keys.usage_mode_description')}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {[
+                    ['primary', t('setup.keys.usage_mode_primary')],
+                    ['balanced_rotation', t('setup.keys.usage_mode_balanced')],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setApiKeyUsageMode(value)}
+                      aria-pressed={apiKeyUsageMode === value}
+                      className={`min-h-10 rounded-lg border px-2 text-[11px] font-semibold transition-colors ${
+                        apiKeyUsageMode === value
+                          ? 'border-primary/40 bg-primary/10 text-primary'
+                          : 'border-border/70 bg-background/50 text-muted-foreground hover:bg-secondary/60'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex flex-col gap-2">
                 {KEY_PROVIDERS.map(({ id }) => renderProviderCard(id))}
@@ -606,16 +666,17 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               </div>
             </div>
           )}
+          {activeTab === 'sync' && <SyncPanel />}
         </div>
 
-        <button
+        {activeTab !== 'sync' && <button
           type="button"
           onClick={handleSave}
           className="inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/15 transition-all hover:brightness-105 active:scale-[0.99]"
         >
           <Save className="h-4 w-4" />
           {t('setup.api.save_btn')}
-        </button>
+        </button>}
       </div>
     </div>
   )

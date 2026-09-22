@@ -1,5 +1,6 @@
 import { getApps, initializeApp } from 'firebase/app'
 import { getAuth, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth/web-extension'
+import { getFirestore } from 'firebase/firestore'
 
 /**
  * Firebase web konfigurasyonu derleme sirasinda (.env.local uzerinden) gomulur.
@@ -29,6 +30,12 @@ export function getFirebaseWebConfig() {
 }
 
 let cachedAuth = null
+let cachedFirestore = null
+
+export function getFirebaseApp() {
+  if (!isFirebaseConfigured()) throw new Error('firebase_not_configured')
+  return getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig)
+}
 
 /**
  * Service worker ve uzanti sayfalari icin Firebase Auth ornegi dondurur.
@@ -38,7 +45,7 @@ let cachedAuth = null
 export function getFirebaseAuth() {
   if (!isFirebaseConfigured()) throw new Error('firebase_not_configured')
   if (cachedAuth) return cachedAuth
-  const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig)
+  const app = getFirebaseApp()
   try {
     cachedAuth = initializeAuth(app, { persistence: indexedDBLocalPersistence })
   } catch {
@@ -46,4 +53,10 @@ export function getFirebaseAuth() {
     cachedAuth = getAuth(app)
   }
   return cachedAuth
+}
+
+export function getFirebaseFirestore() {
+  if (cachedFirestore) return cachedFirestore
+  cachedFirestore = getFirestore(getFirebaseApp())
+  return cachedFirestore
 }

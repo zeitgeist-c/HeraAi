@@ -11,41 +11,73 @@
  */
 
 import { getDefaultVault } from './keyVault'
+import { createStorageAdapter, migrateLegacyKeys } from './v194Migration'
 
 export { PROVIDERS } from './keyVault'
 
+async function getReadyVault() {
+  const vault = await getDefaultVault()
+  const storage = createStorageAdapter()
+  if (storage.available) await migrateLegacyKeys({ storage, vault })
+  return vault
+}
+
+async function markVaultChanged(extra = {}) {
+  if (!globalThis.chrome?.storage?.local) return
+  await globalThis.chrome.storage.local.set({
+    syncVaultUpdatedAt: Date.now(),
+    ...extra,
+  })
+}
+
 export async function getKeys(provider) {
-  return (await getDefaultVault()).listKeys(provider)
+  return (await getReadyVault()).listKeys(provider)
 }
 
 export async function getRawKey(provider, id) {
-  return (await getDefaultVault()).getRawKey(provider, id)
+  return (await getReadyVault()).getRawKey(provider, id)
 }
 
 export async function addKey(provider, rawKey, secenekler) {
-  return (await getDefaultVault()).addKey(provider, rawKey, secenekler)
+  const result = await (await getReadyVault()).addKey(provider, rawKey, secenekler)
+  await markVaultChanged()
+  return result
 }
 
 export async function removeKey(provider, id) {
-  return (await getDefaultVault()).removeKey(provider, id)
+  const removed = await (await getReadyVault()).removeKey(provider, id)
+  if (removed) {
+    const existing = await globalThis.chrome?.storage?.local?.get?.(['syncKeyTombstones'])
+    await markVaultChanged({
+      syncKeyTombstones: {
+        ...(existing?.syncKeyTombstones || {}),
+        [`${provider}:${id}`]: Date.now(),
+      },
+    })
+  }
+  return removed
 }
 
 export async function setPrimary(provider, id) {
-  return (await getDefaultVault()).setPrimary(provider, id)
+  const result = await (await getReadyVault()).setPrimary(provider, id)
+  if (result) await markVaultChanged()
+  return result
 }
 
 export async function updateKeyMetadata(provider, id, updates) {
-  return (await getDefaultVault()).updateKeyMetadata(provider, id, updates)
+  const result = await (await getReadyVault()).updateKeyMetadata(provider, id, updates)
+  if (result) await markVaultChanged()
+  return result
 }
 
 export async function getAllKeysForRequest(provider) {
-  return (await getDefaultVault()).getAllKeysForRequest(provider)
+  return (await getReadyVault()).getAllKeysForRequest(provider)
 }
 
 export async function resolveKeysForRequest(provider) {
-  return (await getDefaultVault()).resolveKeysForRequest(provider)
+  return (await getReadyVault()).resolveKeysForRequest(provider)
 }
 
 export async function countKeys() {
-  return (await getDefaultVault()).countKeys()
+  return (await getReadyVault()).countKeys()
 }

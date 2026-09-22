@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, History, Loader2, Pencil, Star, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Cloud, HardDrive, History, Loader2, Pencil, Star, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { findChatMatchIds } from '../lib/chatSearch'
@@ -13,6 +13,7 @@ function HistoryOverlay({
   onDelete,
   onRename,
   onToggleStar,
+  onToggleSyncPolicy,
   onRequestBulkDelete,
   bulkDeleteOpen,
   onCancelBulkDelete,
@@ -200,6 +201,18 @@ function HistoryOverlay({
         )}
 
         <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => onToggleSyncPolicy?.(session.id)}
+            aria-label={t(session.syncPolicy === 'local_only' ? 'chat.sync_policy.enable' : 'chat.sync_policy.disable')}
+            title={t(session.syncPolicy === 'local_only' ? 'chat.sync_policy.enable' : 'chat.sync_policy.disable')}
+            aria-pressed={session.syncPolicy !== 'local_only'}
+            className={`hera-icon-button h-7 w-7 opacity-70 group-hover:opacity-100 ${
+              session.syncPolicy === 'local_only' ? 'text-amber-500' : 'text-primary'
+            }`}
+          >
+            {session.syncPolicy === 'local_only' ? <HardDrive className="h-3.5 w-3.5" /> : <Cloud className="h-3.5 w-3.5" />}
+          </button>
           <button
             ref={(node) => {
               if (node) renameTriggerRefs.current.set(session.id, node)

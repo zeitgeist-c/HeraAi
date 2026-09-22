@@ -1,14 +1,11 @@
 /**
  * HeraAi 1.10.0 — 1.9.4 açık anahtar göçü (Aşama 6).
  *
- * Sıra önemlidir: önce geri dönüş yedeği yazılır, sonra şifreli kasa doldurulur,
- * sonra her kaydın gerçekten çözülebildiği doğrulanır ve ancak bundan sonra
- * `chrome.storage.local` içindeki açık anahtarlar silinir. Herhangi bir adım
- * başarısız olursa açık anahtarlar yerinde kalır — kullanıcı asla anahtarsız
- * kalmaz.
- *
- * Kullanıcı 1.9.4'e dönerse `apiKeys_v194_backup` alanından tek çağrıyla geri
- * yükleyebilir (`restoreLegacyKeysFromBackup`).
+ * Sıra önemlidir: geçici geri dönüş kopyası yazılır, şifreli kasa doldurulur,
+ * her kaydın gerçekten çözülebildiği doğrulanır ve ancak bundan sonra açık
+ * anahtarlarla geçici kopya birlikte silinir. Herhangi bir adım başarısızsa
+ * açık kaynak alanları yerinde kalır; başarılı göçten sonra kalıcı depolamada
+ * şifrelenmemiş anahtar bırakılmaz.
  */
 
 import { PROVIDERS } from './keyVault'
@@ -39,14 +36,14 @@ export function createStorageAdapter(area) {
   }
   return {
     available: true,
-    get(keys) {
-      return new Promise((resolve) => alan.get(keys, (result) => resolve(result || {})))
+    async get(keys) {
+      return (await alan.get(keys)) || {}
     },
-    set(data) {
-      return new Promise((resolve) => alan.set(data, () => resolve()))
+    async set(data) {
+      await alan.set(data)
     },
-    remove(keys) {
-      return new Promise((resolve) => alan.remove(keys, () => resolve()))
+    async remove(keys) {
+      await alan.remove(keys)
     },
   }
 }
@@ -112,10 +109,16 @@ export async function readBackup(storage) {
  * @returns {{migrated:number, skipped:number, backupWritten:boolean, verified:number, reason?:string}}
  */
 export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
+  if (await hasCompletedMigration(storage)) {
+    // 1.10.0'ın bıraktığı açık geri dönüş kopyasını 1.10.1 temizler.
+    await storage.remove([BACKUP_STORAGE_KEY])
+    return { migrated: 0, skipped: 0, backupWritten: false, verified: 0, reason: 'already_migrated' }
+  }
   const legacy = await readLegacyKeys(storage)
   const plan = buildMigrationPlan(legacy)
 
   if (plan.total === 0) {
+    await storage.set({ [MIGRATION_FLAG]: now })
     return { migrated: 0, skipped: 0, backupWritten: false, verified: 0, reason: 'nothing_to_migrate' }
   }
 
@@ -171,16 +174,16 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
     })
   }
 
-  // 5) Doğrulama geçti: açık alanlar temizlenir, göç damgalanır.
-  await storage.remove(Object.values(LEGACY_STORAGE_KEYS))
+  // 5) Doğrulama geçti: açık alanlar ve geçici geri dönüş kopyası temizlenir.
+  // Şifrelenmemiş API anahtarı kalıcı depolamada bırakılmaz.
+  await storage.remove([...Object.values(LEGACY_STORAGE_KEYS), BACKUP_STORAGE_KEY])
   await storage.set({ [MIGRATION_FLAG]: now })
 
   return { migrated, skipped, backupWritten: true, verified: yazilanlar.length }
 }
 
 /**
- * Geri dönüş: yedekteki açık anahtarları `chrome.storage.local` alanlarına
- * geri yazar (1.9.4 uyumluluğu için).
+ * Yalnız yarım kalmış eski bir göçten kalan geçici kopyayı geri yükler.
  */
 export async function restoreLegacyKeysFromBackup({ storage }) {
   const yedek = await readBackup(storage)

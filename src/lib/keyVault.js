@@ -21,6 +21,8 @@ import {
   openDatabase,
 } from './idb'
 import { decryptJson, encryptJson, generateDeviceKey } from './syncCrypto'
+import { isKeyUsable } from './keyHealth'
+import { KEY_USAGE_MODE, orderKeysForRequest } from './keyRotation'
 
 export const PROVIDERS = Object.freeze(['gemini', 'tavily', 'openrouter', 'ollama'])
 
@@ -38,6 +40,17 @@ function yeniId(provider) {
 
 function saglayiciDogrula(provider) {
   if (!PROVIDERS.includes(provider)) throw new Error(`Invalid provider: ${provider}`)
+}
+
+async function readUsageMode() {
+  try {
+    const stored = await globalThis.chrome?.storage?.local?.get?.(['apiKeyUsageMode'])
+    return stored?.apiKeyUsageMode === KEY_USAGE_MODE.BALANCED_ROTATION
+      ? KEY_USAGE_MODE.BALANCED_ROTATION
+      : KEY_USAGE_MODE.PRIMARY
+  } catch {
+    return KEY_USAGE_MODE.PRIMARY
+  }
 }
 
 /**
@@ -217,7 +230,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       const beklemede = []
       for (const kayit of kayitlar) {
         if (kayit.cooldownUntil && kayit.cooldownUntil > now) beklemede.push(kayit)
-        else hazir.push(kayit)
+        else if (isKeyUsable(kayit, { now })) hazir.push(kayit)
       }
 
       if (hazir.length === 0) {
@@ -230,11 +243,17 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
         }
       }
 
+      const mode = await readUsageMode()
+      const sirali = orderKeysForRequest(hazir, mode)
+      if (sirali[0]) {
+        sirali[0].lastUsedAt = now
+        await idbPut(db, store, sirali[0])
+      }
       const keys = []
-      for (const kayit of sortKeyMetadata(hazir)) {
+      for (const kayit of sirali) {
         keys.push({ id: kayit.id, key: await coz(kayit), isPrimary: Boolean(kayit.isPrimary) })
       }
-      return { keys, allInCooldown: false, earliestCooldownEnd: null }
+      return { keys, mode, allInCooldown: false, earliestCooldownEnd: null }
     },
 
     /** Kasadaki toplam kayıt sayısı (sağlayıcı bazında). */

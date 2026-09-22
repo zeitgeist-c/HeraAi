@@ -126,18 +126,15 @@ describe('v194Migration goc akisi', () => {
     expect((await vault.resolveKeysForRequest('ollama')).keys).toHaveLength(1)
   })
 
-  it('goc oncesi geri donus yedegi yazilir', async () => {
+  it('goc sirasindaki gecici geri donus yedegi basaridan sonra silinir', async () => {
     const storage = bellekStorage(ornekVeri())
     const { vault } = await kasaKur()
 
     await migrateLegacyKeys({ storage, vault, now: 777 })
 
     const yedek = await readBackup(storage)
-    expect(yedek).toBeTruthy()
-    expect(yedek.version).toBe('1.9.4')
-    expect(yedek.savedAt).toBe(777)
-    expect(countBackupKeys(yedek)).toBe(4)
-    expect(yedek.keys.gemini[0].key).toBe('AIza-gemini-ana-1234567890')
+    expect(yedek).toBeNull()
+    expect(countBackupKeys(yedek)).toBe(0)
   })
 
   it('siralama ve kullanim gecmisi korunur', async () => {
@@ -163,7 +160,7 @@ describe('v194Migration goc akisi', () => {
     expect(sonuc.reason).toBe('nothing_to_migrate')
     expect(sonuc.backupWritten).toBe(false)
     expect(storage.veri[BACKUP_STORAGE_KEY]).toBeUndefined()
-    expect(storage.veri[MIGRATION_FLAG]).toBeUndefined()
+    expect(storage.veri[MIGRATION_FLAG]).toBe(777)
   })
 
   it('mukerrer anahtar atlanir, goc tamamlanir', async () => {
@@ -178,7 +175,7 @@ describe('v194Migration goc akisi', () => {
     expect(storage.veri[MIGRATION_FLAG]).toBe(777)
   })
 
-  it('mevcut yedegin uzerine yazilmaz', async () => {
+  it('eski surumden kalan acik yedegi temizler', async () => {
     const storage = bellekStorage({
       ...ornekVeri(),
       [BACKUP_STORAGE_KEY]: { savedAt: 111, version: '1.9.4', keys: { gemini: [{ id: 'eski', key: 'AIza-eski-1234567890' }] } },
@@ -187,16 +184,25 @@ describe('v194Migration goc akisi', () => {
     await migrateLegacyKeys({ storage, vault, now: 777 })
 
     const yedek = await readBackup(storage)
-    expect(yedek.savedAt).toBe(111)
-    expect(countBackupKeys(yedek)).toBe(1)
+    expect(yedek).toBeNull()
   })
 })
 
 describe('v194Migration geri donus', () => {
   it('yedekteki anahtarlari eski alanlara geri yazar', async () => {
-    const storage = bellekStorage(ornekVeri())
-    const { vault } = await kasaKur()
-    await migrateLegacyKeys({ storage, vault, now: 777 })
+    const legacy = ornekVeri()
+    const storage = bellekStorage({
+      [BACKUP_STORAGE_KEY]: {
+        savedAt: 777,
+        version: '1.9.4',
+        keys: {
+          gemini: legacy[LEGACY_STORAGE_KEYS.gemini],
+          tavily: legacy[LEGACY_STORAGE_KEYS.tavily],
+          openrouter: legacy[LEGACY_STORAGE_KEYS.openrouter],
+          ollama: legacy[LEGACY_STORAGE_KEYS.ollama],
+        },
+      },
+    })
 
     const sonuc = await restoreLegacyKeysFromBackup({ storage })
 

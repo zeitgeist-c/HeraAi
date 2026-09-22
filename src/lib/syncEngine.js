@@ -35,7 +35,6 @@ import {
 } from './idb'
 import {
   buildEntityDocument,
-  buildTombstoneDocument,
   buildRevisionId,
   compareEntityVersions,
   deriveOpaqueId,
@@ -242,7 +241,11 @@ export function createSyncEngine({
       if (yuk === null || yuk === undefined) return { opaqueEntityId, skipped: true }
     }
 
-    const zarf = await encryptJson(subkeys.dataEncryptionKey, silme ? { deleted: true } : yuk, aad)
+    const zarf = await encryptJson(
+      subkeys.dataEncryptionKey,
+      silme ? { deleted: true, storageKey: kayit.storageKey, logicalId: kayit.logicalId } : yuk,
+      aad,
+    )
     const temel = {
       ownerUid: uid,
       entityVersion: kayit.entityVersion,
@@ -250,9 +253,11 @@ export function createSyncEngine({
       nonce: zarf.nonce,
       ciphertext: zarf.ciphertext,
     }
-    const belge = silme
-      ? buildTombstoneDocument(temel)
-      : buildEntityDocument({ ...temel, entityType: kayit.entityType })
+    const belge = buildEntityDocument({
+      ...temel,
+      entityType: kayit.entityType,
+      deleted: silme,
+    })
 
     // Mevcut bir varlığın güncellenmesinde önceki sürüm saklanır.
     const onceki = readLocalVersion
@@ -335,7 +340,7 @@ export function createSyncEngine({
   /** Adım 7-8: AAD doğrulaması, sürüm karşılaştırması, yerel uygulama. */
   async function uzakUygula(uid, subkeys, uzak) {
     if (!uzak?.opaqueEntityId || !uzak.ciphertext || !uzak.nonce) return false
-    const entityType = uzak.entityType === 'tombstone' ? 'tombstone' : uzak.entityType
+    const entityType = uzak.entityType
     const aad = buildAad({ ownerUid: uid, opaqueEntityId: uzak.opaqueEntityId, entityType })
     let yuk
     try {
