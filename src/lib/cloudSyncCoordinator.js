@@ -340,6 +340,7 @@ async function createRuntime() {
       } else if (!existing && payload.key) {
         await vault.addKey(provider, payload.key, {
           id: logicalId,
+          label: payload.metadata?.label,
           isPrimary: payload.metadata?.isPrimary,
           createdAt: payload.metadata?.createdAt,
           fingerprint: payload.metadata?.fingerprint,
@@ -691,6 +692,7 @@ export async function importEncryptedBackup(envelope) {
       try {
         await runtime.vault.addKey(provider, key.key, {
           id: key.id,
+          label: key.label,
           isPrimary: key.isPrimary,
           createdAt: key.createdAt,
           fingerprint: key.fingerprint,

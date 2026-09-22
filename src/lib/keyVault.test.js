@@ -100,6 +100,17 @@ describe('keyVault sifreli saklama', () => {
 })
 
 describe('keyVault ekleme ve mukerrer engelleme', () => {
+  it('anahtar adini kirpar, sinirlar ve maskeli metadata ile dondurur', async () => {
+    const { vault } = await kasaKur()
+    await vault.addKey('gemini', 'AIza-isimli-anahtar-1234567890', {
+      label: `  ${'A'.repeat(70)}  `,
+    })
+
+    const [kayit] = await vault.listKeys('gemini')
+    expect(kayit.label).toBe('A'.repeat(60))
+    expect(kayit.masked).toBe('AIza...7890')
+  })
+
   it('bos anahtar reddedilir', async () => {
     const { vault } = await kasaKur()
     await expect(vault.addKey('gemini', '   ')).rejects.toThrow('key_empty_error')
