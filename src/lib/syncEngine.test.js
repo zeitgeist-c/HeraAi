@@ -353,6 +353,79 @@ describe('gönderim', () => {
     expect(sonuc.batches).toBe(3)
     expect(transport.pushEntities).toHaveBeenCalledTimes(3)
   })
+
+  it('700 KiB sinirini asan sohbeti ayri sifreli parcalara boler', async () => {
+    transport.setEntityChunks = vi.fn(async () => undefined)
+    transport.deleteStaleEntityChunks = vi.fn(async () => 0)
+    transport.pushEntities.mockImplementation(async ({ documents }) => ({
+      applied: documents.map(item => item.opaqueEntityId),
+    }))
+    const motor = motorKur()
+    yukKoy('sessions', 'buyuk-sohbet', { id: 'buyuk-sohbet', content: 'x'.repeat(800000) })
+    await motor.enqueue({
+      storageKey: 'sessions',
+      logicalId: 'buyuk-sohbet',
+      entityVersion: await surum(1000),
+    })
+
+    const sonuc = await motor.runOnce()
+    const chunkCall = transport.setEntityChunks.mock.calls[0]
+    const manifest = transport.pushEntities.mock.calls[0][0].documents[0].document
+    expect(sonuc.pushed).toBe(1)
+    expect(chunkCall[3].length).toBeGreaterThan(1)
+    expect(manifest.chunkCount).toBe(chunkCall[3].length)
+    expect(manifest.chunkRevision).toBe(chunkCall[2])
+    expect(manifest).not.toHaveProperty('ciphertext')
+    expect(manifest).not.toHaveProperty('nonce')
+  })
+
+  it('parcali sohbeti eksiksiz yeniden birlestirip uygular', async () => {
+    let manifest
+    let chunks
+    transport.setEntityChunks = vi.fn(async (_uid, _opaque, _revision, value) => { chunks = value })
+    transport.deleteStaleEntityChunks = vi.fn(async () => 0)
+    transport.pushEntities.mockImplementation(async ({ documents }) => {
+      manifest = { ...documents[0].document, opaqueEntityId: documents[0].opaqueEntityId }
+      return { applied: [documents[0].opaqueEntityId] }
+    })
+    const sender = motorKur()
+    yukKoy('sessions', 'buyuk-tur', { id: 'buyuk-tur', content: 'ö'.repeat(500000) })
+    await sender.enqueue({
+      storageKey: 'sessions',
+      logicalId: 'buyuk-tur',
+      entityVersion: await surum(2000),
+    })
+    await sender.runOnce()
+
+    uygulananlar = []
+    transport.getEntityChunks = vi.fn(async () => chunks)
+    transport.pullEntities.mockResolvedValueOnce({
+      documents: [{ ...manifest, serverUpdatedAt: 3000 }],
+      cursor: null,
+    })
+    const receiver = motorKur()
+    const sonuc = await receiver.runOnce()
+    expect(sonuc.applied).toBe(1)
+    expect(uygulananlar[0].payload.content).toHaveLength(500000)
+  })
+
+  it('daha yeni uzak surum kazandiginda yuklenen gecici parcalari temizler', async () => {
+    transport.setEntityChunks = vi.fn(async () => undefined)
+    transport.deleteEntityChunksRevision = vi.fn(async () => 2)
+    transport.deleteStaleEntityChunks = vi.fn(async () => 0)
+    transport.pushEntities.mockResolvedValueOnce({ applied: [] })
+    const motor = motorKur()
+    yukKoy('sessions', 'conflict', { id: 'conflict', content: 'x'.repeat(800000) })
+    await motor.enqueue({
+      storageKey: 'sessions',
+      logicalId: 'conflict',
+      entityVersion: await surum(1000),
+    })
+
+    await motor.runOnce()
+    expect(transport.deleteEntityChunksRevision).toHaveBeenCalledTimes(1)
+    expect(transport.deleteStaleEntityChunks).not.toHaveBeenCalled()
+  })
 })
 
 describe('çekim ve uygulama', () => {
@@ -365,6 +438,7 @@ describe('çekim ve uygulama', () => {
     transport.pullEntities.mockResolvedValueOnce({
       documents: [
         {
+          schemaVersion: 1,
           opaqueEntityId: opaque,
           entityType: 'session',
           entityVersion: { wallTimeMs: 3000, logicalCounter: 0, deviceId: 'cihaz-b' },
@@ -402,6 +476,7 @@ describe('çekim ve uygulama', () => {
     transport.pullEntities.mockResolvedValueOnce({
       documents: [
         {
+          schemaVersion: 1,
           opaqueEntityId: opaque,
           entityType: 'session',
           entityVersion: { wallTimeMs: 3000, logicalCounter: 0, deviceId: 'cihaz-b' },
@@ -414,12 +489,11 @@ describe('çekim ve uygulama', () => {
       cursor: null,
     })
 
-    const sonuc = await motor.runOnce()
-    expect(sonuc.applied).toBe(0)
+    await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
     expect(uygulananlar).toHaveLength(0)
-    // Bozuk kayıt çevrimi tıkamaz; imleç yine ilerler.
+    // Bozuk kayıt açık hata verir ve çekim imlecini ilerletmez.
     const imlec = await motor.readCursor()
-    expect(imlec.serverUpdatedAt).toBe(6000)
+    expect(imlec).toBeNull()
   })
 
   it('yerelde daha yeni sürüm varsa uzak kaydı uygulamaz', async () => {
@@ -433,6 +507,7 @@ describe('çekim ve uygulama', () => {
     transport.pullEntities.mockResolvedValueOnce({
       documents: [
         {
+          schemaVersion: 1,
           opaqueEntityId: opaque,
           entityType: 'session',
           entityVersion: { wallTimeMs: 1000, logicalCounter: 0, deviceId: 'cihaz-b' },
@@ -459,6 +534,7 @@ describe('çekim ve uygulama', () => {
     transport.pullEntities.mockResolvedValueOnce({
       documents: [
         {
+          schemaVersion: 1,
           opaqueEntityId: opaque,
           entityType: 'tombstone',
           entityVersion: { wallTimeMs: 8000, logicalCounter: 0, deviceId: 'cihaz-b' },
@@ -483,6 +559,7 @@ describe('çekim ve uygulama', () => {
       const aad = buildAad({ ownerUid: UID, opaqueEntityId: opaque, entityType: 'session' })
       const zarf = await encryptJson(subkeys.dataEncryptionKey, { id: `sayfa-${sira}` }, aad)
       return {
+        schemaVersion: 1,
         opaqueEntityId: opaque,
         entityType: 'session',
         entityVersion: { wallTimeMs: 1000 + sira, logicalCounter: 0, deviceId: 'cihaz-b' },
@@ -502,6 +579,45 @@ describe('çekim ve uygulama', () => {
     expect(sonuc.applied).toBe(2)
     expect(transport.pullEntities).toHaveBeenCalledTimes(3)
     expect((await motor.readCursor()).serverUpdatedAt).toBe(200)
+  })
+
+  it('eksik parcada yerel veriyi ve imleci degistirmez', async () => {
+    const motor = motorKur()
+    transport.getEntityChunks = vi.fn(async () => [{ index: 0, nonce: 'x', ciphertext: 'y' }])
+    transport.pullEntities.mockResolvedValueOnce({
+      documents: [{
+        schemaVersion: 1,
+        opaqueEntityId: 'chunked',
+        entityType: 'session',
+        entityVersion: { wallTimeMs: 1, logicalCounter: 0, deviceId: 'b' },
+        chunkCount: 2,
+        chunkRevision: 'rev-1',
+        serverUpdatedAt: 6000,
+      }],
+      cursor: null,
+    })
+    await expect(motor.runOnce()).rejects.toThrow('sync_chunk_incomplete')
+    expect(uygulananlar).toHaveLength(0)
+    expect(await motor.readCursor()).toBeNull()
+  })
+
+  it('bilinmeyen sema surumunde yazma ve imlec ilerlemesi yapmaz', async () => {
+    const motor = motorKur()
+    transport.pullEntities.mockResolvedValueOnce({
+      documents: [{
+        schemaVersion: 99,
+        opaqueEntityId: 'future',
+        entityType: 'session',
+        entityVersion: { wallTimeMs: 1, logicalCounter: 0, deviceId: 'b' },
+        nonce: 'x',
+        ciphertext: 'y',
+        serverUpdatedAt: 7000,
+      }],
+      cursor: null,
+    })
+    await expect(motor.runOnce()).rejects.toThrow('sync_version_unsupported')
+    expect(uygulananlar).toHaveLength(0)
+    expect(await motor.readCursor()).toBeNull()
   })
 })
 
@@ -538,14 +654,17 @@ describe('imleç', () => {
   it('ileri gitmeyen imleci kaydetmez', async () => {
     const motor = motorKur()
     await motor.writeCursor({ serverUpdatedAt: 5000, opaqueEntityId: 'x' })
+    const aad = buildAad({ ownerUid: UID, opaqueEntityId: 'y', entityType: 'session' })
+    const zarf = await encryptJson(subkeys.dataEncryptionKey, { id: 'y' }, aad)
     transport.pullEntities.mockResolvedValueOnce({
       documents: [
         {
+          schemaVersion: 1,
           opaqueEntityId: 'y',
           entityType: 'session',
           entityVersion: { wallTimeMs: 1, logicalCounter: 0, deviceId: 'b' },
-          nonce: 'x',
-          ciphertext: 'y',
+          nonce: zarf.nonce,
+          ciphertext: zarf.ciphertext,
           serverUpdatedAt: 4000,
         },
       ],

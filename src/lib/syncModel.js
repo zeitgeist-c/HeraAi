@@ -38,6 +38,7 @@ export const cloudPaths = {
   accountRoot: uid => `users/${uid}/account/root`,
   device: (uid, deviceId) => `users/${uid}/devices/${deviceId}`,
   entity: (uid, opaqueEntityId) => `users/${uid}/entities/${opaqueEntityId}`,
+  entityChunk: (uid, opaqueEntityId, chunkId) => `users/${uid}/entities/${opaqueEntityId}/chunks/${chunkId}`,
   revision: (uid, opaqueEntityId, revisionId) => `users/${uid}/entities/${opaqueEntityId}/revisions/${revisionId}`,
   blob: (uid, opaqueAttachmentId) => `users/${uid}/blobs/${opaqueAttachmentId}`,
   blobChunk: (uid, opaqueAttachmentId, chunkIndex) => `users/${uid}/blobs/${opaqueAttachmentId}/chunks/${chunkIndex}`,
@@ -82,15 +83,6 @@ export async function deriveOpaqueId(hmacKey, entityType, logicalId) {
     throw new Error('opaque_id_logical_missing')
   }
   const payload = new TextEncoder().encode(opaqueNamespace(entityType, logicalId))
-  const signature = await globalThis.crypto.subtle.sign('HMAC', hmacKey, payload)
-  return toHex(signature)
-}
-
-/** Ek dosya kimliği için aynı türetim, `blob:` ad alanıyla. */
-export async function deriveOpaqueAttachmentId(hmacKey, attachmentId) {
-  if (!hmacKey) throw new Error('opaque_id_key_missing')
-  if (!attachmentId) throw new Error('opaque_id_logical_missing')
-  const payload = new TextEncoder().encode(`blob:${attachmentId}`)
   const signature = await globalThis.crypto.subtle.sign('HMAC', hmacKey, payload)
   return toHex(signature)
 }
@@ -270,6 +262,6 @@ export function describeCloudModel() {
     cryptoVersion: CRYPTO_VERSION,
     entityTypes: [...ENTITY_TYPES],
     revisionRetentionDays: REVISION_RETENTION_DAYS,
-    collections: ['account', 'devices', 'entities', 'entities/*/revisions', 'blobs', 'blobs/*/chunks', 'backups'],
+    collections: ['account', 'devices', 'entities', 'entities/*/chunks'],
   }
 }

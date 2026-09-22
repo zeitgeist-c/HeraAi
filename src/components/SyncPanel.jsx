@@ -49,6 +49,7 @@ function SyncPanel() {
   const [devices, setDevices] = useState([])
   const [recoveryCode, setRecoveryCode] = useState('')
   const [recoveryInput, setRecoveryInput] = useState('')
+  const [cleanupResult, setCleanupResult] = useState(null)
   const [busy, setBusy] = useState(null)
   const backupInputRef = useRef(null)
 
@@ -80,7 +81,8 @@ function SyncPanel() {
       await refresh()
       return response
     } catch (error) {
-      notifyError(t('setup.sync.error', { code: error.message }))
+      const translated = t(`setup.sync.errors.${error.message}`, { defaultValue: '' })
+      notifyError(translated || t('setup.sync.error', { code: error.message }))
       return null
     } finally {
       setBusy(null)
@@ -146,6 +148,16 @@ function SyncPanel() {
       t('setup.sync.recovery_regenerated'),
     )
     if (response?.recoveryCode) setRecoveryCode(response.recoveryCode)
+  }
+
+  const handleLegacyCleanup = async () => {
+    if (!globalThis.confirm(t('setup.sync.legacy_cleanup_confirm'))) return
+    const response = await perform(
+      'legacy-cleanup',
+      () => sendMessage({ type: 'SYNC_CLEAN_LEGACY_CLOUD_DATA' }),
+      t('setup.sync.legacy_cleanup_completed'),
+    )
+    if (response?.counts) setCleanupResult(response.counts)
   }
 
   const handleExportBackup = async () => {
@@ -232,6 +244,8 @@ function SyncPanel() {
     )
   }
 
+  const syncBlocked = Number(status.blockedUntil) > Date.now()
+
   return (
     <div className="flex flex-col gap-4">
       {recoveryCode && (
@@ -254,11 +268,24 @@ function SyncPanel() {
           <div><dt className="text-muted-foreground">{t('setup.sync.last_sync')}</dt><dd className="mt-0.5 font-medium">{formatDate(status.lastSyncAt)}</dd></div>
           <div><dt className="text-muted-foreground">{t('setup.sync.pending')}</dt><dd className="mt-0.5 font-medium">{status.pending || 0}</dd></div>
         </dl>
-        {status.lastError && <p className="mt-3 break-all text-[10px] text-destructive">{t('setup.sync.last_error', { code: status.lastError })}</p>}
+        {status.lastError && (
+          <p className="mt-3 break-all text-[10px] text-destructive">
+            {t(`setup.sync.errors.${status.lastErrorCode || status.lastError}`, {
+              defaultValue: t('setup.sync.last_error', { code: status.lastError }),
+            })}
+          </p>
+        )}
+        {syncBlocked && (
+          <p className="mt-2 text-[10px] text-amber-500">{t('setup.sync.blocked_until', { date: formatDate(status.blockedUntil) })}</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-[10px] leading-relaxed text-muted-foreground">
+        {t('setup.sync.attachments_local_notice')}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={handleSync} disabled={busy !== null || status.paused} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:opacity-50">{busy === 'sync' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t('setup.sync.sync_now')}</button>
+        <button type="button" onClick={handleSync} disabled={busy !== null || status.paused || syncBlocked} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:opacity-50">{busy === 'sync' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t('setup.sync.sync_now')}</button>
         <button type="button" onClick={handlePause} disabled={busy !== null} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-secondary disabled:opacity-50">{status.paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{status.paused ? t('setup.sync.resume') : t('setup.sync.pause')}</button>
       </div>
 
@@ -286,6 +313,25 @@ function SyncPanel() {
         <button type="button" onClick={handleRegenerateRecovery} disabled={busy !== null} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border text-[11px] font-semibold hover:bg-secondary disabled:opacity-50">
           {busy === 'recovery-regenerate' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
           {t('setup.sync.regenerate_recovery')}
+        </button>
+      </section>
+
+      <section className="rounded-xl border border-destructive/25 p-3">
+        <h3 className="text-xs font-semibold">{t('setup.sync.legacy_cleanup_title')}</h3>
+        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{t('setup.sync.legacy_cleanup_description')}</p>
+        {cleanupResult && (
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            {t('setup.sync.legacy_cleanup_summary', cleanupResult)}
+          </p>
+        )}
+        {!cleanupResult && status.legacyCleanupCompletedAt && (
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            {t('setup.sync.legacy_cleanup_last_completed', { date: formatDate(status.legacyCleanupCompletedAt) })}
+          </p>
+        )}
+        <button type="button" onClick={handleLegacyCleanup} disabled={busy !== null} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/30 text-[11px] font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50">
+          {busy === 'legacy-cleanup' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          {t('setup.sync.legacy_cleanup_action')}
         </button>
       </section>
 

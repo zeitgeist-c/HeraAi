@@ -119,8 +119,8 @@ export const MESSAGE_FIELD_CONTRACT = {
  */
 export const ATTACHMENT_SYNC_POLICY = {
   metadataSynced: true,
-  binarySynced: true,
-  maxSyncBytes: 3 * 1024 * 1024,
+  binarySynced: false,
+  maxSyncBytes: 0,
   store: 'heraai-attachments',
   missingMetadata: ['id', 'name', 'mimeType', 'size', 'kind', 'availability'],
 }

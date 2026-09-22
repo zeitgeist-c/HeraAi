@@ -593,6 +593,13 @@ function App() {
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => {
+    try {
+      chrome.runtime?.sendMessage?.({ type: 'SYNC_WAKE' }, () => void chrome.runtime?.lastError)
+    } catch {
+      // Senkron özelliği bulunmayan test/tarayıcı bağlamında uygulama açılmaya devam eder.
+    }
+  }, [])
+  useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false

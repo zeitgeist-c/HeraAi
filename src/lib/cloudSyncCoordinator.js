@@ -1,19 +1,7 @@
 import { getCurrentAuthUser, waitForCurrentAuthUser } from './authService'
 import { createFirestoreTransport } from './firestoreTransport'
-import {
-  ATTACHMENT_AVAILABILITY,
-  ATTACHMENT_MANIFEST_STATUS,
-  buildBlobManifest,
-  computeSha256,
-  decryptAttachmentChunks,
-  decryptAttachmentName,
-  encryptAttachmentChunks,
-  encryptAttachmentName,
-  isManifestReady,
-  planAttachmentSync,
-} from './attachmentSync'
-import { getAttachment, putAttachment } from './attachmentStore'
-import { processAttachmentFile } from './fileParsers'
+import { getAttachment } from './attachmentStore'
+import { normalizeSessionAttachmentMetadata } from './attachmentSyncPolicy'
 import { buildBackupPayload, decryptBackup, encryptBackup } from './backupRestore'
 import {
   VAULT_STORES,
@@ -33,7 +21,6 @@ import {
   buildAccountRootDocument,
   buildDeviceDocument,
   createEntityVersion,
-  deriveOpaqueAttachmentId,
 } from './syncModel'
 import {
   deriveSubkeys,
@@ -51,12 +38,15 @@ const SYNC_ENABLED_KEY = 'syncEnabled'
 const SYNC_PAUSED_KEY = 'syncPaused'
 const LAST_SYNC_KEY = 'syncLastSuccessAt'
 const LAST_ERROR_KEY = 'syncLastError'
+const BLOCKED_UNTIL_KEY = 'syncBlockedUntil'
+const LEGACY_CLEANUP_KEY = 'legacyCloudCleanupCompletedAt'
+const ATTACHMENT_POLICY_MIGRATION_KEY = 'attachmentCloudPolicyV2MigratedAt'
 const KEY_CHANGE_MARKER = 'syncVaultUpdatedAt'
 const KEY_TOMBSTONES = 'syncKeyTombstones'
+const AUTO_SYNC_INTERVAL_MS = 15 * 60 * 1000
 
 let runtimePromise = null
 let cachedSubkeys = null
-let syncTimer = null
 let listenerInstalled = false
 const remoteWrites = new Map()
 
@@ -107,6 +97,46 @@ function randomId() {
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+export function mapCloudSyncError(error) {
+  const raw = String(error?.code || error?.message || '').toLowerCase()
+  if (raw.includes('resource-exhausted') || raw.includes('quota')) return 'quota_exceeded'
+  if (raw.includes('permission-denied')) return 'rules_denied'
+  if (raw.includes('unauthenticated') || raw.includes('signed_out')) return 'sync_signed_out'
+  if (raw.includes('unavailable') || raw.includes('network') || raw.includes('offline')) return 'offline'
+  if (raw.includes('version_unsupported')) return 'sync_version_unsupported'
+  if (raw.includes('chunk_incomplete')) return 'sync_chunk_incomplete'
+  if (raw.includes('payload_invalid')) return 'sync_payload_invalid'
+  return 'sync_failed'
+}
+
+export function nextPacificQuotaReset(now = Date.now()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const partsAt = value => Object.fromEntries(
+    formatter.formatToParts(new Date(value)).map(part => [part.type, part.value]),
+  )
+  const current = partsAt(now)
+  const step = 60 * 1000
+  const firstCandidate = Math.floor(now / step) * step + step
+  for (let candidate = firstCandidate; candidate <= now + 48 * 60 * 60 * 1000; candidate += step) {
+    const parts = partsAt(candidate)
+    if (`${parts.year}-${parts.month}-${parts.day}` !== `${current.year}-${current.month}-${current.day}`
+      && parts.hour === '01' && parts.minute === '00') return candidate
+  }
+  return now + 26 * 60 * 60 * 1000
+}
+
+export function cloudSyncWakeReason(status, now = Date.now()) {
+  if (status?.[SYNC_ENABLED_KEY] !== true) return 'disabled'
+  if (status?.[SYNC_PAUSED_KEY] === true) return 'paused'
+  if (Number(status?.[BLOCKED_UNTIL_KEY]) > now) return 'quota_blocked'
+  if (now - Number(status?.[LAST_SYNC_KEY] || 0) < AUTO_SYNC_INTERVAL_MS) return 'recently_synced'
+  return null
+}
+
 async function getOrCreateDeviceId() {
   const stored = await storageGet([DEVICE_ID_KEY])
   if (stored[DEVICE_ID_KEY]) return stored[DEVICE_ID_KEY]
@@ -143,142 +173,8 @@ async function createRuntime() {
   const deviceId = await getOrCreateDeviceId()
   const transport = createFirestoreTransport()
 
-  async function syncSessionAttachments(session) {
-    const user = await waitForCurrentAuthUser()
-    if (!user || !cachedSubkeys?.blobEncryptionKey || !cachedSubkeys?.hmacIdKey) return session
-    const availability = new Map()
-    const attachments = new Map()
-    for (const message of session?.messages || []) {
-      for (const attachment of message?.attachments || []) {
-        if (attachment?.id) attachments.set(attachment.id, attachment)
-      }
-    }
-    for (const attachment of attachments.values()) {
-      const local = await getAttachment(attachment.id)
-      if (!local?.blob) {
-        availability.set(attachment.id, attachment.availability || 'missing')
-        continue
-      }
-      const plan = planAttachmentSync({ size: attachment.size || local.blob.size })
-      if (!plan.syncBinary) {
-        availability.set(attachment.id, ATTACHMENT_AVAILABILITY.LOCAL_ONLY)
-        continue
-      }
-      const opaqueAttachmentId = await deriveOpaqueAttachmentId(
-        cachedSubkeys.hmacIdKey,
-        attachment.id,
-      )
-      const bytes = new Uint8Array(await local.blob.arrayBuffer())
-      const sha256 = await computeSha256(bytes)
-      const existing = await transport.getBlobManifest(user.uid, opaqueAttachmentId)
-      if (!isManifestReady(existing) || existing.sha256 !== sha256) {
-        const nameEnvelope = await encryptAttachmentName({
-          blobKey: cachedSubkeys.blobEncryptionKey,
-          name: attachment.name,
-          ownerUid: user.uid,
-          opaqueAttachmentId,
-        })
-        const baseManifest = buildBlobManifest({
-          ownerUid: user.uid,
-          opaqueAttachmentId,
-          totalBytes: bytes.length,
-          sha256,
-          nameEnvelope,
-          mimeType: attachment.mimeType,
-          kind: attachment.kind,
-          availability: ATTACHMENT_AVAILABILITY.SYNCED,
-          status: ATTACHMENT_MANIFEST_STATUS.UPLOADING,
-          sourceDeviceId: deviceId,
-          createdAt: existing?.createdAt || Date.now(),
-          updatedAt: Date.now(),
-        })
-        await transport.setBlobManifest(user.uid, opaqueAttachmentId, baseManifest)
-        const chunks = await encryptAttachmentChunks({
-          blobKey: cachedSubkeys.blobEncryptionKey,
-          bytes,
-          ownerUid: user.uid,
-          opaqueAttachmentId,
-        })
-        for (const chunk of chunks) {
-          await transport.setBlobChunk(user.uid, opaqueAttachmentId, chunk)
-        }
-        await transport.setBlobManifest(user.uid, opaqueAttachmentId, {
-          ...baseManifest,
-          status: ATTACHMENT_MANIFEST_STATUS.READY,
-          updatedAt: Date.now(),
-        })
-      }
-      availability.set(attachment.id, ATTACHMENT_AVAILABILITY.SYNCED)
-    }
-    return {
-      ...session,
-      messages: (session?.messages || []).map(message => ({
-        ...message,
-        attachments: (message?.attachments || []).map(attachment => ({
-          ...attachment,
-          ...(attachment?.id && availability.has(attachment.id)
-            ? { availability: availability.get(attachment.id) }
-            : {}),
-        })),
-      })),
-    }
-  }
-
-  async function hydrateSessionAttachments(session) {
-    const user = await waitForCurrentAuthUser()
-    if (!user || !cachedSubkeys?.blobEncryptionKey || !cachedSubkeys?.hmacIdKey) return session
-    const nextAvailability = new Map()
-    const attachments = new Map()
-    for (const message of session?.messages || []) {
-      for (const attachment of message?.attachments || []) {
-        if (attachment?.id && attachment.availability === ATTACHMENT_AVAILABILITY.SYNCED) {
-          attachments.set(attachment.id, attachment)
-        }
-      }
-    }
-    for (const attachment of attachments.values()) {
-      if (await getAttachment(attachment.id)) continue
-      try {
-        const opaqueAttachmentId = await deriveOpaqueAttachmentId(
-          cachedSubkeys.hmacIdKey,
-          attachment.id,
-        )
-        const manifest = await transport.getBlobManifest(user.uid, opaqueAttachmentId)
-        if (!isManifestReady(manifest)) throw new Error('attachment_not_ready')
-        const chunks = await transport.getBlobChunks(user.uid, opaqueAttachmentId)
-        const bytes = await decryptAttachmentChunks({
-          blobKey: cachedSubkeys.blobEncryptionKey,
-          chunks,
-          ownerUid: user.uid,
-          opaqueAttachmentId,
-        })
-        const name = await decryptAttachmentName({
-          blobKey: cachedSubkeys.blobEncryptionKey,
-          envelope: manifest.nameEnvelope,
-          ownerUid: user.uid,
-          opaqueAttachmentId,
-        })
-        const blob = new Blob([bytes], { type: manifest.mimeType || attachment.mimeType })
-        const file = new File([blob], name || attachment.name || 'attachment', { type: blob.type })
-        await putAttachment(await processAttachmentFile(file), attachment.id)
-      } catch (error) {
-        console.error('attachment_sync_download_failed', error)
-        nextAvailability.set(attachment.id, ATTACHMENT_AVAILABILITY.REMOTE_ONLY)
-      }
-    }
-    if (nextAvailability.size === 0) return session
-    return {
-      ...session,
-      messages: (session?.messages || []).map(message => ({
-        ...message,
-        attachments: (message?.attachments || []).map(attachment => ({
-          ...attachment,
-          ...(attachment?.id && nextAvailability.has(attachment.id)
-            ? { availability: nextAvailability.get(attachment.id) }
-            : {}),
-        })),
-      })),
-    }
+  async function normalizeSessionAttachments(session) {
+    return normalizeSessionAttachmentMetadata(session, async id => Boolean(await getAttachment(id)))
   }
 
   async function readPayload(storageKey, logicalId) {
@@ -286,7 +182,7 @@ async function createRuntime() {
       const stored = await storageGet(['sessions'])
       const session = (stored.sessions || []).find(item => String(item.id) === String(logicalId))
       if (!session || session.syncPolicy === 'local_only') return null
-      return { storageKey, logicalId, value: await syncSessionAttachments(session) }
+      return { storageKey, logicalId, value: await normalizeSessionAttachments(session) }
     }
     if (storageKey.endsWith('ApiKeys')) {
       const provider = storageKey.replace('ApiKeys', '').replace('openRouter', 'openrouter')
@@ -325,7 +221,7 @@ async function createRuntime() {
       if (deleted) {
         if (index >= 0) sessions.splice(index, 1)
       } else if (payload.value?.syncPolicy !== 'local_only') {
-        const hydrated = await hydrateSessionAttachments(payload.value)
+        const hydrated = await normalizeSessionAttachments(payload.value)
         if (index >= 0) sessions[index] = hydrated
         else sessions.push(hydrated)
       }
@@ -377,7 +273,31 @@ async function createRuntime() {
     },
   })
 
-  return { db, deviceKey, vault, deviceId, transport, engine }
+  const migrationState = await storageGet([ATTACHMENT_POLICY_MIGRATION_KEY, 'sessions'])
+  if (!migrationState[ATTACHMENT_POLICY_MIGRATION_KEY]) {
+    const sessions = Array.isArray(migrationState.sessions) ? migrationState.sessions : []
+    const normalized = []
+    const changedIds = []
+    for (const session of sessions) {
+      const next = await normalizeSessionAttachments(session)
+      normalized.push(next)
+      if (JSON.stringify(next) !== JSON.stringify(session)) changedIds.push(session.id)
+    }
+    if (changedIds.length > 0) {
+      await markRemoteWrite('sessions', normalized)
+      for (const sessionId of changedIds) {
+        await engine.enqueue({
+          storageKey: 'sessions',
+          logicalId: sessionId,
+          entityType: 'session',
+          entityVersion: newVersion(deviceId),
+        })
+      }
+    }
+    await storageSet({ [ATTACHMENT_POLICY_MIGRATION_KEY]: Date.now() })
+  }
+
+  return { db, deviceKey, vault, deviceId, transport, engine, normalizeSessionAttachments }
 }
 
 async function getRuntime() {
@@ -563,6 +483,8 @@ export async function getCloudSyncStatus() {
     SYNC_PAUSED_KEY,
     LAST_SYNC_KEY,
     LAST_ERROR_KEY,
+    BLOCKED_UNTIL_KEY,
+    LEGACY_CLEANUP_KEY,
     DEVICE_ID_KEY,
   ])
   if (!user) return { signedIn: false, ...stored, state: 'signed_out' }
@@ -578,6 +500,9 @@ export async function getCloudSyncStatus() {
     paused: stored[SYNC_PAUSED_KEY] === true,
     lastSyncAt: stored[LAST_SYNC_KEY] || null,
     lastError: stored[LAST_ERROR_KEY] || null,
+    lastErrorCode: stored[LAST_ERROR_KEY] || null,
+    blockedUntil: stored[BLOCKED_UNTIL_KEY] || null,
+    legacyCleanupCompletedAt: stored[LEGACY_CLEANUP_KEY] || null,
     deviceId: runtime.deviceId,
     pending: await runtime.engine.pendingCount(),
     state: linked ? runtime.engine.getStatus().state : account ? 'recovery_required' : 'setup_required',
@@ -588,9 +513,10 @@ export async function runCloudSync() {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
-  const stored = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY])
+  const stored = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY, BLOCKED_UNTIL_KEY])
   if (stored[SYNC_ENABLED_KEY] !== true) throw new Error('sync_not_enabled')
   if (stored[SYNC_PAUSED_KEY] === true) return { skipped: 'paused' }
+  if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) throw new Error('quota_exceeded')
   if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
   try {
     const result = await runtime.engine.drain()
@@ -599,18 +525,20 @@ export async function runCloudSync() {
       lastSeenAt: now,
       lastSyncedAt: now,
     })
-    await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null })
+    await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null, [BLOCKED_UNTIL_KEY]: null })
     await storageSet({ [KEY_TOMBSTONES]: {} })
     return result
   } catch (error) {
-    await storageSet({ [LAST_ERROR_KEY]: error?.message || 'sync_failed' })
-    throw error
+    const errorCode = mapCloudSyncError(error)
+    const update = { [LAST_ERROR_KEY]: errorCode }
+    if (errorCode === 'quota_exceeded') update[BLOCKED_UNTIL_KEY] = nextPacificQuotaReset()
+    await storageSet(update)
+    throw new Error(errorCode)
   }
 }
 
 export async function setCloudSyncPaused(paused) {
   await storageSet({ [SYNC_PAUSED_KEY]: paused === true })
-  if (!paused) scheduleCloudSync(0)
   return { paused: paused === true }
 }
 
@@ -644,6 +572,21 @@ export async function disconnectCloudSync() {
   return { disconnected: true }
 }
 
+export async function cleanLegacyCloudData() {
+  const user = await waitForCurrentAuthUser()
+  if (!user) throw new Error('sync_signed_out')
+  const runtime = await getRuntime()
+  if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
+  try {
+    const counts = await runtime.transport.cleanLegacyCloudData(user.uid)
+    const completedAt = Date.now()
+    await storageSet({ [LEGACY_CLEANUP_KEY]: completedAt })
+    return { counts, completedAt }
+  } catch (error) {
+    throw new Error(mapCloudSyncError(error))
+  }
+}
+
 export async function exportEncryptedBackup() {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
@@ -665,7 +608,7 @@ export async function exportEncryptedBackup() {
     settings.filter(key => stored[key] !== undefined).map(key => [key, stored[key]]),
   )
   const payload = buildBackupPayload({
-    sessions: stored.sessions || [],
+    sessions: await Promise.all((stored.sessions || []).map(runtime.normalizeSessionAttachments)),
     apiKeys,
     settings: settingsPayload,
     stats: stored.stats || null,
@@ -682,7 +625,9 @@ export async function importEncryptedBackup(envelope) {
   const payload = await decryptBackup({ backupKey: cachedSubkeys.backupKey, envelope })
   const data = payload?.data || {}
   const changes = { ...(data.settings || {}) }
-  if (Array.isArray(data.sessions)) changes.sessions = data.sessions
+  if (Array.isArray(data.sessions)) {
+    changes.sessions = await Promise.all(data.sessions.map(runtime.normalizeSessionAttachments))
+  }
   if (data.stats) changes.stats = data.stats
   await storageSet(changes)
   for (const provider of PROVIDERS) {
@@ -710,17 +655,9 @@ export async function importEncryptedBackup(envelope) {
   return { counts: payload.counts || null }
 }
 
-function scheduleCloudSync(delay = 1200) {
-  if (syncTimer) clearTimeout(syncTimer)
-  syncTimer = setTimeout(() => {
-    syncTimer = null
-    runCloudSync().catch(() => undefined)
-  }, delay)
-}
-
 async function enqueueStorageChange(changes) {
-  const status = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY])
-  if (status[SYNC_ENABLED_KEY] !== true || status[SYNC_PAUSED_KEY] === true) return
+  const status = await storageGet([SYNC_ENABLED_KEY])
+  if (status[SYNC_ENABLED_KEY] !== true) return
   const runtime = await getRuntime()
 
   for (const [key, change] of Object.entries(changes)) {
@@ -763,7 +700,6 @@ async function enqueueStorageChange(changes) {
       })
     }
   }
-  scheduleCloudSync()
 }
 
 export function installCloudSyncListeners() {
@@ -778,9 +714,18 @@ export function installCloudSyncListeners() {
 }
 
 export async function wakeCloudSync() {
-  const status = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY])
-  if (status[SYNC_ENABLED_KEY] === true && status[SYNC_PAUSED_KEY] !== true) {
-    scheduleCloudSync(250)
+  const status = await storageGet([
+    SYNC_ENABLED_KEY,
+    SYNC_PAUSED_KEY,
+    LAST_SYNC_KEY,
+    BLOCKED_UNTIL_KEY,
+  ])
+  const skipReason = cloudSyncWakeReason(status)
+  if (skipReason) return { skipped: skipReason }
+  try {
+    return await runCloudSync()
+  } catch (error) {
+    return { skipped: mapCloudSyncError(error) }
   }
 }
 

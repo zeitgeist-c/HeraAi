@@ -43,7 +43,7 @@ describe('cihaz anahtarı ve ana sır', () => {
     expect(sır.bytes.length).toBe(32)
     const alt = await servis.deriveSubKeys(sır.key)
     expect(alt.dataEncryptionKey.algorithm.name).toBe('AES-GCM')
-    expect(alt.blobEncryptionKey.algorithm.name).toBe('AES-GCM')
+    expect(alt).not.toHaveProperty('blobEncryptionKey')
     expect(alt.hmacIdKey.algorithm.name).toBe('HMAC')
     expect(alt.fingerprintKey.algorithm.name).toBe('HMAC')
     expect(alt.backupKey.algorithm.name).toBe('AES-GCM')
@@ -145,10 +145,10 @@ describe('varlık şifreleme', () => {
 
   it('ham bayt şifreleme turu çalışır', async () => {
     const sır = await servis.createCloudMasterSecret()
-    const { blobEncryptionKey } = await servis.deriveSubKeys(sır.key)
+    const { dataEncryptionKey } = await servis.deriveSubKeys(sır.key)
     const ham = new Uint8Array([1, 2, 3, 4, 5])
-    const zarf = await servis.encryptBytes(blobEncryptionKey, ham, null)
-    const cozulen = await servis.decryptBytes(blobEncryptionKey, zarf, null)
+    const zarf = await servis.encryptBytes(dataEncryptionKey, ham, null)
+    const cozulen = await servis.decryptBytes(dataEncryptionKey, zarf, null)
     expect([...cozulen]).toEqual([1, 2, 3, 4, 5])
   })
 })
@@ -164,12 +164,8 @@ describe('kimlik ve parmak izi', () => {
     expect(a).not.toBe(c)
   })
 
-  it('ek kimliği ayrı ad alanında üretilir', async () => {
-    const sır = await servis.createCloudMasterSecret()
-    const { hmacIdKey } = await servis.deriveSubKeys(sır.key)
-    const varlik = await servis.deriveOpaqueId(hmacIdKey, 'session', 'ek-1')
-    const ek = await servis.deriveOpaqueAttachmentId(hmacIdKey, 'ek-1')
-    expect(ek).not.toBe(varlik)
+  it('bulut ek kimligi uretim arayuzunden kaldirilmistir', () => {
+    expect(servis.deriveOpaqueAttachmentId).toBeUndefined()
   })
 
   it('gizli parmak izi ham anahtarı sızdırmaz', async () => {

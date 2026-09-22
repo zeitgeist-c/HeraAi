@@ -2,6 +2,24 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.6',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'Dosya, görsel, PDF ve ekran kırpıntılarının yalnız metadatası eşitlenir; ikili içerik cihazda kalır',
+        'Otomatik Firestore çağrıları kaldırıldı; eşitleme elle veya panel açılışında 15 dakikalık korumayla çalışır',
+        'Firebase kota, kural, çevrimdışı, şema ve bozuk parça hataları güvenli durum kodlarıyla gösterilir',
+        'Büyük sohbetler ayrı şifreli parçalarla saklanır ve eski bulut verileri kullanıcı onayıyla temizlenebilir',
+      ],
+      en: [
+        'Only metadata for files, images, PDFs, and screen crops is synced; binary content stays on the device',
+        'Automatic Firestore calls were removed; sync runs manually or on panel open with a 15-minute guard',
+        'Firebase quota, rules, offline, schema, and corrupt-chunk failures now use safe status codes',
+        'Large chats use separately encrypted chunks, and legacy cloud data can be cleaned with user approval',
+      ],
+    },
+  },
+  {
     version: '1.10.5',
     date: '2026-09-22',
     changes: {
