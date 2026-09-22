@@ -67,7 +67,6 @@ function SyncPanel() {
 
   useEffect(() => {
     refresh().catch(error => {
-      console.error('sync_status_failed', error)
       setStatus({ signedIn: false, state: 'error', lastError: error.message })
     })
   }, [refresh])
@@ -207,6 +206,36 @@ function SyncPanel() {
           {busy === 'signin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
           {t('setup.sync.sign_in')}
         </button>
+      </div>
+    )
+  }
+
+  if (status.cloudUnavailable) {
+    const errorCode = status.lastErrorCode || status.lastError || 'sync_failed'
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <CloudOff className="h-4 w-4 text-amber-500" />
+            {t('setup.sync.cloud_temporarily_unavailable_title')}
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            {t(`setup.sync.errors.${errorCode}`, { defaultValue: t('setup.sync.errors.sync_failed') })}
+          </p>
+          {Number(status.blockedUntil) > Date.now() && (
+            <p className="mt-2 text-[10px] text-amber-500">
+              {t('setup.sync.blocked_until', { date: formatDate(status.blockedUntil) })}
+            </p>
+          )}
+          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+            {t('setup.sync.google_session_preserved')}
+          </p>
+        </div>
+        <button type="button" onClick={() => refresh()} disabled={busy !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border px-4 text-xs font-semibold hover:bg-secondary disabled:opacity-50">
+          <RefreshCw className="h-4 w-4" />
+          {t('setup.sync.retry_status')}
+        </button>
+        <button type="button" onClick={handleSignOut} disabled={busy !== null} className="text-xs text-muted-foreground hover:text-foreground">{t('setup.sync.sign_out')}</button>
       </div>
     )
   }

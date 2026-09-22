@@ -489,13 +489,9 @@ export async function getCloudSyncStatus() {
   ])
   if (!user) return { signedIn: false, ...stored, state: 'signed_out' }
   const runtime = await getRuntime()
-  const account = await runtime.transport.getAccountRoot(user.uid)
-  const linked = account ? await loadLinkedDevice(runtime, user).catch(() => false) : false
-  return {
+  const localStatus = {
     signedIn: true,
     user,
-    accountExists: Boolean(account),
-    linked,
     enabled: stored[SYNC_ENABLED_KEY] === true,
     paused: stored[SYNC_PAUSED_KEY] === true,
     lastSyncAt: stored[LAST_SYNC_KEY] || null,
@@ -505,20 +501,60 @@ export async function getCloudSyncStatus() {
     legacyCleanupCompletedAt: stored[LEGACY_CLEANUP_KEY] || null,
     deviceId: runtime.deviceId,
     pending: await runtime.engine.pendingCount(),
-    state: linked ? runtime.engine.getStatus().state : account ? 'recovery_required' : 'setup_required',
+  }
+  if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) {
+    return {
+      ...localStatus,
+      accountExists: null,
+      linked: Boolean(cachedSubkeys),
+      cloudUnavailable: true,
+      lastError: 'quota_exceeded',
+      lastErrorCode: 'quota_exceeded',
+      state: 'quota_blocked',
+    }
+  }
+  try {
+    const account = await runtime.transport.getAccountRoot(user.uid)
+    const linked = account ? await loadLinkedDevice(runtime, user) : false
+    return {
+      ...localStatus,
+      accountExists: Boolean(account),
+      linked,
+      cloudUnavailable: false,
+      state: linked ? runtime.engine.getStatus().state : account ? 'recovery_required' : 'setup_required',
+    }
+  } catch (error) {
+    const errorCode = mapCloudSyncError(error)
+    const blockedUntil = errorCode === 'quota_exceeded'
+      ? nextPacificQuotaReset()
+      : localStatus.blockedUntil
+    await storageSet({
+      [LAST_ERROR_KEY]: errorCode,
+      ...(blockedUntil ? { [BLOCKED_UNTIL_KEY]: blockedUntil } : {}),
+    })
+    return {
+      ...localStatus,
+      accountExists: null,
+      linked: Boolean(cachedSubkeys),
+      cloudUnavailable: true,
+      lastError: errorCode,
+      lastErrorCode: errorCode,
+      blockedUntil,
+      state: errorCode,
+    }
   }
 }
 
 export async function runCloudSync() {
-  const user = await waitForCurrentAuthUser()
-  if (!user) throw new Error('sync_signed_out')
-  const runtime = await getRuntime()
-  const stored = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY, BLOCKED_UNTIL_KEY])
-  if (stored[SYNC_ENABLED_KEY] !== true) throw new Error('sync_not_enabled')
-  if (stored[SYNC_PAUSED_KEY] === true) return { skipped: 'paused' }
-  if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) throw new Error('quota_exceeded')
-  if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
   try {
+    const user = await waitForCurrentAuthUser()
+    if (!user) throw new Error('sync_signed_out')
+    const runtime = await getRuntime()
+    const stored = await storageGet([SYNC_ENABLED_KEY, SYNC_PAUSED_KEY, BLOCKED_UNTIL_KEY])
+    if (stored[SYNC_ENABLED_KEY] !== true) throw new Error('sync_not_enabled')
+    if (stored[SYNC_PAUSED_KEY] === true) return { skipped: 'paused' }
+    if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) throw new Error('quota_exceeded')
+    if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
     const result = await runtime.engine.drain()
     const now = Date.now()
     await runtime.transport.setDevice(user.uid, runtime.deviceId, {

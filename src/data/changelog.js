@@ -2,6 +2,20 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.7',
+    date: '2026-09-23',
+    changes: {
+      tr: [
+        'Google girişi Firestore durum sorgusundan ayrıldı; kota dolu olsa bile oturum başarıyla açık kalır',
+        'Firebase kotası dolduğunda tekrar eden istekler engellenir, bekleyen veriler korunur ve sıfırlanma zamanı gösterilir',
+      ],
+      en: [
+        'Google sign-in is now independent from Firestore status checks, so the session remains signed in when quota is exhausted',
+        'When Firebase quota is exhausted, repeated requests are blocked, pending data is preserved, and the reset time is shown',
+      ],
+    },
+  },
+  {
     version: '1.10.6',
     date: '2026-09-22',
     changes: {
