@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "HeraAi",
-    "version": "1.10.6",
+    "version": "1.10.7",
     "minimum_chrome_version": "114",
     "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4XF0Hl9x/mtUgZ0Rbs+SvV28UEeEpm3IF/nyGsSUIdKIflIAe6VQOlhscitd/1oMDeJrXb2kdtv7n1bO21Ll3lJhQ1VwfU9/I+gMLX+F2VHBE/8CNIOpg5pJ40R9XQucL2F05qxe4AAKFIrm6Wqe0v1DnXdu/76CzdRZtyWSb9zlbzun8AOvnSF3XVFtcK2j5TtZN4lNtKKcnFnVWeKSCFpC8k0iwCXPJsZv7y3CPANlPcXsGYUvk/IY/lZ9rVjU42Dv95vtDslDB2Gacy05IVn6uy3mrXUL7deXn5YQiYB148H1DgTTlqOj7vetMtjFM0/449ghZyUsdyGP9qpwLwIDAQAB",
     "description": "Multi-provider AI assistant for Chrome Side Panel with Gemini, OpenRouter Free, and Ollama Cloud.",

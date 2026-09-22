@@ -30,6 +30,7 @@ vi.mock('./firestoreTransport', () => ({
 }))
 
 import {
+  getCloudSyncStatus,
   initializeCloudSync,
   cloudSyncWakeReason,
   mapCloudSyncError,
@@ -123,5 +124,37 @@ describe('cloud sync error policy', () => {
       .toBe('recently_synced')
     expect(cloudSyncWakeReason({ syncEnabled: true, syncLastSuccessAt: 100_000 }, 1_000_000))
       .toBeNull()
+  })
+
+  it('Firestore kotasi doluyken Google oturumunu basarili tutar ve yerel engel kaydeder', async () => {
+    delete storage.syncBlockedUntil
+    transport.getAccountRoot.mockRejectedValueOnce(
+      Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' }),
+    )
+
+    const status = await getCloudSyncStatus()
+
+    expect(status.signedIn).toBe(true)
+    expect(status.user).toEqual(user)
+    expect(status.cloudUnavailable).toBe(true)
+    expect(status.lastErrorCode).toBe('quota_exceeded')
+    expect(status.state).toBe('quota_exceeded')
+    expect(status.blockedUntil).toBeGreaterThan(Date.now())
+    expect(storage.syncBlockedUntil).toBe(status.blockedUntil)
+  })
+
+  it('cihaz baglantisi okunurken kota dolarsa kurtarma ekrani yerine kota durumunu gosterir', async () => {
+    delete storage.syncBlockedUntil
+    transport.getAccountRoot.mockResolvedValueOnce(cloud.account)
+    transport.getDevice.mockRejectedValueOnce(
+      Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' }),
+    )
+
+    const status = await getCloudSyncStatus()
+
+    expect(status.signedIn).toBe(true)
+    expect(status.cloudUnavailable).toBe(true)
+    expect(status.lastErrorCode).toBe('quota_exceeded')
+    expect(status.state).toBe('quota_exceeded')
   })
 })

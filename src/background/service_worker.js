@@ -1842,7 +1842,7 @@ async function handleAuthRequest(message) {
     }
     if (message.type === 'AUTH_SIGN_IN') {
       const user = await signInWithGoogle();
-      await wakeCloudSync();
+      await wakeCloudSync().catch(() => undefined);
       return { ok: true, user: user || null };
     }
     if (message.type === 'AUTH_SIGN_OUT') {
@@ -1890,8 +1890,13 @@ async function handleSyncRequest(message) {
         return { ok: false, errorCode: 'sync_unknown_request' };
     }
   } catch (error) {
-    console.error('Sync request error', error);
-    return { ok: false, errorCode: error?.code || error?.message || 'sync_failed' };
+    const errorCode = error?.code || error?.message || 'sync_failed';
+    const expectedCodes = new Set([
+      'quota_exceeded', 'rules_denied', 'sync_signed_out', 'offline',
+      'sync_version_unsupported', 'sync_chunk_incomplete', 'sync_payload_invalid',
+    ]);
+    if (!expectedCodes.has(errorCode)) console.error('Sync request error', error);
+    return { ok: false, errorCode };
   }
 }
 
