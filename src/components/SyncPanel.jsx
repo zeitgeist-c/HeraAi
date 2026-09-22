@@ -138,6 +138,16 @@ function SyncPanel() {
     t('setup.sync.device_revoked'),
   )
 
+  const handleRegenerateRecovery = async () => {
+    if (!globalThis.confirm(t('setup.sync.regenerate_recovery_confirm'))) return
+    const response = await perform(
+      'recovery-regenerate',
+      () => sendMessage({ type: 'SYNC_REGENERATE_RECOVERY' }),
+      t('setup.sync.recovery_regenerated'),
+    )
+    if (response?.recoveryCode) setRecoveryCode(response.recoveryCode)
+  }
+
   const handleExportBackup = async () => {
     const response = await perform(
       'backup-export',
@@ -263,6 +273,20 @@ function SyncPanel() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="rounded-xl border border-border/70 p-3">
+        <div className="flex items-start gap-2">
+          <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-xs font-semibold">{t('setup.sync.recovery_management_title')}</h3>
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{t('setup.sync.recovery_management_description')}</p>
+          </div>
+        </div>
+        <button type="button" onClick={handleRegenerateRecovery} disabled={busy !== null} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border text-[11px] font-semibold hover:bg-secondary disabled:opacity-50">
+          {busy === 'recovery-regenerate' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+          {t('setup.sync.regenerate_recovery')}
+        </button>
       </section>
 
       <section>

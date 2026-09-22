@@ -26,6 +26,11 @@
       "save_recovery_title": "Kurtarma kodunu şimdi kaydedin",
       "save_recovery_description": "Bu kod yalnızca şimdi gösterilir. Kod kaybolursa yeni tarayıcıları bağlayamazsınız.",
       "copied": "Kurtarma kodu kopyalandı.",
+      "recovery_management_title": "Kurtarma kodu",
+      "recovery_management_description": "Bu cihaz hesaba bağlıysa yeni bir kurtarma kodu oluşturabilirsiniz. Yeni kod oluşturulduğunda varsa eski kod geçersiz olur.",
+      "regenerate_recovery": "Yeni kurtarma kodu oluştur",
+      "regenerate_recovery_confirm": "Yeni kurtarma kodu oluşturulsun mu? Varsa önceki kurtarma kodu geçersiz olacaktır.",
+      "recovery_regenerated": "Yeni kurtarma kodu oluşturuldu. Güvenli bir yere kaydedin.",
       "status_active": "Eşitleme açık",
       "status_paused": "Eşitleme duraklatıldı",
       "last_sync": "Son eşitleme",
@@ -91,7 +96,6 @@
       "add_failed": "Anahtar eklenemedi",
       "last_used": "Son kullanım",
       "cooldown_until": "Bekleme süresi",
-      "security_warning": "API anahtarları yalnızca bu cihazdaki tarayıcı depolamasında saklanır. Kişisel kullanım içindir. Anahtarlarınızı kimseyle paylaşmayın.",
       "show_key": "Göster",
       "hide_key": "Gizle",
       "status_success": "Başarılı",
@@ -103,7 +107,6 @@
             "pause": "Anahtarı duraklat",
             "resume": "Anahtarı kullanıma aç",
             "usage_mode_title": "API anahtarı kullanım biçimi",
-            "usage_mode_description": "Bu seçim bütün sağlayıcılara uygulanır; Gemini, Tavily, OpenRouter ve Ollama anahtarları yalnız kendi havuzlarında kullanılır.",
             "usage_mode_primary": "Ana anahtarları kullan",
             "usage_mode_balanced": "Anahtarları sırayla kullan",
       "last_error": "Son hata: {{minutes}} dk önce",
@@ -116,8 +119,7 @@
       "test_service_unavailable": "Sağlayıcı geçici olarak kullanılamıyor. Biraz sonra yeniden deneyin.",
       "test_billing_required": "Bu model için faturalandırma veya proje erişimi gerekiyor.",
       "test_permission_denied": "Bu API anahtarının seçili modeli kullanma izni yok.",
-      "test_unknown": "Test başarısız",
-      "test_usage_warning": "Anahtar testleri küçük bir gerçek istek gönderir ve az miktarda kota veya arama kredisi kullanabilir."
+      "test_unknown": "Test başarısız"
     },
     "general": {
       "theme_title": "Görünüm Teması",
@@ -128,8 +130,7 @@
       "accent_color": "Vurgu Rengi",
       "custom_accent_color": "Özel vurgu rengi",
       "sources_title": "Kaynakları Göster",
-      "sources_description": "Araştırma yanıtlarının altında tıklanabilir kaynak kartlarını gösterir. Yanıttaki atıf işaretleri değişmez.",
-      "voice_api_notice": "Ses özellikleri Gemini API anahtarınızı kullanır ve API kullanımı oluşturabilir. Ses yalnız bellekte işlenir ve kaydedilmez."
+      "sources_description": "Araştırma yanıtlarının altında tıklanabilir kaynak kartlarını gösterir. Yanıttaki atıf işaretleri değişmez."
     },
     "ai": {
       "system_prompt_title": "Sistem Komutu (System Prompt)",

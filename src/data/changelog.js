@@ -2,6 +2,22 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.3',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'API anahtarı kullanım biçimi seçimi Genel Ayarlar bölümüne taşındı',
+        'Bağlı cihazdan yeni kurtarma kodu oluşturma ve önceki kodu güvenli biçimde geçersiz kılma eklendi',
+        'API ve ses ayarlarındaki dört gereksiz bilgilendirme metni kaldırıldı',
+      ],
+      en: [
+        'Moved API-key usage mode selection to General Settings',
+        'Added secure recovery-code regeneration from a linked device, invalidating the previous code',
+        'Removed four unnecessary information notices from API and voice settings',
+      ],
+    },
+  },
+  {
     version: '1.10.2',
     date: '2026-09-22',
     changes: {

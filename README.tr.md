@@ -46,7 +46,7 @@ npm run dev      # HMR geliştirme sunucusu
 npm run preview  # üretim derlemesi önizleme
 npm run lint     # eslint — commit öncesi çalıştır
 npm run test     # vitest + jsdom (chrome API'leri taklit)
-npm run package  # release/HeraAi-<sürüm>.zip (şu an 1.10.2)
+npm run package  # release/HeraAi-<sürüm>.zip (şu an 1.10.3)
 ```
 
 ## Proje yapısı

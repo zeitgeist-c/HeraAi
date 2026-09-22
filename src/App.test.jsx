@@ -2784,14 +2784,21 @@ describe('HeraAi App', () => {
     expect(geminiInput.type).toBe('password');
   });
 
-  it('shows the security warning banner inside the API tab', async () => {
+  it('does not show the removed API and voice information texts', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
 
-    expect(await screen.findByText(/API keys are stored in this browser|API anahtarları yalnızca bu cihazdaki/i)).toBeInTheDocument();
+    expect(screen.queryByText(/API keys are stored in this browser|API anahtarları yalnızca bu cihazdaki/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Key tests send a small real request|Anahtar testleri küçük bir gerçek istek/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This applies to every provider|Bu seçim bütün sağlayıcılara/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/API key usage mode|API anahtarı kullanım biçimi/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/General Settings|Genel Ayarlar/i));
+    expect(screen.queryByText(/Voice features use your Gemini API key|Ses özellikleri Gemini API/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/API key usage mode|API anahtarı kullanım biçimi/i)).toBeInTheDocument();
   });
 
   it('separates API providers into collapsible cards and links to every key portal', async () => {
@@ -5479,7 +5486,7 @@ describe('HeraAi App', () => {
     fireEvent.click(screen.getByRole('button', { name: /General Settings/i }));
     expect(screen.queryByRole('switch', { name: 'Gemini Dictation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: 'Gemini Read Aloud (Preview)' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Voice features use your Gemini API key/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Voice features use your Gemini API key/i)).not.toBeInTheDocument();
   });
 
   it('reloads a both-resolved comparison without locking the composer', async () => {

@@ -530,6 +530,31 @@ export async function linkCloudSyncDevice(recoveryCode) {
   return { linked: true }
 }
 
+export async function regenerateCloudRecoveryCode() {
+  const user = await waitForCurrentAuthUser()
+  if (!user) throw new Error('sync_signed_out')
+  const runtime = await getRuntime()
+  const account = await runtime.transport.getAccountRoot(user.uid)
+  if (!account) throw new Error('sync_account_missing')
+  const device = await runtime.transport.getDevice(user.uid, runtime.deviceId)
+  if (!device?.deviceMasterKeyEnvelope || device.revokedAt) {
+    throw new Error('sync_recovery_required')
+  }
+
+  const masterBytes = await unwrapMasterSecretFromDevice(
+    runtime.deviceKey,
+    device.deviceMasterKeyEnvelope,
+  )
+  const recoveryCode = generateRecoveryCode()
+  const recoveryEnvelope = await sealMasterSecretForRecovery(masterBytes, recoveryCode)
+  await runtime.transport.setAccountRoot(user.uid, {
+    recoveryEnvelope,
+    keyRotationIndex: (Number(account.keyRotationIndex) || 0) + 1,
+  })
+  await cacheMasterSecret(masterBytes)
+  return { recoveryCode }
+}
+
 export async function getCloudSyncStatus() {
   const user = await waitForCurrentAuthUser()
   const stored = await storageGet([
