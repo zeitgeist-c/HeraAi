@@ -2,6 +2,20 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.2',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'Chrome MV3 servis çalışanında şifreli alan oluşturmayı engelleyen XMLHttpRequest hatası giderildi',
+        'Firestore iletişimi servis çalışanıyla uyumlu REST tabanlı Lite istemcisine geçirildi',
+      ],
+      en: [
+        'Fixed the XMLHttpRequest error that blocked encrypted-space creation in the Chrome MV3 service worker',
+        'Moved Firestore communication to the service-worker-compatible REST-based Lite client',
+      ],
+    },
+  },
+  {
     version: '1.10.1',
     date: '2026-09-22',
     changes: {

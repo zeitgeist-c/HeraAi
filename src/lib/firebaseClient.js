@@ -1,6 +1,8 @@
 import { getApps, initializeApp } from 'firebase/app'
 import { getAuth, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth/web-extension'
-import { getFirestore } from 'firebase/firestore'
+// MV3 service worker ortaminda XMLHttpRequest yoktur. Firestore Lite REST/fetch
+// kullanir ve bu nedenle arka plan servis calisaniyla uyumludur.
+import { getFirestore } from 'firebase/firestore/lite'
 
 /**
  * Firebase web konfigurasyonu derleme sirasinda (.env.local uzerinden) gomulur.
