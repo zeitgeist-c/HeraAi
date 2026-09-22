@@ -98,6 +98,12 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [newTavilyKey, setNewTavilyKey] = useState('')
   const [newOpenRouterKey, setNewOpenRouterKey] = useState('')
   const [newOllamaKey, setNewOllamaKey] = useState('')
+  const [newKeyLabels, setNewKeyLabels] = useState({
+    gemini: '',
+    tavily: '',
+    openrouter: '',
+    ollama: '',
+  })
   const [testingKeyId, setTestingKeyId] = useState(null)
   const [testingAllProvider, setTestingAllProvider] = useState(null)
   const [showGeminiInput, setShowGeminiInput] = useState(false)
@@ -151,12 +157,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       return
     }
     try {
-      await addKey(provider, rawKey)
+      await addKey(provider, rawKey, { label: newKeyLabels[provider] })
       notifySuccess(t('setup.keys.add_success'))
       if (provider === 'gemini') setNewGeminiKey('')
       else if (provider === 'tavily') setNewTavilyKey('')
       else if (provider === 'openrouter') setNewOpenRouterKey('')
       else if (provider === 'ollama') setNewOllamaKey('')
+      setNewKeyLabels(current => ({ ...current, [provider]: '' }))
       await refreshKeys(provider)
     } catch (err) {
       if (err.message === 'key_duplicate_error') {
@@ -291,7 +298,12 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       <div key={key.id} data-testid="api-key-row" className="rounded-lg border border-border/75 bg-gradient-to-r from-primary/[0.07] to-transparent px-2.5 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Key className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs tracking-wide text-foreground">{key.masked}</span>
+          <span
+            className={`min-w-0 flex-1 truncate text-xs text-foreground ${key.label ? 'font-semibold' : 'font-mono tracking-wide'}`}
+            title={key.label || key.masked}
+          >
+            {key.label || key.masked}
+          </span>
           {key.isPrimary && (
             <span className="shrink-0 rounded-full bg-gradient-to-r from-primary to-violet-500 px-1.5 py-0.5 text-[9px] font-semibold text-primary-foreground">
               {t('setup.keys.primary_badge')}
@@ -303,9 +315,10 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-2 pl-5">
           <div className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground">
-            {key.lastUsedAt && <span>{t('setup.keys.last_used')}: {new Date(key.lastUsedAt).toLocaleDateString()}</span>}
-            {hasCooldown && <span className="text-amber-500">{key.lastUsedAt ? ' · ' : ''}{t('setup.keys.cooldown_until')}: {new Date(key.cooldownUntil).toLocaleTimeString()}</span>}
-            {minutesAgo != null && <span>{key.lastUsedAt || hasCooldown ? ' · ' : ''}{t('setup.keys.last_error', { minutes: minutesAgo })}</span>}
+            {key.label && <span className="font-mono">{key.masked}</span>}
+            {key.lastUsedAt && <span>{key.label ? ' · ' : ''}{t('setup.keys.last_used')}: {new Date(key.lastUsedAt).toLocaleDateString()}</span>}
+            {hasCooldown && <span className="text-amber-500">{key.label || key.lastUsedAt ? ' · ' : ''}{t('setup.keys.cooldown_until')}: {new Date(key.cooldownUntil).toLocaleTimeString()}</span>}
+            {minutesAgo != null && <span>{key.label || key.lastUsedAt || hasCooldown ? ' · ' : ''}{t('setup.keys.last_error', { minutes: minutesAgo })}</span>}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -381,6 +394,15 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>
+        <input
+          type="text"
+          value={newKeyLabels[provider]}
+          onChange={(event) => setNewKeyLabels(current => ({ ...current, [provider]: event.target.value }))}
+          maxLength={60}
+          placeholder={t('setup.keys.name_placeholder')}
+          aria-label={t('setup.keys.name_label')}
+          className="h-8 w-full rounded-lg border border-border/75 bg-background/50 px-3 text-xs text-foreground outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+        />
         <div className="flex items-stretch gap-0 overflow-hidden rounded-lg border border-primary/30 focus-within:ring-2 focus-within:ring-primary/30">
           <div className="relative min-w-0 flex-1">
             <input

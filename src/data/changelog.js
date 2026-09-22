@@ -2,6 +2,18 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.5',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        'API anahtarlarına ekleme sırasında isteğe bağlı ad verme ve bu adı kompakt listede gösterme desteği eklendi',
+      ],
+      en: [
+        'Added optional names while adding API keys and displayed them in the compact key list',
+      ],
+    },
+  },
+  {
     version: '1.10.4',
     date: '2026-09-22',
     changes: {

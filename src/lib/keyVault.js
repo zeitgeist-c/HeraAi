@@ -69,6 +69,7 @@ export function sortKeyMetadata(entries) {
 }
 
 export const KEY_METADATA_FIELDS = Object.freeze([
+  'label',
   'lastUsedAt',
   'lastSuccessAt',
   'lastErrorAt',
@@ -124,7 +125,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
      * `isPrimary` ve `createdAt` yalnızca göç sırasında verilir; böylece
      * 1.9.4'teki ana anahtar seçimi ve sıralama aynen korunur.
      */
-    async addKey(provider, rawKey, { fingerprint = null, model = null, isPrimary = null, createdAt = null, id = null } = {}) {
+    async addKey(provider, rawKey, { label = null, fingerprint = null, model = null, isPrimary = null, createdAt = null, id = null } = {}) {
       saglayiciDogrula(provider)
       const trimmed = String(rawKey ?? '').trim()
       if (!trimmed) throw new Error('key_empty_error')
@@ -141,6 +142,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       const kayit = {
         id: id ?? yeniId(provider),
         provider,
+        label: String(label ?? '').trim().slice(0, 60) || null,
         masked: maskKey(trimmed),
         fingerprint,
         model,

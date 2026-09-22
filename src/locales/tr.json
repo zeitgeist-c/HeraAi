@@ -77,6 +77,8 @@
       "ollama_key_link": "Ollama anahtarı oluştur",
       "tavily_key_link": "Tavily anahtarı oluştur",
       "add_placeholder": "API anahtarınızı yapıştırın...",
+      "name_label": "Anahtar adı",
+      "name_placeholder": "Anahtar adı (isteğe bağlı)",
       "add_btn": "Anahtar Ekle",
       "test_btn": "Test Et",
       "test_all_btn": "Tümünü Test Et",

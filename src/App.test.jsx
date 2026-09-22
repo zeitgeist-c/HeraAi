@@ -2749,7 +2749,7 @@ describe('HeraAi App', () => {
     }));
   });
 
-  it('renders all provider key inputs as type=password', async () => {
+  it('renders provider API keys as passwords and names as text inputs', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -2760,7 +2760,9 @@ describe('HeraAi App', () => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
     });
 
-    expect(document.querySelectorAll('input[type="text"]').length).toBe(0);
+    const nameInputs = Array.from(document.querySelectorAll('input[maxlength="60"]'));
+    expect(nameInputs).toHaveLength(4);
+    expect(nameInputs.every(input => input.type === 'text')).toBe(true);
   });
 
   it('toggles a Gemini password input to text and back via the eye button', async () => {
@@ -3026,6 +3028,25 @@ describe('HeraAi App', () => {
     fireEvent.click(addBtn);
 
     expect(await screen.findByText(/^Pending$|^Bekliyor$/)).toBeInTheDocument();
+  });
+
+  it('saves and displays an optional name while adding an API key', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    openSettingsPanel();
+
+    const nameInputs = screen.getAllByRole('textbox', { name: /Key name|Anahtar adı/i });
+    const geminiInput = document.querySelectorAll('input[type="password"]')[0];
+    fireEvent.change(nameInputs[0], { target: { value: 'Kişisel Gemini' } });
+    fireEvent.change(geminiInput, { target: { value: 'AIza-named-key-1234567890' } });
+    fireEvent.click(Array.from(document.querySelectorAll('button')).find(button => (
+      button.textContent?.match(/Add Key|Anahtar Ekle/i)
+    )));
+
+    expect(await screen.findByText('Kişisel Gemini')).toBeInTheDocument();
+    expect(screen.getByText('AIza...7890')).toBeInTheDocument();
+    await waitFor(() => expect(kasaOku('gemini')[0]?.label).toBe('Kişisel Gemini'));
+    expect(nameInputs[0]).toHaveValue('');
   });
 
   it('renders the provider-grouped model selector with the 9 supported model ids', async () => {

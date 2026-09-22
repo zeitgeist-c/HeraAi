@@ -77,6 +77,8 @@
             "ollama_key_link": "Create an Ollama key",
             "tavily_key_link": "Create a Tavily key",
             "add_placeholder": "Paste your API key...",
+            "name_label": "Key name",
+            "name_placeholder": "Key name (optional)",
             "add_btn": "Add Key",
             "test_btn": "Test",
             "test_all_btn": "Test All",
