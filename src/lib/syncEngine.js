@@ -35,15 +35,14 @@ import {
 } from './idb'
 import {
   buildEntityDocument,
-  buildRevisionId,
   compareEntityVersions,
   deriveOpaqueId,
   entityTypeForStorageKey,
   isIncomingNewer,
   parseEntityVersion,
-  shouldWriteRevision,
+  CLOUD_SCHEMA_VERSION,
 } from './syncModel'
-import { buildAad, decryptJson, encryptJson } from './syncCrypto'
+import { buildAad, decryptBytes, decryptJson, encryptBytes, encryptJson } from './syncCrypto'
 
 /** Kilit adı; tek eşitleme çevrimi aynı anda yalnız bir bağlamda çalışır. */
 export const SYNC_LEASE_NAME = 'sync'
@@ -53,6 +52,19 @@ export const SYNC_BATCH_SIZE = 500
 
 /** Tek çekimde alınacak en fazla belge. */
 export const SYNC_PULL_LIMIT = 200
+export const SESSION_DOC_SAFE_BYTES = 700 * 1024
+export const SESSION_CHUNK_BYTES = 480 * 1024
+
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+function chunkAad(base, revision, index) {
+  const suffix = encoder.encode(`|chunk:${revision}:${index}`)
+  const result = new Uint8Array(base.length + suffix.length)
+  result.set(base)
+  result.set(suffix, base.length)
+  return result
+}
 
 /** Kuyruk kaydı türleri. */
 export const QUEUE_OP = Object.freeze({ PUT: 'put', DELETE: 'delete' })
@@ -253,21 +265,42 @@ export function createSyncEngine({
       nonce: zarf.nonce,
       ciphertext: zarf.ciphertext,
     }
-    const belge = buildEntityDocument({
+    let belge = buildEntityDocument({
       ...temel,
       entityType: kayit.entityType,
       deleted: silme,
     })
+    let chunks = null
+    let chunkRevision = null
+    if (!silme && kayit.entityType === 'session' && zarf.ciphertext.length > SESSION_DOC_SAFE_BYTES) {
+      const bytes = encoder.encode(JSON.stringify(yuk))
+      chunkRevision = `${kayit.entityVersion.wallTimeMs}-${kayit.entityVersion.logicalCounter}-${kayit.entityVersion.deviceId}`
+      chunks = []
+      for (let offset = 0, index = 0; offset < bytes.length; offset += SESSION_CHUNK_BYTES, index += 1) {
+        const encrypted = await encryptBytes(
+          subkeys.dataEncryptionKey,
+          bytes.subarray(offset, Math.min(bytes.length, offset + SESSION_CHUNK_BYTES)),
+          chunkAad(aad, chunkRevision, index),
+        )
+        chunks.push({ index, nonce: encrypted.nonce, ciphertext: encrypted.ciphertext })
+      }
+      belge = {
+        ...buildEntityDocument({
+          ...temel,
+          nonce: null,
+          ciphertext: null,
+          entityType: kayit.entityType,
+          deleted: false,
+        }),
+        chunkCount: chunks.length,
+        chunkRevision,
+        payloadBytes: bytes.length,
+      }
+    } else {
+      belge = { ...belge, chunkCount: 0 }
+    }
 
-    // Mevcut bir varlığın güncellenmesinde önceki sürüm saklanır.
-    const onceki = readLocalVersion
-      ? await readLocalVersion(kayit.entityType, opaqueEntityId)
-      : null
-    const revizyon = shouldWriteRevision({ isInitialSync: !onceki })
-      ? { id: buildRevisionId(kayit.entityVersion), document: belge }
-      : null
-
-    return { opaqueEntityId, document: belge, revision: revizyon }
+    return { opaqueEntityId, document: belge, chunks, chunkRevision }
   }
 
   /** Adım 3-5: kuyruğu boşaltır. */
@@ -281,7 +314,7 @@ export function createSyncEngine({
     for (let i = 0; i < kayitlar.length; i += batchSize) {
       const dilim = kayitlar.slice(i, i + batchSize)
       const belgeler = []
-      const revizyonlar = []
+      const chunkPlans = new Map()
       const temizlenecek = []
 
       for (const kayit of dilim) {
@@ -289,17 +322,30 @@ export function createSyncEngine({
         temizlenecek.push(kayit.id)
         if (hazir?.skipped) continue
         belgeler.push({ opaqueEntityId: hazir.opaqueEntityId, document: hazir.document })
-        if (hazir.revision) {
-          revizyonlar.push({
-            opaqueEntityId: hazir.opaqueEntityId,
-            revisionId: hazir.revision.id,
-            document: hazir.revision.document,
-          })
-        }
+        chunkPlans.set(hazir.opaqueEntityId, hazir)
       }
 
       if (belgeler.length > 0) {
-        await transport.pushEntities({ uid, documents: belgeler, revisions: revizyonlar })
+        for (const plan of chunkPlans.values()) {
+          if (plan.chunks?.length) {
+            if (!transport.setEntityChunks) throw new Error('sync_chunk_transport_missing')
+            await transport.setEntityChunks(uid, plan.opaqueEntityId, plan.chunkRevision, plan.chunks)
+          }
+        }
+        const pushed = await transport.pushEntities({ uid, documents: belgeler })
+        const appliedIds = pushed?.applied || belgeler.map(item => item.opaqueEntityId)
+        const applied = new Set(appliedIds)
+        for (const [opaqueEntityId, plan] of chunkPlans) {
+          if (!applied.has(opaqueEntityId)) {
+            if (plan.chunkRevision && transport.deleteEntityChunksRevision) {
+              await transport.deleteEntityChunksRevision(uid, opaqueEntityId, plan.chunkRevision)
+            }
+            continue
+          }
+          if (transport.deleteStaleEntityChunks) {
+            await transport.deleteStaleEntityChunks(uid, opaqueEntityId, plan?.chunkRevision || null)
+          }
+        }
         toplam += belgeler.length
         parti += 1
       }
@@ -339,19 +385,47 @@ export function createSyncEngine({
 
   /** Adım 7-8: AAD doğrulaması, sürüm karşılaştırması, yerel uygulama. */
   async function uzakUygula(uid, subkeys, uzak) {
-    if (!uzak?.opaqueEntityId || !uzak.ciphertext || !uzak.nonce) return false
+    if (!uzak?.opaqueEntityId) return false
+    if (Number(uzak.schemaVersion) !== CLOUD_SCHEMA_VERSION) {
+      throw new Error('sync_version_unsupported')
+    }
     const entityType = uzak.entityType
     const aad = buildAad({ ownerUid: uid, opaqueEntityId: uzak.opaqueEntityId, entityType })
     let yuk
     try {
-      yuk = await decryptJson(
-        subkeys.dataEncryptionKey,
-        { nonce: uzak.nonce, ciphertext: uzak.ciphertext },
-        aad,
-      )
-    } catch {
-      // AAD uyuşmazlığı veya bozuk kayıt: sessizce atlanır, imleç ilerler.
-      return false
+      if (Number(uzak.chunkCount) > 0) {
+        if (!uzak.chunkRevision || !transport.getEntityChunks) throw new Error('sync_chunk_incomplete')
+        const chunks = await transport.getEntityChunks(uid, uzak.opaqueEntityId, uzak.chunkRevision)
+        if (chunks.length !== Number(uzak.chunkCount)) throw new Error('sync_chunk_incomplete')
+        const parts = []
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunk = chunks[index]
+          if (Number(chunk.index) !== index) throw new Error('sync_chunk_incomplete')
+          parts.push(await decryptBytes(
+            subkeys.dataEncryptionKey,
+            { nonce: chunk.nonce, ciphertext: chunk.ciphertext },
+            chunkAad(aad, uzak.chunkRevision, index),
+          ))
+        }
+        const total = parts.reduce((sum, part) => sum + part.length, 0)
+        const bytes = new Uint8Array(total)
+        let offset = 0
+        for (const part of parts) {
+          bytes.set(part, offset)
+          offset += part.length
+        }
+        yuk = JSON.parse(decoder.decode(bytes))
+      } else {
+        if (!uzak.ciphertext || !uzak.nonce) throw new Error('sync_payload_invalid')
+        yuk = await decryptJson(
+          subkeys.dataEncryptionKey,
+          { nonce: uzak.nonce, ciphertext: uzak.ciphertext },
+          aad,
+        )
+      }
+    } catch (error) {
+      if (error?.message === 'sync_chunk_incomplete') throw error
+      throw new Error('sync_payload_invalid')
     }
 
     const uzakSurum = parseEntityVersion(uzak.entityVersion)

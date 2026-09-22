@@ -8,7 +8,7 @@
  * Anahtar hiyerarşisi:
  *   cihaz anahtarı (cihazda, dışa aktarılamaz)
  *     └─ sarar → ana sır (cloudMasterSecret)
- *          └─ HKDF → veri / blob / HMAC kimlik / parmak izi / yedek anahtarları
+ *          └─ HKDF → veri / HMAC kimlik / parmak izi / yedek anahtarları
  */
 
 import {
@@ -30,7 +30,7 @@ import {
   unwrapMasterSecretFromDevice,
   wrapMasterSecretForDevice,
 } from './syncCrypto'
-import { deriveOpaqueAttachmentId, deriveOpaqueId } from './syncModel'
+import { deriveOpaqueId } from './syncModel'
 
 /** Servis hatalarını tek tipe indirger. */
 function servisHatasi(kod) {
@@ -95,9 +95,6 @@ export function createCryptoService() {
     /** Opak varlık kimliği: `HMAC(hmacKey, "<entityType>:<logicalId>")`. */
     deriveOpaqueId: (hmacKey, entityType, logicalId) => deriveOpaqueId(hmacKey, entityType, logicalId),
 
-    /** Ek dosyalar için opak kimlik. */
-    deriveOpaqueAttachmentId: (hmacKey, attachmentId) => deriveOpaqueAttachmentId(hmacKey, attachmentId),
-
     /** Gizli parmak izi: mükerrer API anahtarını açık metin karşılaştırmadan bulur. */
     deriveSecretFingerprint: (fingerprintKey, rawKey) => computeKeyFingerprint(fingerprintKey, rawKey),
 
@@ -123,7 +120,7 @@ export function describeCryptoService() {
       'deriveOpaqueId',
       'deriveSecretFingerprint',
     ],
-    keyHierarchy: ['deviceKey', 'masterSecret', 'dataKey', 'blobKey', 'hmacKey', 'fingerprintKey', 'backupKey'],
+    keyHierarchy: ['deviceKey', 'masterSecret', 'dataKey', 'hmacKey', 'fingerprintKey', 'backupKey'],
   }
 }
 

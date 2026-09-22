@@ -18,10 +18,6 @@ const transport = {
   listDevices: vi.fn(async () => [...cloud.devices.values()]),
   pushEntities: vi.fn(async () => undefined),
   pullEntities: vi.fn(async () => ({ documents: [] })),
-  getBlobManifest: vi.fn(async () => null),
-  setBlobManifest: vi.fn(async () => undefined),
-  setBlobChunk: vi.fn(async () => undefined),
-  getBlobChunks: vi.fn(async () => []),
 }
 
 vi.mock('./authService', () => ({
@@ -35,6 +31,9 @@ vi.mock('./firestoreTransport', () => ({
 
 import {
   initializeCloudSync,
+  cloudSyncWakeReason,
+  mapCloudSyncError,
+  nextPacificQuotaReset,
   regenerateCloudRecoveryCode,
 } from './cloudSyncCoordinator'
 import { openMasterSecretFromRecovery } from './syncCrypto'
@@ -78,5 +77,51 @@ describe('cloud recovery code regeneration', () => {
     await expect(
       openMasterSecretFromRecovery(cloud.account.recoveryEnvelope, initial.recoveryCode),
     ).rejects.toThrow('recovery_code_invalid')
+  })
+})
+
+describe('cloud sync error policy', () => {
+  it.each([
+    ['resource-exhausted', 'quota_exceeded'],
+    ['permission-denied', 'rules_denied'],
+    ['unauthenticated', 'sync_signed_out'],
+    ['unavailable', 'offline'],
+    ['sync_chunk_incomplete', 'sync_chunk_incomplete'],
+    ['unknown', 'sync_failed'],
+  ])('%s hatasini %s koduna cevirir', (code, expected) => {
+    expect(mapCloudSyncError({ code })).toBe(expected)
+  })
+
+  it('kota engelini sonraki Pasifik gununun saat 01:00 anina kurar', () => {
+    const now = Date.parse('2026-09-22T12:07:30Z')
+    const reset = nextPacificQuotaReset(now)
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Los_Angeles',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(reset)).map(part => [part.type, part.value]))
+    expect(parts.hour).toBe('01')
+    expect(parts.minute).toBe('00')
+    expect(reset).toBeGreaterThan(now)
+  })
+
+  it('panel uyanmasinda kapali esitlemeyi atlar', () => {
+    expect(cloudSyncWakeReason({ syncEnabled: false }, 1_000_000)).toBe('disabled')
+  })
+
+  it('panel uyanmasinda duraklatilmis esitlemeyi atlar', () => {
+    expect(cloudSyncWakeReason({ syncEnabled: true, syncPaused: true }, 1_000_000)).toBe('paused')
+  })
+
+  it('panel uyanmasinda kota engelini atlar', () => {
+    expect(cloudSyncWakeReason({ syncEnabled: true, syncBlockedUntil: 2_000_000 }, 1_000_000))
+      .toBe('quota_blocked')
+  })
+
+  it('panel uyanmasinda 15 dakika dolmadan esitlemez', () => {
+    expect(cloudSyncWakeReason({ syncEnabled: true, syncLastSuccessAt: 500_001 }, 1_000_000))
+      .toBe('recently_synced')
+    expect(cloudSyncWakeReason({ syncEnabled: true, syncLastSuccessAt: 100_000 }, 1_000_000))
+      .toBeNull()
   })
 })

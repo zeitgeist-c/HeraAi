@@ -23,7 +23,7 @@ Private AI assistant living in Chrome's Side Panel. Chat with Gemini, OpenRouter
 - **File attachments** — images (Gemini/OpenRouter), PDF + audio Gemini-only, Office text extraction.
 - **Voice** — Gemini-only STT/TTS.
 - **Sessions** — history overlay, chat search, import/export.
-- **Encrypted cloud sync** — settings, chats, stats, API keys, and attachments up to 3 MiB across browsers; per-chat device-only mode.
+- **Encrypted cloud sync** — settings, chats, stats, encrypted API keys, and attachment metadata across browsers; attachment files stay on the originating device, with per-chat device-only mode.
 - **Recovery and backup** — recovery-code device linking, device revocation, and encrypted full backup/restore.
 - **Compare + auto-route** — model comparison panel and automatic provider routing.
 - **Bilingual UI** — TR/EN via i18next; light/dark/system themes; stats and response-time display.
@@ -46,13 +46,13 @@ npm run dev      # HMR dev server
 npm run preview  # preview production build
 npm run lint     # eslint — run before committing
 npm run test     # vitest + jsdom (chrome APIs mocked)
-npm run package  # release/HeraAi-<version>.zip (currently 1.10.5)
+npm run package  # release/HeraAi-<version>.zip (currently 1.10.6)
 ```
 
 ## Project structure
 
 ```text
-manifest.json        MV3 (sidePanel, storage, identity, alarms, activeTab, scripting, contextMenus, offscreen)
+manifest.json        MV3 (sidePanel, storage, identity, activeTab, scripting, contextMenus, offscreen)
 src/App.jsx          Side Panel React app
 src/background/      service worker
 src/offscreen/       generation worker
@@ -60,6 +60,10 @@ src/components/      Settings, ModelSelector, ChatMessage, History, Comparison, 
 src/lib/             providerApi, models, keyManager, fileParsers, voiceApi, autoRouter, ...
 src/locales/         en.json, tr.json
 ```
+
+## Firebase rules
+
+The repository contains the matching [`firestore.rules`](./firestore.rules), but packaging the extension does not publish those rules. Review and deploy them separately to the Firebase project before using cloud sync in production.
 
 ## Contributing
 

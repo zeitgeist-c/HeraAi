@@ -8,7 +8,6 @@
  *
  *   Bulut ana sırrı (256-bit, HKDF) ──HKDF-SHA-256(info)──▶ görev anahtarları
  *        ├─ dataEncryptionKey  (AES-GCM) ayar/sohbet/mesaj
- *        ├─ blobEncryptionKey  (AES-GCM) ek dosya parçaları
  *        ├─ hmacIdKey          (HMAC)    opak belge kimliği
  *        ├─ fingerprintKey     (HMAC)    yinelenen API anahtarı parmak izi
  *        └─ backupKey          (AES-GCM) çevrimdışı yedek dosyası
@@ -41,7 +40,6 @@ export const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 /** HKDF `info` parametreleri — sürümlenmiş sabit metinler. */
 export const HKDF_INFO = Object.freeze({
   dataEncryptionKey: 'heraai-data-encryption',
-  blobEncryptionKey: 'heraai-blob-encryption',
   hmacIdKey: 'heraai-opaque-id-hmac',
   fingerprintKey: 'heraai-key-fingerprint',
   backupKey: 'heraai-offline-backup',
@@ -52,7 +50,6 @@ const HKDF_SALT = 'heraai-sync-v1'
 /** Görev anahtarlarının Web Crypto algoritma tanımları. */
 export const SUBKEY_ALGORITHMS = Object.freeze({
   dataEncryptionKey: { name: 'AES-GCM', length: 256 },
-  blobEncryptionKey: { name: 'AES-GCM', length: 256 },
   hmacIdKey: { name: 'HMAC', hash: 'SHA-256' },
   fingerprintKey: { name: 'HMAC', hash: 'SHA-256' },
   backupKey: { name: 'AES-GCM', length: 256 },

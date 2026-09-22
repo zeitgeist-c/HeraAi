@@ -182,8 +182,9 @@ describe('syncContract alan sözleşmeleri', () => {
     expect(alanlar).toContain('attachments')
   })
 
-  it('ek politikası 3 MiB sınırını ve metadata alanlarını tanımlar', () => {
-    expect(ATTACHMENT_SYNC_POLICY.maxSyncBytes).toBe(3 * 1024 * 1024)
+  it('ek politikasında yalnız metadata eşitlenir', () => {
+    expect(ATTACHMENT_SYNC_POLICY.maxSyncBytes).toBe(0)
+    expect(ATTACHMENT_SYNC_POLICY.binarySynced).toBe(false)
     expect(ATTACHMENT_SYNC_POLICY.metadataSynced).toBe(true)
     expect(ATTACHMENT_SYNC_POLICY.store).toBe('heraai-attachments')
     expect(ATTACHMENT_SYNC_POLICY.missingMetadata).toContain('availability')

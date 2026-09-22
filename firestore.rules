@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// HeraAi 1.10.0 — Firestore güvenlik kuralları (Aşama 5).
+// HeraAi 1.10.6 — Firestore güvenlik kuralları.
 //
 // İlke: şifreleme istemcide yapılır, burada ise yalnızca "kendi verine eriş"
 // kuralı zorlanır. Tanımlanmamış her yol kapalıdır; yeni bir koleksiyon
@@ -44,30 +44,41 @@ service cloud.firestore {
         allow read: if isOwner();
         allow create, update: if isOwner()
           && request.resource.data.ownerUid == userId
+          && request.resource.data.schemaVersion == 1
           && request.resource.data.entityType in ['setting', 'session', 'message', 'message_batch', 'api_key', 'stats_day', 'tombstone']
           && request.resource.data.ciphertextSize <= 800000; // ~780 KiB üst sınır
         allow delete: if isOwner();
 
-        // Geçmiş sürümler: yetim kalmasın diye ana belgeyle aynı sahiplikte.
+        match /chunks/{chunkId} {
+          allow read, delete: if isOwner();
+          allow create, update: if isOwner()
+            && request.resource.data.ownerUid == userId
+            && request.resource.data.entityType == 'session_chunk'
+            && request.resource.data.schemaVersion == 1
+            && request.resource.data.chunkSize <= 720000;
+        }
+
+        // Eski revizyonlar yalnızca kullanıcı onaylı temizlik için okunup silinebilir.
         match /revisions/{revisionId} {
-          allow read, write: if isOwner();
+          allow read, delete: if isOwner();
+          allow create, update: if false;
         }
       }
 
       match /blobs/{blobId} {
-        allow read, write: if isOwner();
+        allow read, delete: if isOwner();
+        allow create, update: if false;
 
         match /chunks/{chunkIndex} {
-          allow read: if isOwner();
-          allow create, update: if isOwner()
-            && request.resource.data.chunkSize <= 750000; // ~730 KiB üst sınır
-          allow delete: if isOwner();
+          allow read, delete: if isOwner();
+          allow create, update: if false;
         }
       }
 
-      // Çevrimdışı yedekler (plan §7 koleksiyon listesi).
+      // Eski bulut yedekleri yalnızca kullanıcı onaylı temizlik için erişilebilir.
       match /backups/{backupId} {
-        allow read, write: if isOwner();
+        allow read, delete: if isOwner();
+        allow create, update: if false;
       }
     }
   }

@@ -32,6 +32,7 @@ import {
   signOutFromGoogle,
 } from '../lib/authService.js';
 import {
+  cleanLegacyCloudData,
   clearCloudSyncSession,
   disconnectCloudSync,
   exportEncryptedBackup,
@@ -1826,6 +1827,8 @@ const SYNC_REQUEST_TYPES = new Set([
   'SYNC_EXPORT_BACKUP',
   'SYNC_IMPORT_BACKUP',
   'SYNC_REGENERATE_RECOVERY',
+  'SYNC_WAKE',
+  'SYNC_CLEAN_LEGACY_CLOUD_DATA',
 ]);
 
 /**
@@ -1879,6 +1882,10 @@ async function handleSyncRequest(message) {
         return { ok: true, ...(await importEncryptedBackup(message.backup)) };
       case 'SYNC_REGENERATE_RECOVERY':
         return { ok: true, ...(await regenerateCloudRecoveryCode()) };
+      case 'SYNC_WAKE':
+        return { ok: true, result: await wakeCloudSync() };
+      case 'SYNC_CLEAN_LEGACY_CLOUD_DATA':
+        return { ok: true, ...(await cleanLegacyCloudData()) };
       default:
         return { ok: false, errorCode: 'sync_unknown_request' };
     }
@@ -1928,14 +1935,6 @@ if (typeof chrome.storage?.local?.setAccessLevel === 'function') {
 }
 
 installCloudSyncListeners();
-void wakeCloudSync();
-
-if (chrome.alarms) {
-  chrome.alarms.create('heraai-cloud-sync', { periodInMinutes: 15 });
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'heraai-cloud-sync') void wakeCloudSync();
-  });
-}
 
 // Prefer the native side panel. Browsers without this Chrome-specific API
 // open Hera in a regular extension tab instead.

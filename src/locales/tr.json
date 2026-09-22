@@ -9,7 +9,7 @@
     },
     "sync": {
       "title": "Google hesabıyla ortak kullanım",
-      "description": "Ayarlarınızı, sohbetlerinizi ve şifrelenmiş API anahtarlarınızı aynı Google hesabıyla kullandığınız tarayıcılar arasında eşitleyin. İçerik Firebase'e gönderilmeden önce cihazınızda şifrelenir.",
+      "description": "Ayarlarınızı, sohbetlerinizi, istatistiklerinizi ve şifrelenmiş API anahtarlarınızı aynı Google hesabındaki tarayıcılar arasında eşitleyin. Dosya ekleri cihazda kalır.",
       "sign_in": "Google ile giriş yap",
       "sign_out": "Hesaptan çık",
       "signed_in": "Google hesabına giriş yapıldı.",
@@ -36,6 +36,8 @@
       "last_sync": "Son eşitleme",
       "pending": "Bekleyen değişiklik",
       "last_error": "Son hata: {{code}}",
+      "blocked_until": "Firebase kota koruması {{date}} tarihine kadar etkin.",
+      "attachments_local_notice": "Görsel, PDF, Office dosyası ve ekran kırpıntılarının ikili içeriği buluta gönderilmez. Diğer cihazlarda yalnızca ek bilgisi görünür.",
       "sync_now": "Şimdi eşitle",
       "completed": "Eşitleme tamamlandı.",
       "pause": "Duraklat",
@@ -47,6 +49,13 @@
       "revoked": "Erişimi kaldırıldı",
       "revoke": "Cihaz erişimini kaldır",
       "device_revoked": "Cihaz erişimi kaldırıldı.",
+      "legacy_cleanup_title": "Eski bulut verileri",
+      "legacy_cleanup_description": "Önceki sürümlerin yüklediği şifreli ekleri, revizyonları ve kullanılmayan bulut yedeklerini kalıcı olarak siler. Güncel sohbet ve ayarlara dokunmaz.",
+      "legacy_cleanup_action": "Eski bulut verilerini temizle",
+      "legacy_cleanup_confirm": "Eski şifreli ekler, revizyonlar ve kullanılmayan bulut yedekleri kalıcı olarak silinsin mi? Bu işlem geri alınamaz.",
+      "legacy_cleanup_completed": "Eski bulut verileri temizlendi.",
+      "legacy_cleanup_summary": "Silinen: {{blobs}} ek, {{chunks}} parça, {{revisions}} revizyon, {{backups}} yedek.",
+      "legacy_cleanup_last_completed": "Son temizlik: {{date}}",
       "backup_title": "Şifreli tam yedek",
       "backup_description": "Sohbetleri, ayarları, istatistikleri ve API anahtarlarını yalnız bu hesaba ait anahtarla okunabilen bir dosyaya aktarın.",
       "export_backup": "Yedeği indir",
@@ -55,7 +64,17 @@
       "backup_imported": "Şifreli yedek geri yüklendi.",
       "disconnect": "Bu cihazda eşitlemeyi kapat",
       "disconnected": "Bu cihazda eşitleme kapatıldı.",
-      "error": "İşlem tamamlanamadı: {{code}}"
+      "error": "İşlem tamamlanamadı: {{code}}",
+      "errors": {
+        "quota_exceeded": "Günlük Firebase kotası doldu. Gösterilen zamandan sonra yeniden deneyin.",
+        "rules_denied": "Firebase güvenlik kuralları bu işleme izin vermedi.",
+        "sync_signed_out": "Google hesabı oturumu kapalı.",
+        "offline": "İnternet bağlantısı yok veya Firebase'e ulaşılamıyor.",
+        "sync_version_unsupported": "Bulut verisinin sürümü bu HeraAi sürümüyle uyumlu değil.",
+        "sync_chunk_incomplete": "Büyük sohbetin bulut parçaları eksik. Daha sonra yeniden deneyin.",
+        "sync_payload_invalid": "Şifreli bulut verisi bozuk veya doğrulanamadı.",
+        "sync_failed": "Senkronizasyon tamamlanamadı. Daha sonra yeniden deneyin."
+      }
     },
     "api": {
       "active": "Aktif",

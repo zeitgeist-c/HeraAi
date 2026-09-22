@@ -9,7 +9,7 @@
         },
         "sync": {
             "title": "Share through your Google account",
-            "description": "Sync settings, chats, and encrypted API keys across browsers using the same Google account. Content is encrypted on your device before it reaches Firebase.",
+            "description": "Sync settings, chats, statistics, and encrypted API keys across browsers on the same Google account. File attachments remain on the device.",
             "sign_in": "Sign in with Google",
             "sign_out": "Sign out",
             "signed_in": "Signed in to your Google account.",
@@ -36,6 +36,8 @@
             "last_sync": "Last sync",
             "pending": "Pending changes",
             "last_error": "Last error: {{code}}",
+            "blocked_until": "Firebase quota protection is active until {{date}}.",
+            "attachments_local_notice": "Binary content for images, PDFs, Office files, and screen crops is never uploaded. Other devices receive attachment metadata only.",
             "sync_now": "Sync now",
             "completed": "Sync completed.",
             "pause": "Pause",
@@ -47,6 +49,13 @@
             "revoked": "Access revoked",
             "revoke": "Revoke device access",
             "device_revoked": "Device access revoked.",
+            "legacy_cleanup_title": "Legacy cloud data",
+            "legacy_cleanup_description": "Permanently removes encrypted attachments, revisions, and unused cloud backups uploaded by earlier versions. Current chats and settings are not touched.",
+            "legacy_cleanup_action": "Clean legacy cloud data",
+            "legacy_cleanup_confirm": "Permanently delete legacy encrypted attachments, revisions, and unused cloud backups? This cannot be undone.",
+            "legacy_cleanup_completed": "Legacy cloud data was cleaned.",
+            "legacy_cleanup_summary": "Deleted: {{blobs}} attachments, {{chunks}} chunks, {{revisions}} revisions, {{backups}} backups.",
+            "legacy_cleanup_last_completed": "Last cleanup: {{date}}",
             "backup_title": "Encrypted full backup",
             "backup_description": "Export chats, settings, statistics, and API keys to a file that can only be read with this account's key.",
             "export_backup": "Download backup",
@@ -55,7 +64,17 @@
             "backup_imported": "Encrypted backup restored.",
             "disconnect": "Disable sync on this device",
             "disconnected": "Sync disabled on this device.",
-            "error": "Operation failed: {{code}}"
+            "error": "Operation failed: {{code}}",
+            "errors": {
+                "quota_exceeded": "The daily Firebase quota is exhausted. Retry after the displayed time.",
+                "rules_denied": "Firebase security rules denied this operation.",
+                "sync_signed_out": "The Google account is signed out.",
+                "offline": "There is no Internet connection or Firebase is unavailable.",
+                "sync_version_unsupported": "The cloud data version is unsupported by this HeraAi version.",
+                "sync_chunk_incomplete": "Cloud chunks for a large chat are incomplete. Retry later.",
+                "sync_payload_invalid": "Encrypted cloud data is corrupt or could not be authenticated.",
+                "sync_failed": "Synchronization could not be completed. Retry later."
+            }
         },
         "api": {
             "active": "Active",

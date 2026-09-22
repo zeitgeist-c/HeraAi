@@ -95,14 +95,13 @@ describe('syncCrypto anahtar hiyerarsisi', () => {
     await expect(globalThis.crypto.subtle.exportKey('raw', key)).rejects.toBeTruthy()
   })
 
-  it('bes gorev anahtari turetilir ve turleri dogrudur', async () => {
+  it('dort gorev anahtari turetilir ve turleri dogrudur', async () => {
     const { keys } = await hazirla()
     expect(Object.keys(keys).sort()).toEqual([
-      'backupKey', 'blobEncryptionKey', 'dataEncryptionKey', 'fingerprintKey', 'hmacIdKey',
+      'backupKey', 'dataEncryptionKey', 'fingerprintKey', 'hmacIdKey',
     ])
     expect(keys.dataEncryptionKey.algorithm.name).toBe('AES-GCM')
     expect(keys.dataEncryptionKey.algorithm.length).toBe(256)
-    expect(keys.blobEncryptionKey.algorithm.name).toBe('AES-GCM')
     expect(keys.backupKey.algorithm.name).toBe('AES-GCM')
     expect(keys.hmacIdKey.algorithm.name).toBe('HMAC')
     expect(keys.fingerprintKey.algorithm.name).toBe('HMAC')
@@ -116,7 +115,6 @@ describe('syncCrypto anahtar hiyerarsisi', () => {
     const metin = { a: 1 }
     const zarf = await encryptJson(keys.dataEncryptionKey, metin)
     await expect(decryptJson(yeniden, zarf)).resolves.toEqual(metin)
-    await expect(decryptJson(keys.blobEncryptionKey, zarf)).rejects.toThrow('decrypt_failed')
     await expect(decryptJson(keys.backupKey, zarf)).rejects.toThrow('decrypt_failed')
   })
 
@@ -127,7 +125,6 @@ describe('syncCrypto anahtar hiyerarsisi', () => {
 
   it('HKDF info metinleri plan ile aynidir', () => {
     expect(HKDF_INFO.dataEncryptionKey).toBe('heraai-data-encryption')
-    expect(HKDF_INFO.blobEncryptionKey).toBe('heraai-blob-encryption')
     expect(HKDF_INFO.hmacIdKey).toBe('heraai-opaque-id-hmac')
     expect(HKDF_INFO.fingerprintKey).toBe('heraai-key-fingerprint')
     expect(HKDF_INFO.backupKey).toBe('heraai-offline-backup')
@@ -263,10 +260,10 @@ describe('syncCrypto veri sifreleme', () => {
   it('ham bayt yuku sifrelenir ve acilir', async () => {
     const { keys } = await hazirla()
     const veri = randomBytes(256)
-    const zarf = await encryptBytes(keys.blobEncryptionKey, veri)
-    const acilan = await decryptBytes(keys.blobEncryptionKey, zarf)
+    const zarf = await encryptBytes(keys.dataEncryptionKey, veri)
+    const acilan = await decryptBytes(keys.dataEncryptionKey, zarf)
     expect(Array.from(acilan)).toEqual(Array.from(veri))
-    await expect(decryptBytes(keys.dataEncryptionKey, zarf)).rejects.toThrow('decrypt_failed')
+    await expect(decryptBytes(keys.backupKey, zarf)).rejects.toThrow('decrypt_failed')
   })
 
   it('API anahtari parmak izi deterministik ve tektir', async () => {

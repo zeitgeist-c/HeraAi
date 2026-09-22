@@ -59,7 +59,7 @@ describe('firestore.rules guvenlik sozlesmesi', () => {
 
   it('belge boyut sinirlari 1 MiB limitinin altindadir', () => {
     expect(kurallar).toContain('ciphertextSize <= 800000')
-    expect(kurallar).toContain('chunkSize <= 750000')
+    expect(kurallar).toContain('chunkSize <= 720000')
   })
 
   it('varlik sahipligi ve sema alanlari dogrulanir', () => {
@@ -76,5 +76,14 @@ describe('firestore.rules guvenlik sozlesmesi', () => {
       kurallar.indexOf('match /devices/{deviceId}'),
     )
     expect(hesapBlogu).toContain('allow delete: if false;')
+  })
+
+  it('eski blob, revision ve yedek yollarinda yeni veri yazimini reddeder', () => {
+    for (const yol of ['match /revisions/{revisionId}', 'match /blobs/{blobId}', 'match /backups/{backupId}']) {
+      const baslangic = kurallar.indexOf(yol)
+      const blok = kurallar.slice(baslangic, kurallar.indexOf('\n      }', baslangic) + 8)
+      expect(blok).toContain('allow create, update: if false;')
+      expect(blok).toContain('allow read, delete: if isOwner();')
+    }
   })
 })

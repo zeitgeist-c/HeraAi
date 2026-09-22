@@ -14,7 +14,6 @@ import {
   cloudPaths,
   compareEntityVersions,
   createEntityVersion,
-  deriveOpaqueAttachmentId,
   deriveOpaqueId,
   describeCloudModel,
   entityTypeForStorageKey,
@@ -102,13 +101,9 @@ describe('syncModel opak kimlik', () => {
     expect(opak).not.toContain('session')
   })
 
-  it('ek dosya kimligi blob ad alaniyla turetilir', async () => {
-    const key = await makeHmacKey()
-    const opak = await deriveOpaqueAttachmentId(key, 'attachment-1')
-    const ayni = await deriveOpaqueAttachmentId(key, 'attachment-1')
-    const farkli = await deriveOpaqueAttachmentId(key, 'attachment-2')
-    expect(opak).toBe(ayni)
-    expect(opak).not.toBe(farkli)
+  it('eski ek yolu yalniz temizlik uyumlulugu icin tanimlidir', () => {
+    expect(cloudPaths.blob('u1', 'legacy-1')).toBe('users/u1/blobs/legacy-1')
+    expect(cloudPaths.blobChunk('u1', 'legacy-1', 2)).toBe('users/u1/blobs/legacy-1/chunks/2')
   })
 
   it('eksik anahtar veya kimlikte hata verir', async () => {
@@ -116,7 +111,7 @@ describe('syncModel opak kimlik', () => {
     await expect(deriveOpaqueId(null, 'session', 'x')).rejects.toThrow('opaque_id_key_missing')
     await expect(deriveOpaqueId(key, 'bilinmeyen', 'x')).rejects.toThrow('opaque_id_type_invalid')
     await expect(deriveOpaqueId(key, 'session', '')).rejects.toThrow('opaque_id_logical_missing')
-    await expect(deriveOpaqueAttachmentId(key, '')).rejects.toThrow('opaque_id_logical_missing')
+    expect(cloudPaths.blob('u1', 'legacy')).toContain('/blobs/')
   })
 
   it('ad alani bicimi tur:kimlik seklindedir', () => {
