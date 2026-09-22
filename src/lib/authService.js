@@ -138,6 +138,13 @@ export function getCurrentAuthUser() {
   return toAuthUser(getFirebaseAuth().currentUser)
 }
 
+export async function waitForCurrentAuthUser() {
+  if (!isFirebaseConfigured()) return null
+  const auth = getFirebaseAuth()
+  if (typeof auth.authStateReady === 'function') await auth.authStateReady()
+  return toAuthUser(auth.currentUser)
+}
+
 export function subscribeToAuthChanges(handler) {
   if (!isFirebaseConfigured()) return () => {}
   return onAuthStateChanged(getFirebaseAuth(), user => handler(toAuthUser(user)))

@@ -309,7 +309,7 @@ describe('gönderim', () => {
     expect(transport.pushEntities.mock.calls[0][0].documents[0].opaqueEntityId).toBe(beklenen)
   })
 
-  it('silme kaydını tombstone olarak gönderir', async () => {
+  it('silme kaydını ayni varlik turunde tombstone bayragiyla gönderir', async () => {
     const motor = motorKur()
     await motor.enqueue({
       storageKey: 'sessions',
@@ -321,7 +321,7 @@ describe('gönderim', () => {
     const sonuc = await motor.runOnce()
     expect(sonuc.pushed).toBe(1)
     const belge = transport.pushEntities.mock.calls[0][0].documents[0]
-    expect(belge.document.entityType).toBe('tombstone')
+    expect(belge.document.entityType).toBe('session')
     expect(belge.document.deleted).toBe(true)
   })
 

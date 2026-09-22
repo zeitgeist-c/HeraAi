@@ -406,6 +406,7 @@ function createSession({ id, title, messages, updatedAt = Date.now(), activeAtta
     title,
     isTitleCustom: false,
     isStarred: false,
+    syncPolicy: 'synced',
     updatedAt,
     messages,
     activeAttachmentIds,
@@ -436,6 +437,7 @@ function normalizeSessionMetadata(session) {
     ...(shouldResetHiddenPromptTitle ? { title: i18n.t('chat.new_chat') } : {}),
     isTitleCustom: session.isTitleCustom === true,
     isStarred: session.isStarred === true,
+    syncPolicy: session.syncPolicy === 'local_only' ? 'local_only' : 'synced',
     activeAttachmentIds: Array.isArray(session.activeAttachmentIds) ? session.activeAttachmentIds : [],
     activeWebUrls: Array.isArray(session.activeWebUrls) ? session.activeWebUrls : [],
   }
@@ -1119,6 +1121,16 @@ function App() {
       notifyError(t('chat.bulk_delete.save_error', {
         defaultValue: 'Chat could not be updated.',
       }))
+    })
+  }, [t, updateSessionMetadata])
+
+  const toggleSessionSyncPolicy = useCallback((sessionId) => {
+    const currentSession = sessionsRef.current.find(session => session?.id === sessionId)
+    if (!currentSession) return
+    void updateSessionMetadata(sessionId, {
+      syncPolicy: currentSession.syncPolicy === 'local_only' ? 'synced' : 'local_only',
+    }).catch(() => {
+      notifyError(t('chat.sync_policy.save_error'))
     })
   }, [t, updateSessionMetadata])
 
@@ -2261,6 +2273,7 @@ function App() {
           'selectedProvider',
           'modelSelectionMode',
           'comparisonModelKeys',
+          'apiKeyUsageMode',
         ])
       } catch (error) {
         console.error('Chrome storage initialization failed', error)
@@ -2275,6 +2288,7 @@ function App() {
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
         language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
         showSources: result.showSources === true,
+        apiKeyUsageMode: result.apiKeyUsageMode === 'balanced_rotation' ? 'balanced_rotation' : 'primary',
       }
       if (systemInstructionConfig.shouldPersist) {
         try {
@@ -4639,6 +4653,7 @@ function App() {
         onDelete={deleteSession}
         onRename={renameSession}
         onToggleStar={toggleStarSession}
+        onToggleSyncPolicy={toggleSessionSyncPolicy}
         onRequestBulkDelete={requestBulkDelete}
         bulkDeleteOpen={showBulkDeleteConfirm}
         onCancelBulkDelete={() => setShowBulkDeleteConfirm(false)}

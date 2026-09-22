@@ -31,6 +31,21 @@ import {
   signInWithGoogle,
   signOutFromGoogle,
 } from '../lib/authService.js';
+import {
+  clearCloudSyncSession,
+  disconnectCloudSync,
+  exportEncryptedBackup,
+  getCloudSyncStatus,
+  initializeCloudSync,
+  importEncryptedBackup,
+  installCloudSyncListeners,
+  linkCloudSyncDevice,
+  listCloudSyncDevices,
+  revokeCloudSyncDevice,
+  runCloudSync,
+  setCloudSyncPaused,
+  wakeCloudSync,
+} from '../lib/cloudSyncCoordinator.js';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const OFFSCREEN_REASON = 'WORKERS';
@@ -1798,6 +1813,18 @@ async function handleGetState() {
 }
 
 const AUTH_REQUEST_TYPES = new Set(['AUTH_SIGN_IN', 'AUTH_SIGN_OUT', 'AUTH_GET_STATE']);
+const SYNC_REQUEST_TYPES = new Set([
+  'SYNC_GET_STATUS',
+  'SYNC_INITIALIZE',
+  'SYNC_LINK_DEVICE',
+  'SYNC_NOW',
+  'SYNC_SET_PAUSED',
+  'SYNC_LIST_DEVICES',
+  'SYNC_REVOKE_DEVICE',
+  'SYNC_DISCONNECT',
+  'SYNC_EXPORT_BACKUP',
+  'SYNC_IMPORT_BACKUP',
+]);
 
 /**
  * Kimlik dogrulama istekleri generation kuyruguna girmez; dogrudan yanitlanir.
@@ -1810,9 +1837,11 @@ async function handleAuthRequest(message) {
     }
     if (message.type === 'AUTH_SIGN_IN') {
       const user = await signInWithGoogle();
+      await wakeCloudSync();
       return { ok: true, user: user || null };
     }
     if (message.type === 'AUTH_SIGN_OUT') {
+      await clearCloudSyncSession();
       await signOutFromGoogle();
       return { ok: true, user: null };
     }
@@ -1820,6 +1849,38 @@ async function handleAuthRequest(message) {
   } catch (error) {
     const code = AUTH_ERROR_CODES.has(error?.code) ? error.code : 'auth_failed';
     return { ok: false, errorCode: code, user: null };
+  }
+}
+
+async function handleSyncRequest(message) {
+  try {
+    switch (message.type) {
+      case 'SYNC_GET_STATUS':
+        return { ok: true, status: await getCloudSyncStatus() };
+      case 'SYNC_INITIALIZE':
+        return { ok: true, ...(await initializeCloudSync()) };
+      case 'SYNC_LINK_DEVICE':
+        return { ok: true, ...(await linkCloudSyncDevice(message.recoveryCode)) };
+      case 'SYNC_NOW':
+        return { ok: true, result: await runCloudSync(), status: await getCloudSyncStatus() };
+      case 'SYNC_SET_PAUSED':
+        return { ok: true, ...(await setCloudSyncPaused(message.paused)) };
+      case 'SYNC_LIST_DEVICES':
+        return { ok: true, devices: await listCloudSyncDevices() };
+      case 'SYNC_REVOKE_DEVICE':
+        return { ok: true, ...(await revokeCloudSyncDevice(message.deviceId)) };
+      case 'SYNC_DISCONNECT':
+        return { ok: true, ...(await disconnectCloudSync()) };
+      case 'SYNC_EXPORT_BACKUP':
+        return { ok: true, backup: await exportEncryptedBackup() };
+      case 'SYNC_IMPORT_BACKUP':
+        return { ok: true, ...(await importEncryptedBackup(message.backup)) };
+      default:
+        return { ok: false, errorCode: 'sync_unknown_request' };
+    }
+  } catch (error) {
+    console.error('Sync request error', error);
+    return { ok: false, errorCode: error?.code || error?.message || 'sync_failed' };
   }
 }
 
@@ -1860,6 +1921,16 @@ function handleProtocolMessage(message) {
 if (typeof chrome.storage?.local?.setAccessLevel === 'function') {
   Promise.resolve(chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }))
     .catch(error => console.error('Storage access level could not be restricted', error));
+}
+
+installCloudSyncListeners();
+void wakeCloudSync();
+
+if (chrome.alarms) {
+  chrome.alarms.create('heraai-cloud-sync', { periodInMinutes: 15 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'heraai-cloud-sync') void wakeCloudSync();
+  });
 }
 
 // Prefer the native side panel. Browsers without this Chrome-specific API
@@ -1934,6 +2005,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, errorCode: 'auth_failed', user: null });
         },
       );
+    return true;
+  }
+
+  if (SYNC_REQUEST_TYPES.has(message.type)) {
+    handleSyncRequest(message).then(
+      response => sendResponse(response),
+      () => sendResponse({ ok: false, errorCode: 'sync_failed' }),
+    );
     return true;
   }
 

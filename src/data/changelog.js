@@ -2,11 +2,33 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.1',
+    date: '2026-09-22',
+    changes: {
+      tr: [
+        '1.10.0 bulut modülleri gerçek uygulama akışına bağlandı: Google girişi, ilk kurulum, kurtarma kodu ve cihaz yönetimi artık Ayarlar > Bulut bölümünde çalışıyor',
+        'Ayarlar, sohbetler, istatistikler ve şifreli API anahtarları Firestore üzerinden otomatik veya elle eşitleniyor',
+        'Ana API ve anahtarlar arasında sırayla dolaşma seçenekleri istek seçim katmanına bağlandı; anahtarlar tek tek duraklatılabiliyor',
+        '1.9.4 anahtarları şifreli kasaya güvenli taşınıyor; 1.10.0\'ın bırakabildiği açık geri dönüş kopyası temizleniyor',
+        'Sohbetler bulut veya yalnız cihaz olarak seçilebiliyor; 3 MiB\'a kadar ekler şifreli parçalarla aktarılıyor',
+        'Şifreli tam yedek indirme ve aynı hesap anahtarıyla geri yükleme eklendi',
+      ],
+      en: [
+        'The 1.10.0 cloud modules are now connected to the real app flow: Google sign-in, onboarding, recovery code, and device management work under Settings > Cloud',
+        'Settings, chats, statistics, and encrypted API keys now sync through Firestore automatically or on demand',
+        'Primary-key and balanced-rotation modes are connected to request selection; individual keys can be paused',
+        '1.9.4 keys migrate safely into the encrypted vault, and any plaintext rollback copy left by 1.10.0 is removed',
+        'Chats can be cloud-synced or device-only; attachments up to 3 MiB transfer in encrypted chunks',
+        'Encrypted full-backup download and restore with the same account key are now available',
+      ],
+    },
+  },
+  {
     version: '1.10.0',
     date: '2026-09-22',
     changes: {
       tr: [
-        'Uçtan uca şifreli bulut eşitleme: sohbet, ayar, istatistik ve API anahtarları cihazlar arasında şifreli taşınır',
+        'Uçtan uca şifreli bulut eşitleme için veri modeli, kripto, kuyruk ve test altyapısı',
         'API anahtarları artık açık metin tutulmaz; şifreli kasada saklanır',
         'Kurtarma kodu ile ikinci cihaz kurulumu ve 7 günlük geri dönüş noktaları',
         'Anahtarları sırayla kullan modu ve sağlık takibi (bekleme, geçersiz, duraklatıldı)',
@@ -14,7 +36,7 @@ export const CHANGELOG = Object.freeze([
         'Çevrimdışıyken çalışmaya devam edilir; bağlantı gelince kuyruk kendiliğinden eşitlenir',
       ],
       en: [
-        'End-to-end encrypted cloud sync: chats, settings, stats and API keys travel encrypted',
+        'Data model, cryptography, queue, and test infrastructure for end-to-end encrypted cloud sync',
         'API keys are no longer stored in plain text; they live in an encrypted vault',
         'Second-device setup with a recovery code and 7-day restore points',
         'Balanced key rotation mode with health tracking (cooldown, invalid, paused)',
