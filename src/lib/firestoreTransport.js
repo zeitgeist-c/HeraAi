@@ -12,7 +12,7 @@ import {
   serverTimestamp,
   setDoc,
   startAfter,
-} from 'firebase/firestore'
+} from 'firebase/firestore/lite'
 
 import { getFirebaseFirestore } from './firebaseClient'
 import { cloudPaths } from './syncModel'
