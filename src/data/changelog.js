@@ -2,6 +2,22 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.8',
+    date: '2026-09-23',
+    changes: {
+      tr: [
+        'Bulut sekmesindeki bağlı cihazları kapatıp açabilirsiniz; kapalı cihaz yeniden açılana kadar eşitleme yapmaz',
+        'Bağlı cihazlara ad verebilirsiniz; ad diğer cihazlarda da görünür ve cihaz yeniden bağlansa bile korunur',
+        'Bir cihaz başka bir cihazdan kapatıldığında o cihazın panelinde durum açıkça gösterilir; eşitle, yedek ve kurtarma kodu işlemleri kapalıyken çalışmaz',
+      ],
+      en: [
+        'You can now turn linked devices off and on from the Cloud tab; a turned-off device stops syncing until it is turned back on',
+        'You can give linked devices a name; the name shows up on other devices and survives re-linking',
+        'When a device is turned off from another device, its panel shows the state clearly; sync, backup, and recovery-code actions stay disabled while it is off',
+      ],
+    },
+  },
+  {
     version: '1.10.7',
     date: '2026-09-23',
     changes: {
