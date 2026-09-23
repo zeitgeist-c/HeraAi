@@ -2,6 +2,32 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.12',
+    date: '2026-09-24',
+    changes: {
+      tr: [
+        'Otomatik eşitleme eklendi: bulut bölümünden aralık seçilir (Manuel / 1 saat / 2 saat / 6 saat) ve panel açıkken seçilen aralıkta kendiliğinden eşitlenir',
+        'Bir değişiklik yaptığında sohbet ve ayarlar 1 dakika içinde kendiliğinden buluta gönderilir; düğmeye basmak gerekmez',
+        'Panel kapalıyken veya bilgisayar boştayken otomatik eşitleme çalışmaz, boşuna veri harcamaz',
+        'Bulut bölümünde günlük Firebase kullanımı görünüyor (okuma/yazma yüzdesi)',
+        'Günlük kullanım ücretsiz sınırın yarısını geçerse otomatik eşitleme yavaşlar ve panelde uyarı çıkar',
+        'Aynı anda iki eşitleme çalışması engellendi: üst üste gelen istekler tek koşuda birleşir',
+        'API anahtarlarının yanında artık son kullanım saati de görünüyor, anahtar sırayla kullanımı gözle izlenebiliyor',
+        'Yeni izin istenmiyor; güncelleme sorunsuz kurulur',
+      ],
+      en: [
+        'Automatic sync added: pick an interval in the cloud section (Manual / 1 hour / 2 hours / 6 hours) and it syncs on its own while the panel is open',
+        'Chats and settings are sent to the cloud within a minute of a change; no button press needed',
+        'Automatic sync does not run while the panel is closed or the computer is idle, so it never wastes quota',
+        "The cloud section shows today's Firebase usage (read/write percentage)",
+        'If daily usage passes half of the free tier, automatic sync slows down and the panel shows a warning',
+        'Two syncs can no longer run at the same time: overlapping requests collapse into one run',
+        'API key rows now show the last-used time, so key rotation can be watched',
+        'No new permissions are requested; the update installs cleanly',
+      ],
+    },
+  },
+  {
     version: '1.10.11',
     date: '2026-09-23',
     changes: {
