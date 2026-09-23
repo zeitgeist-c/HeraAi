@@ -2,6 +2,20 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.9',
+    date: '2026-09-23',
+    changes: {
+      tr: [
+        'Erişimi kaldırılmış cihazlar artık "Bağlı cihazlar" listesinde görünmez',
+        'Listede yalnızca erişimi açık cihazlar kalır; kapatma ve ad verme butonları her satırda çalışır',
+      ],
+      en: [
+        'Devices with revoked access no longer appear in the Linked devices list',
+        'Only devices with active access stay in the list; the turn-off and rename buttons work on every row',
+      ],
+    },
+  },
+  {
     version: '1.10.8',
     date: '2026-09-23',
     changes: {
