@@ -847,6 +847,39 @@ describe('HeraAi App', () => {
     }
   });
 
+  it('renders the language choice as a segmented control and applies it', async () => {
+    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'tr';
+    await i18n.changeLanguage('tr');
+    currentStorage = {
+      theme: 'light',
+      language: 'tr',
+    };
+
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+      openSettingsPanel();
+      fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+
+      const group = screen.getByRole('radiogroup', { name: /Dil|Language/i });
+      const options = within(group).getAllByRole('radio');
+      expect(options).toHaveLength(2);
+      expect(options[0]).toHaveAttribute('aria-checked', 'true');
+      expect(options[1]).toHaveAttribute('aria-checked', 'false');
+      expect(within(group).getByRole('radio', { name: /TR/ })).toHaveTextContent('Türkçe');
+      expect(within(group).getByRole('radio', { name: /EN/ })).toHaveTextContent('English');
+
+      fireEvent.click(options[1]);
+
+      await waitFor(() => expect(i18n.resolvedLanguage).toBe('en'));
+      expect(options[1]).toHaveAttribute('aria-checked', 'true');
+      expect(options[0]).toHaveAttribute('aria-checked', 'false');
+    } finally {
+      await i18n.changeLanguage(previousLanguage);
+    }
+  });
+
   it('adopts an atomic session and generation change that lands during bootstrap', async () => {
     const initialStorage = {
       theme: 'light',
@@ -2817,13 +2850,17 @@ describe('HeraAi App', () => {
     ].map(pattern => screen.getByText(pattern).closest('button'));
 
     expect(providerHeadings.map(button => button.getAttribute('aria-expanded'))).toEqual([
-      'true',
+      'false',
       'false',
       'false',
       'false',
     ]);
 
     fireEvent.click(providerHeadings[1]);
+    expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'false');
+    expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(providerHeadings[0]);
     expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'true');
     expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
 
@@ -3002,6 +3039,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     openSettingsPanel();
+    fireEvent.click(screen.getByText(/Gemini API (Keys|Anahtarları)/i).closest('button'));
 
     const keyList = await screen.findByTestId('gemini-key-list');
     expect(keyList).toHaveClass('max-h-64', 'overflow-y-auto');
@@ -3034,6 +3072,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     openSettingsPanel();
+    fireEvent.click(screen.getByText(/Gemini API (Keys|Anahtarları)/i).closest('button'));
 
     const nameInputs = screen.getAllByRole('textbox', { name: /Key name|Anahtar adı/i });
     const geminiInput = document.querySelectorAll('input[type="password"]')[0];
@@ -4323,6 +4362,49 @@ describe('HeraAi App', () => {
     expect(screen.getByText('Pin this chat')).toBeInTheDocument();
     expect(screen.getByText('Already starred')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus());
+  });
+
+  it('başka cihazdan eşitlenen yeni sohbeti geçmiş listesinde gösterir', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = {
+      theme: 'light',
+      startupBehavior: 'resume',
+      activeSessionId: 'yerel-1',
+      sessions: [
+        {
+          id: 'yerel-1',
+          title: 'Local chat',
+          isTitleCustom: false,
+          isStarred: false,
+          updatedAt: 100,
+          messages: [{ id: 'yerel-m1', role: 'user', content: 'Local question' }],
+        },
+      ],
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
+    expect(screen.getByText('Local chat')).toBeInTheDocument();
+
+    const pulledSession = {
+      id: 'uzak-1',
+      title: 'Synced starred chat',
+      isTitleCustom: false,
+      isStarred: true,
+      updatedAt: 200,
+      messages: [{ id: 'uzak-m1', role: 'user', content: 'Remote question' }],
+    };
+    const previousSessions = currentStorage.sessions;
+    currentStorage.sessions = [...previousSessions, pulledSession];
+    triggerStorageChange({
+      sessions: { oldValue: previousSessions, newValue: currentStorage.sessions },
+    });
+
+    expect(await screen.findByText('Synced starred chat')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Starred' })).toBeInTheDocument();
+    expect(screen.getByText('Local chat')).toBeInTheDocument();
   });
 
   it('uses the protected menu action and cancels a deleted active generation', async () => {

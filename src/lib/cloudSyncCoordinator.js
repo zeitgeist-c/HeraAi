@@ -372,18 +372,12 @@ async function enqueueAllKeys(runtime) {
   }
 }
 
-async function enqueueSnapshot(runtime) {
-  const settings = getKeysByClass(SYNC_CLASS.SETTING)
-  const stored = await storageGet([...settings, 'sessions', 'stats'])
-  for (const key of settings) {
-    if (stored[key] === undefined) continue
-    await runtime.engine.enqueue({
-      storageKey: key,
-      logicalId: key,
-      entityType: 'setting',
-      entityVersion: newVersion(runtime.deviceId),
-    })
-  }
+/**
+ * Yerel sohbetleri kuyruğa alır (yerel-only hariç). Hesaba ilk bağlanmada
+ * çağrılır: bağlanmadan önce oluşmuş sohbetler yoksa hiçbir cihaza gitmez.
+ */
+async function enqueueLocalSessions(runtime) {
+  const stored = await storageGet(['sessions'])
   for (const session of stored.sessions || []) {
     if (!session?.id || session.syncPolicy === 'local_only') continue
     await runtime.engine.enqueue({
@@ -393,6 +387,21 @@ async function enqueueSnapshot(runtime) {
       entityVersion: newVersion(runtime.deviceId),
     })
   }
+}
+
+async function enqueueSnapshot(runtime) {
+  const settings = getKeysByClass(SYNC_CLASS.SETTING)
+  const stored = await storageGet([...settings, 'stats'])
+  for (const key of settings) {
+    if (stored[key] === undefined) continue
+    await runtime.engine.enqueue({
+      storageKey: key,
+      logicalId: key,
+      entityType: 'setting',
+      entityVersion: newVersion(runtime.deviceId),
+    })
+  }
+  await enqueueLocalSessions(runtime)
   if (stored.stats !== undefined) {
     await runtime.engine.enqueue({
       storageKey: 'stats',
@@ -460,6 +469,10 @@ export async function linkCloudSyncDevice(recoveryCode) {
   }))
   await cacheMasterSecret(masterBytes)
   await storageSet({ [SYNC_ENABLED_KEY]: true, [SYNC_PAUSED_KEY]: false })
+  // Bağlanmadan önce bu cihazda oluşmuş sohbetler hesaba taşınır; yoksa geçmiş
+  // yalnız bu cihazda kalır ve diğer cihazlarda hiç görünmez. Ayarlar bilinçli
+  // olarak gönderilmez: yeni cihazın varsayılanları hesabınkini ezmemeli.
+  await enqueueLocalSessions(runtime)
   await runCloudSync()
   return { linked: true }
 }

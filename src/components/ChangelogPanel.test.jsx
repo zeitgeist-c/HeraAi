@@ -48,4 +48,16 @@ describe('ChangelogPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('bolge ekli dil kodunda (tr-TR) notlari turkce gosterir', async () => {
+    await i18n.changeLanguage('tr-TR')
+    render(<ChangelogPanel onClose={() => {}} />)
+
+    expect(screen.getByText('Yama Notları')).toBeInTheDocument()
+    expect(screen.getByText(`Sürüm ${CHANGELOG[0].version} · güncel`)).toBeInTheDocument()
+    for (const change of CHANGELOG[0].changes.tr) {
+      expect(screen.getByText(change)).toBeInTheDocument()
+    }
+    expect(screen.queryByText(CHANGELOG[0].changes.en[0])).not.toBeInTheDocument()
+  })
 })

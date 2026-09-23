@@ -2605,9 +2605,25 @@ function App() {
             isStarred,
           }
         })
-        if (metadataChanged) {
-          sessionsRef.current = metadataSyncedSessions
-          setSessions(metadataSyncedSessions)
+        const knownIds = new Set(metadataSyncedSessions.map(session => session?.id))
+        // Başka cihazdan eşitlenen yeni sohbetler belleğe eklenir; yoksa geçmiş
+        // listesinde panel yeniden açılana kadar görünmezler. Aynı değişiklikte
+        // `activeGeneration` varsa o sohbeti aşağıdaki canlı üretim dalı devralır
+        // (mesajları da o dal yazar), burada ikinci kez eklenmez.
+        const claimedByGeneration = changes.activeGeneration?.newValue?.sessionId || null
+        const incomingSessions = changes.sessions.newValue
+          .filter(session => (
+            session?.id
+            && session.id !== claimedByGeneration
+            && !knownIds.has(session.id)
+          ))
+          .map(session => normalizeSessionMetadata(session))
+        const nextSessions = incomingSessions.length > 0
+          ? [...metadataSyncedSessions, ...incomingSessions]
+          : metadataSyncedSessions
+        if (metadataChanged || incomingSessions.length > 0) {
+          sessionsRef.current = nextSessions
+          setSessions(nextSessions)
         }
       }
       if (changes.activeGeneration) {

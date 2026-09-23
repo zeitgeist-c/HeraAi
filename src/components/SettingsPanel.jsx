@@ -25,8 +25,8 @@ import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } 
 import SyncPanel from './SyncPanel'
 
 const AVAILABLE_LANGUAGES = [
-  { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
-  { code: 'en', name: 'English', flag: '🇬🇧' },
+  { code: 'tr', name: 'Türkçe' },
+  { code: 'en', name: 'English' },
 ]
 
 const KEY_PROVIDERS = [
@@ -110,7 +110,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [showTavilyInput, setShowTavilyInput] = useState(false)
   const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
   const [showOllamaInput, setShowOllamaInput] = useState(false)
-  const [expandedProviders, setExpandedProviders] = useState(['gemini'])
+  const [expandedProviders, setExpandedProviders] = useState([])
 
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
@@ -630,19 +630,47 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                  {t('setup.general.language_title')}
-                </label>
-                <select
-                  value={selectedLanguage}
-                  onChange={(e) => handleLanguageChange(e.target.value)}
-                  className="h-9 rounded-lg border border-input bg-background/60 px-3 text-xs"
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
+                <div className="min-w-0">
+                  <span className="block text-xs font-semibold text-foreground">
+                    {t('setup.general.language_title')}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
+                    {t('setup.general.language_description')}
+                  </span>
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label={t('setup.general.language_title')}
+                  className="grid shrink-0 grid-cols-2 gap-1.5"
                 >
-                  {AVAILABLE_LANGUAGES.map(lang => (
-                    <option key={lang.code} value={lang.code}>{lang.flag} {lang.name}</option>
-                  ))}
-                </select>
+                  {AVAILABLE_LANGUAGES.map(lang => {
+                    const isActive = selectedLanguage === lang.code
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        onClick={() => handleLanguageChange(lang.code)}
+                        className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border px-2 text-[11px] font-medium transition-all ${
+                          isActive
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-border/80 text-foreground hover:bg-secondary'
+                        }`}
+                      >
+                        <span
+                          className={`rounded px-1 py-px text-[9px] font-bold tracking-wide ${
+                            isActive ? 'bg-primary/20 text-primary' : 'bg-muted/70 text-muted-foreground'
+                          }`}
+                        >
+                          {lang.code.toUpperCase()}
+                        </span>
+                        {lang.name}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
               <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">

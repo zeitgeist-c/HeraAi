@@ -3,6 +3,7 @@ import { ChevronDown, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CHANGELOG } from '../data/changelog'
+import { currentLanguage } from '../lib/language'
 
 function formatDate(value, lang) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '')
@@ -17,7 +18,7 @@ function formatDate(value, lang) {
 
 function ChangelogPanel({ onClose }) {
   const { t, i18n } = useTranslation()
-  const lang = i18n.language === 'tr' ? 'tr' : 'en'
+  const lang = currentLanguage(i18n)
   const [openVersions, setOpenVersions] = useState(() => new Set([CHANGELOG[0]?.version]))
   const [latest] = CHANGELOG
 
