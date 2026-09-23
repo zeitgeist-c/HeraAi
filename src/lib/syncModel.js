@@ -22,6 +22,9 @@ import { SYNC_CLASS, classifyStorageKey } from './syncContract'
 export const CLOUD_SCHEMA_VERSION = 1
 export const CRYPTO_VERSION = 1
 
+/** Cihaz adı üst sınırı; arayüz ve eşitleme aynı değeri kullanır. */
+export const MAX_DEVICE_LABEL_LENGTH = 40
+
 /** Varlık türleri (plan §7). */
 export const ENTITY_TYPES = Object.freeze([
   'setting',
@@ -172,6 +175,7 @@ export function buildDeviceDocument({
   lastSyncedAt = null,
   deviceMasterKeyEnvelope = null,
   revokedAt = null,
+  disabledAt = null,
 } = {}) {
   if (!deviceId) throw new Error('device_id_missing')
   return {
@@ -184,6 +188,7 @@ export function buildDeviceDocument({
     lastSyncedAt,
     deviceMasterKeyEnvelope,
     revokedAt,
+    disabledAt,
   }
 }
 

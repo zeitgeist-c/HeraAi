@@ -21,6 +21,7 @@ import {
   buildAccountRootDocument,
   buildDeviceDocument,
   createEntityVersion,
+  MAX_DEVICE_LABEL_LENGTH,
 } from './syncModel'
 import {
   deriveSubkeys,
@@ -101,6 +102,7 @@ export function mapCloudSyncError(error) {
   const raw = String(error?.code || error?.message || '').toLowerCase()
   if (raw.includes('resource-exhausted') || raw.includes('quota')) return 'quota_exceeded'
   if (raw.includes('permission-denied')) return 'rules_denied'
+  if (raw.includes('device_disabled')) return 'sync_device_disabled'
   if (raw.includes('unauthenticated') || raw.includes('signed_out')) return 'sync_signed_out'
   if (raw.includes('unavailable') || raw.includes('network') || raw.includes('offline')) return 'offline'
   if (raw.includes('version_unsupported')) return 'sync_version_unsupported'
@@ -312,16 +314,25 @@ async function cacheMasterSecret(masterBytes) {
   cachedSubkeys = await deriveSubkeys(await importMasterSecret(masterBytes))
 }
 
-async function loadLinkedDevice(runtime, user) {
+/**
+ * Kendi cihaz belgesini bir kez okur; "kullanılabilir" (eşitlemeye hazır) ile
+ * "kapatılmış" durumunu ayırır. Kapalı cihaz kurtarma ekranına düşmemeli ama
+ * eşitleme de yapmamalı — ayrım bu yüzden ayrı alanlarla raporlanır.
+ */
+async function loadLinkedDeviceState(runtime, user) {
   const device = await runtime.transport.getDevice(user.uid, runtime.deviceId)
-  if (!device?.deviceMasterKeyEnvelope || device.revokedAt) return false
-  if (cachedSubkeys) return true
-  const masterBytes = await unwrapMasterSecretFromDevice(
-    runtime.deviceKey,
-    device.deviceMasterKeyEnvelope,
-  )
-  await cacheMasterSecret(masterBytes)
-  return true
+  const hasEnvelope = Boolean(device?.deviceMasterKeyEnvelope)
+  const revoked = Boolean(device?.revokedAt)
+  const disabled = Boolean(device?.disabledAt)
+  const usable = hasEnvelope && !revoked && !disabled
+  if (usable && !cachedSubkeys) {
+    const masterBytes = await unwrapMasterSecretFromDevice(
+      runtime.deviceKey,
+      device.deviceMasterKeyEnvelope,
+    )
+    await cacheMasterSecret(masterBytes)
+  }
+  return { linked: usable, hasEnvelope, revoked, disabled }
 }
 
 function newVersion(deviceId) {
@@ -436,9 +447,11 @@ export async function linkCloudSyncDevice(recoveryCode) {
   const masterBytes = await openMasterSecretFromRecovery(account.recoveryEnvelope, recoveryCode)
   const deviceEnvelope = await wrapMasterSecretForDevice(runtime.deviceKey, masterBytes)
   const now = Date.now()
+  // Başka bir cihazdan verilmiş ad varsa korunur; yeniden bağlanma adı sıfırlamaz.
+  const existingDevice = await runtime.transport.getDevice(user.uid, runtime.deviceId)
   await runtime.transport.setDevice(user.uid, runtime.deviceId, buildDeviceDocument({
     deviceId: runtime.deviceId,
-    label: deviceLabel(),
+    label: existingDevice?.label || deviceLabel(),
     platform: globalThis.navigator?.platform || null,
     browser: globalThis.navigator?.userAgent || null,
     createdAt: now,
@@ -461,6 +474,7 @@ export async function regenerateCloudRecoveryCode() {
   if (!device?.deviceMasterKeyEnvelope || device.revokedAt) {
     throw new Error('sync_recovery_required')
   }
+  if (device.disabledAt) throw new Error('sync_device_disabled')
 
   const masterBytes = await unwrapMasterSecretFromDevice(
     runtime.deviceKey,
@@ -515,13 +529,19 @@ export async function getCloudSyncStatus() {
   }
   try {
     const account = await runtime.transport.getAccountRoot(user.uid)
-    const linked = account ? await loadLinkedDevice(runtime, user) : false
+    const deviceState = account ? await loadLinkedDeviceState(runtime, user) : null
+    const linked = Boolean(deviceState?.hasEnvelope && !deviceState.revoked)
     return {
       ...localStatus,
       accountExists: Boolean(account),
       linked,
+      deviceDisabled: Boolean(deviceState?.disabled),
       cloudUnavailable: false,
-      state: linked ? runtime.engine.getStatus().state : account ? 'recovery_required' : 'setup_required',
+      state: deviceState?.linked
+        ? runtime.engine.getStatus().state
+        : deviceState?.disabled
+          ? 'device_disabled'
+          : account ? 'recovery_required' : 'setup_required',
     }
   } catch (error) {
     const errorCode = mapCloudSyncError(error)
@@ -554,7 +574,9 @@ export async function runCloudSync() {
     if (stored[SYNC_ENABLED_KEY] !== true) throw new Error('sync_not_enabled')
     if (stored[SYNC_PAUSED_KEY] === true) return { skipped: 'paused' }
     if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) throw new Error('quota_exceeded')
-    if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
+    const deviceState = await loadLinkedDeviceState(runtime, user)
+    if (deviceState.disabled) return { skipped: 'device_disabled' }
+    if (!deviceState.linked) throw new Error('sync_recovery_required')
     const result = await runtime.engine.drain()
     const now = Date.now()
     await runtime.transport.setDevice(user.uid, runtime.deviceId, {
@@ -597,6 +619,31 @@ export async function revokeCloudSyncDevice(deviceId) {
   return { revoked: true }
 }
 
+/**
+ * Cihazı hesap düzeyinde kapatır/açar. Kapatılan cihaz kendi belgesini okuyup
+ * eşitlemeyi atlar; kayıt ve anahtar zarfı silinmez, yeniden açılabilir.
+ */
+export async function setCloudSyncDeviceEnabled(deviceId, enabled) {
+  const user = await waitForCurrentAuthUser()
+  if (!user) throw new Error('sync_signed_out')
+  const runtime = await getRuntime()
+  await runtime.transport.setDevice(user.uid, deviceId, {
+    disabledAt: enabled === true ? null : Date.now(),
+  })
+  return { deviceId, enabled: enabled === true }
+}
+
+/** Cihaz adını yazar; boş ad reddedilir, uzunluk kırpılır. */
+export async function renameCloudSyncDevice(deviceId, label) {
+  const user = await waitForCurrentAuthUser()
+  if (!user) throw new Error('sync_signed_out')
+  const runtime = await getRuntime()
+  const nextLabel = String(label ?? '').trim().slice(0, MAX_DEVICE_LABEL_LENGTH)
+  if (!nextLabel) throw new Error('device_label_empty')
+  await runtime.transport.setDevice(user.uid, deviceId, { label: nextLabel })
+  return { deviceId, label: nextLabel }
+}
+
 export async function disconnectCloudSync() {
   const user = await waitForCurrentAuthUser()
   const runtime = await getRuntime()
@@ -612,7 +659,9 @@ export async function cleanLegacyCloudData() {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
-  if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
+  const deviceState = await loadLinkedDeviceState(runtime, user)
+  if (deviceState.disabled) throw new Error('sync_device_disabled')
+  if (!deviceState.linked) throw new Error('sync_recovery_required')
   try {
     const counts = await runtime.transport.cleanLegacyCloudData(user.uid)
     const completedAt = Date.now()
@@ -627,7 +676,9 @@ export async function exportEncryptedBackup() {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
-  if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
+  const deviceState = await loadLinkedDeviceState(runtime, user)
+  if (deviceState.disabled) throw new Error('sync_device_disabled')
+  if (!deviceState.linked) throw new Error('sync_recovery_required')
   const settings = getKeysByClass(SYNC_CLASS.SETTING)
   const stored = await storageGet([...settings, 'sessions', 'stats'])
   const apiKeys = {}
@@ -657,7 +708,9 @@ export async function importEncryptedBackup(envelope) {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
-  if (!await loadLinkedDevice(runtime, user)) throw new Error('sync_recovery_required')
+  const deviceState = await loadLinkedDeviceState(runtime, user)
+  if (deviceState.disabled) throw new Error('sync_device_disabled')
+  if (!deviceState.linked) throw new Error('sync_recovery_required')
   const payload = await decryptBackup({ backupKey: cachedSubkeys.backupKey, envelope })
   const data = payload?.data || {}
   const changes = { ...(data.settings || {}) }

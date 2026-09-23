@@ -206,6 +206,26 @@ describe('cihaz yönetimi', () => {
     expect(satir.canRevoke).toBe(false)
   })
 
+  it('kapatılmış cihazı durum bilgisiyle taşır', () => {
+    const satir = deviceRow({
+      device: { deviceId: 'b', disabledAt: 500 },
+      currentDeviceId: 'a',
+    })
+    expect(satir.disabled).toBe(true)
+    expect(satir.canToggle).toBe(true)
+    expect(satir.canRename).toBe(true)
+  })
+
+  it('iptal edilmiş cihazda aç/kapat ve ad verme kapalıdır', () => {
+    const satir = deviceRow({
+      device: { deviceId: 'b', revokedAt: 123 },
+      currentDeviceId: 'a',
+    })
+    expect(satir.disabled).toBe(false)
+    expect(satir.canToggle).toBe(false)
+    expect(satir.canRename).toBe(false)
+  })
+
   it('geçersiz kayıtta null döner', () => {
     expect(deviceRow({})).toBeNull()
     expect(deviceRow()).toBeNull()

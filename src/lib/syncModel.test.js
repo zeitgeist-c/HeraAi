@@ -196,7 +196,13 @@ describe('syncModel belgeleri', () => {
     expect(doc.label).toBe('Brave - Windows')
     expect(doc.deviceMasterKeyEnvelope).toEqual({ wrapped: 'x' })
     expect(doc.revokedAt).toBeNull()
+    expect(doc.disabledAt).toBeNull()
     expect(() => buildDeviceDocument({})).toThrow('device_id_missing')
+  })
+
+  it('devices belgesi kapatma damgasini tasir', () => {
+    const doc = buildDeviceDocument({ deviceId: DEVICE_A, disabledAt: 1_700_000 })
+    expect(doc.disabledAt).toBe(1_700_000)
   })
 
   it('entities belgesi sifreli zarfi ve acik teknik alanlari ayirir', () => {

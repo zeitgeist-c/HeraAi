@@ -194,8 +194,11 @@ export function deviceRow({ device, currentDeviceId } = {}) {
     label: device.name || device.deviceId.slice(0, 8),
     isCurrent: kendisi,
     revoked: Boolean(device.revokedAt),
+    disabled: Boolean(device.disabledAt),
     lastSeenAt: device.lastSeenAt || null,
     canRevoke: !kendisi && !device.revokedAt,
+    canToggle: !device.revokedAt,
+    canRename: !device.revokedAt,
     canForceRemove: !kendisi,
   }
 }
