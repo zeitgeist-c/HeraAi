@@ -8,6 +8,7 @@ import {
   LogIn,
   LogOut,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -19,6 +20,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { notifyError, notifySuccess } from '../lib/notify'
+import { MAX_DEVICE_LABEL_LENGTH } from '../lib/syncModel'
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -51,7 +53,10 @@ function SyncPanel() {
   const [recoveryInput, setRecoveryInput] = useState('')
   const [cleanupResult, setCleanupResult] = useState(null)
   const [busy, setBusy] = useState(null)
+  const [renamingId, setRenamingId] = useState(null)
+  const [labelDraft, setLabelDraft] = useState('')
   const backupInputRef = useRef(null)
+  const renameInputRef = useRef(null)
 
   const refresh = useCallback(async () => {
     const response = await sendMessage({ type: 'SYNC_GET_STATUS' })
@@ -70,6 +75,10 @@ function SyncPanel() {
       setStatus({ signedIn: false, state: 'error', lastError: error.message })
     })
   }, [refresh])
+
+  useEffect(() => {
+    if (renamingId) renameInputRef.current?.focus()
+  }, [renamingId])
 
   const perform = async (name, action, successMessage) => {
     setBusy(name)
@@ -138,6 +147,39 @@ function SyncPanel() {
     () => sendMessage({ type: 'SYNC_REVOKE_DEVICE', deviceId }),
     t('setup.sync.device_revoked'),
   )
+
+  const handleToggleDevice = device => perform(
+    `device:${device.id}`,
+    () => sendMessage({
+      type: 'SYNC_SET_DEVICE_ENABLED',
+      deviceId: device.id,
+      enabled: Boolean(device.disabledAt),
+    }),
+    device.disabledAt ? t('setup.sync.device_enabled') : t('setup.sync.device_disabled'),
+  )
+
+  const startRenaming = device => {
+    setRenamingId(device.id)
+    setLabelDraft(device.label || '')
+  }
+
+  const cancelRenaming = () => {
+    setRenamingId(null)
+    setLabelDraft('')
+  }
+
+  const saveDeviceLabel = async device => {
+    const next = labelDraft.trim()
+    const current = (device.label || '').trim()
+    setRenamingId(null)
+    setLabelDraft('')
+    if (!next || next === current) return
+    await perform(
+      `rename:${device.id}`,
+      () => sendMessage({ type: 'SYNC_RENAME_DEVICE', deviceId: device.id, label: next }),
+      t('setup.sync.renamed'),
+    )
+  }
 
   const handleRegenerateRecovery = async () => {
     if (!globalThis.confirm(t('setup.sync.regenerate_recovery_confirm'))) return
@@ -274,6 +316,7 @@ function SyncPanel() {
   }
 
   const syncBlocked = Number(status.blockedUntil) > Date.now()
+  const deviceDisabled = status.deviceDisabled === true
 
   return (
     <div className="flex flex-col gap-4">
@@ -290,7 +333,7 @@ function SyncPanel() {
 
       <div className="rounded-xl border border-border/70 bg-secondary/30 p-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2 text-xs font-semibold">{status.paused ? <CloudOff className="h-4 w-4 text-amber-500" /> : <Cloud className="h-4 w-4 text-green-500" />}{status.paused ? t('setup.sync.status_paused') : t('setup.sync.status_active')}</span>
+          <span className="flex items-center gap-2 text-xs font-semibold">{deviceDisabled || status.paused ? <CloudOff className="h-4 w-4 text-amber-500" /> : <Cloud className="h-4 w-4 text-green-500" />}{deviceDisabled ? t('setup.sync.device_disabled_status') : status.paused ? t('setup.sync.status_paused') : t('setup.sync.status_active')}</span>
           <span className="text-[10px] text-muted-foreground">{status.user?.email}</span>
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
@@ -309,25 +352,71 @@ function SyncPanel() {
         )}
       </div>
 
+      {deviceDisabled && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-[10px] leading-relaxed text-muted-foreground">
+          <CloudOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span>{t('setup.sync.device_disabled_notice')}</span>
+        </div>
+      )}
+
       <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-[10px] leading-relaxed text-muted-foreground">
         {t('setup.sync.attachments_local_notice')}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={handleSync} disabled={busy !== null || status.paused || syncBlocked} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:opacity-50">{busy === 'sync' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t('setup.sync.sync_now')}</button>
+        <button type="button" onClick={handleSync} disabled={busy !== null || status.paused || syncBlocked || deviceDisabled} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:opacity-50">{busy === 'sync' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t('setup.sync.sync_now')}</button>
         <button type="button" onClick={handlePause} disabled={busy !== null} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-secondary disabled:opacity-50">{status.paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{status.paused ? t('setup.sync.resume') : t('setup.sync.pause')}</button>
       </div>
 
       <section>
         <h3 className="mb-2 text-xs font-semibold">{t('setup.sync.devices')}</h3>
         <div className="flex flex-col gap-2">
-          {devices.map(device => (
-            <div key={device.id} className="flex items-center gap-2 rounded-xl border border-border/70 p-2.5">
-              <Smartphone className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium">{device.label || device.id}</p><p className="text-[10px] text-muted-foreground">{device.id === status.deviceId ? t('setup.sync.this_device') : formatDate(device.lastSyncedAt)}{device.revokedAt ? ` · ${t('setup.sync.revoked')}` : ''}</p></div>
-              {!device.revokedAt && <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button text-destructive" aria-label={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>}
-            </div>
-          ))}
+          {devices.map(device => {
+            const isRenaming = renamingId === device.id
+            const isDisabled = Boolean(device.disabledAt)
+            return (
+              <div key={device.id} className={`flex items-center gap-2 rounded-xl border p-2.5 ${isDisabled ? 'border-amber-500/25 bg-amber-500/[0.04]' : 'border-border/70'}`}>
+                <Smartphone className={`h-4 w-4 shrink-0 ${isDisabled ? 'text-amber-500' : 'text-muted-foreground'}`} />
+                <div className="min-w-0 flex-1">
+                  {isRenaming ? (
+                    <input
+                      ref={renameInputRef}
+                      type="text"
+                      value={labelDraft}
+                      maxLength={MAX_DEVICE_LABEL_LENGTH}
+                      aria-label={t('setup.sync.rename_placeholder')}
+                      placeholder={t('setup.sync.rename_placeholder')}
+                      onChange={event => setLabelDraft(event.target.value)}
+                      onBlur={() => saveDeviceLabel(device)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          saveDeviceLabel(device)
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault()
+                          cancelRenaming()
+                        }
+                      }}
+                      className="h-7 w-full rounded-lg border border-primary/40 bg-background px-2 text-[11px] font-medium outline-none focus:ring-2 focus:ring-ring/40"
+                    />
+                  ) : (
+                    <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium">
+                      <span className="truncate">{device.label || device.id}</span>
+                      {isDisabled && <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">{t('setup.sync.device_off_badge')}</span>}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">{device.id === status.deviceId ? t('setup.sync.this_device') : formatDate(device.lastSyncedAt)}{device.revokedAt ? ` · ${t('setup.sync.revoked')}` : ''}</p>
+                </div>
+                {!device.revokedAt && (
+                  <>
+                    <button type="button" onClick={() => handleToggleDevice(device)} disabled={busy !== null} className={`hera-icon-button h-7 w-7 ${isDisabled ? 'text-amber-500' : ''}`} aria-pressed={!isDisabled} aria-label={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')} title={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')}>{isDisabled ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</button>
+                    <button type="button" onClick={() => startRenaming(device)} disabled={busy !== null} className="hera-icon-button h-7 w-7" aria-label={t('setup.sync.rename')} title={t('setup.sync.rename')}><Pencil className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button h-7 w-7 text-destructive" aria-label={t('setup.sync.revoke')} title={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>
+                  </>
+                )}
+              </div>
+            )
+          })}
         </div>
       </section>
 

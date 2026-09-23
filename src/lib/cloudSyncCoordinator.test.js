@@ -30,12 +30,17 @@ vi.mock('./firestoreTransport', () => ({
 }))
 
 import {
+  exportEncryptedBackup,
   getCloudSyncStatus,
   initializeCloudSync,
   cloudSyncWakeReason,
+  linkCloudSyncDevice,
   mapCloudSyncError,
   nextPacificQuotaReset,
   regenerateCloudRecoveryCode,
+  renameCloudSyncDevice,
+  runCloudSync,
+  setCloudSyncDeviceEnabled,
 } from './cloudSyncCoordinator'
 import { openMasterSecretFromRecovery } from './syncCrypto'
 
@@ -156,5 +161,74 @@ describe('cloud sync error policy', () => {
     expect(status.cloudUnavailable).toBe(true)
     expect(status.lastErrorCode).toBe('quota_exceeded')
     expect(status.state).toBe('quota_exceeded')
+  })
+})
+
+describe('cihaz kapatma ve ad verme', () => {
+  let deviceId = null
+
+  beforeAll(async () => {
+    cloud.account = null
+    cloud.devices.clear()
+    delete storage.syncDeviceId
+    delete storage.syncBlockedUntil
+    delete storage.syncPaused
+    await initializeCloudSync()
+    // getRuntime() modül düzeyinde önbellekli; cihaz kimliği depodan değil kayıttan okunur.
+    deviceId = [...cloud.devices.keys()][0]
+    cloud.devices.set(deviceId, { ...cloud.devices.get(deviceId), disabledAt: 1_700_000 })
+  })
+
+  it('kapatilmis cihazda durum bagli kalir ve kurtarma ekranina dusmez', async () => {
+    const status = await getCloudSyncStatus()
+
+    expect(status.linked).toBe(true)
+    expect(status.deviceDisabled).toBe(true)
+    expect(status.state).toBe('device_disabled')
+  })
+
+  it('kapatilmis cihazda esitleme hic calismaz', async () => {
+    await expect(runCloudSync()).resolves.toEqual({ skipped: 'device_disabled' })
+  })
+
+  it('kapatilmis cihaz buluta yazan islemleri reddeder', async () => {
+    await expect(exportEncryptedBackup()).rejects.toThrow('sync_device_disabled')
+    await expect(regenerateCloudRecoveryCode()).rejects.toThrow('sync_device_disabled')
+  })
+
+  it('cihaz kapatilir ve yeniden acilir', async () => {
+    await setCloudSyncDeviceEnabled('dev-2', false)
+    expect(cloud.devices.get('dev-2').disabledAt).toBeGreaterThan(0)
+
+    await setCloudSyncDeviceEnabled('dev-2', true)
+    expect(cloud.devices.get('dev-2').disabledAt).toBeNull()
+  })
+
+  it('cihaz adini kirparak kaydeder ve bos adi reddeder', async () => {
+    await expect(renameCloudSyncDevice('dev-2', '  Masaüstü PC  '))
+      .resolves.toEqual({ deviceId: 'dev-2', label: 'Masaüstü PC' })
+    expect(cloud.devices.get('dev-2').label).toBe('Masaüstü PC')
+
+    await expect(renameCloudSyncDevice('dev-2', '   ')).rejects.toThrow('device_label_empty')
+  })
+
+  it('yeniden acilan cihazda esitleme yeniden calisir', async () => {
+    await setCloudSyncDeviceEnabled(deviceId, true)
+
+    const result = await runCloudSync()
+
+    expect(result?.skipped).toBeUndefined()
+  })
+
+  it('yeniden baglanma verilen adi korur ve cihazi acar', async () => {
+    const { recoveryCode } = await regenerateCloudRecoveryCode()
+    cloud.devices.set(deviceId, { ...cloud.devices.get(deviceId), label: 'Özel Ad', revokedAt: 1 })
+
+    await linkCloudSyncDevice(recoveryCode)
+
+    const device = cloud.devices.get(deviceId)
+    expect(device.label).toBe('Özel Ad')
+    expect(device.revokedAt).toBeNull()
+    expect(device.disabledAt).toBeNull()
   })
 })

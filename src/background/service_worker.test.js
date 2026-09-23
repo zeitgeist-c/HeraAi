@@ -23,6 +23,7 @@ const authServiceMocks = vi.hoisted(() => ({
     'auth_token_invalid',
   ]),
   getCurrentAuthUser: vi.fn(),
+  waitForCurrentAuthUser: vi.fn(),
   signInWithGoogle: vi.fn(),
   signOutFromGoogle: vi.fn(),
 }));
@@ -374,6 +375,22 @@ describe('background generation coordinator', () => {
       activeGeneration: null,
       keyStatuses: [],
     });
+  });
+
+  it('routes device enable and rename messages to the sync handler', async () => {
+    const mock = createChromeMock();
+    const listener = await loadWorker(mock);
+
+    const toggle = await dispatch(listener, {
+      type: 'SYNC_SET_DEVICE_ENABLED', deviceId: 'dev-2', enabled: false,
+    });
+    const rename = await dispatch(listener, {
+      type: 'SYNC_RENAME_DEVICE', deviceId: 'dev-2', label: 'Ofis',
+    });
+
+    // Oturum kapalı olduğu için iş mantığı durur; ölçülen şey tipin tanınması.
+    expect(toggle.errorCode).toBe('sync_signed_out');
+    expect(rename.errorCode).toBe('sync_signed_out');
   });
 
   it('atomically persists the session, thinking placeholder and queued claim before starting', async () => {

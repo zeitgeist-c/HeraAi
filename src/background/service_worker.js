@@ -43,8 +43,10 @@ import {
   linkCloudSyncDevice,
   listCloudSyncDevices,
   regenerateCloudRecoveryCode,
+  renameCloudSyncDevice,
   revokeCloudSyncDevice,
   runCloudSync,
+  setCloudSyncDeviceEnabled,
   setCloudSyncPaused,
   wakeCloudSync,
 } from '../lib/cloudSyncCoordinator.js';
@@ -1823,6 +1825,8 @@ const SYNC_REQUEST_TYPES = new Set([
   'SYNC_SET_PAUSED',
   'SYNC_LIST_DEVICES',
   'SYNC_REVOKE_DEVICE',
+  'SYNC_SET_DEVICE_ENABLED',
+  'SYNC_RENAME_DEVICE',
   'SYNC_DISCONNECT',
   'SYNC_EXPORT_BACKUP',
   'SYNC_IMPORT_BACKUP',
@@ -1874,6 +1878,10 @@ async function handleSyncRequest(message) {
         return { ok: true, devices: await listCloudSyncDevices() };
       case 'SYNC_REVOKE_DEVICE':
         return { ok: true, ...(await revokeCloudSyncDevice(message.deviceId)) };
+      case 'SYNC_SET_DEVICE_ENABLED':
+        return { ok: true, ...(await setCloudSyncDeviceEnabled(message.deviceId, message.enabled)) };
+      case 'SYNC_RENAME_DEVICE':
+        return { ok: true, ...(await renameCloudSyncDevice(message.deviceId, message.label)) };
       case 'SYNC_DISCONNECT':
         return { ok: true, ...(await disconnectCloudSync()) };
       case 'SYNC_EXPORT_BACKUP':
@@ -1894,6 +1902,7 @@ async function handleSyncRequest(message) {
     const expectedCodes = new Set([
       'quota_exceeded', 'rules_denied', 'sync_signed_out', 'offline',
       'sync_version_unsupported', 'sync_chunk_incomplete', 'sync_payload_invalid',
+      'sync_device_disabled',
     ]);
     if (!expectedCodes.has(errorCode)) console.error('Sync request error', error);
     return { ok: false, errorCode };
