@@ -83,6 +83,7 @@ import {
   isComparisonJob,
 } from './lib/comparison'
 import { selectLocalFallback } from './lib/autoRouter'
+import { createAutoSyncScheduler, touchesSyncedKeys } from './lib/autoSyncScheduler'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -590,6 +591,82 @@ function App() {
     }
   }, [])
 
+  // Otomatik eşitleme (panel içi zamanlayıcı): ek izin gerekmez ve panel
+  // kapalıyken hiç çalışmaz, böylece boşuna kota harcanmaz.
+  const autoSyncSchedulerRef = useRef(null)
+  const autoSyncIntervalRef = useRef(undefined)
+  const autoSyncUsageRef = useRef(undefined)
+  const lastActivityAtRef = useRef(Date.now())
+
+  useEffect(() => {
+    const markActivity = () => { lastActivityAtRef.current = Date.now() }
+    const events = ['pointerdown', 'keydown', 'wheel']
+    events.forEach(name => window.addEventListener(name, markActivity, { passive: true }))
+    return () => events.forEach(name => window.removeEventListener(name, markActivity))
+  }, [])
+
+  useEffect(() => {
+    const readAutoSettings = () => {
+      try {
+        chrome.storage?.local?.get?.(
+          ['syncAutoIntervalMinutes', 'syncUsage'],
+          stored => {
+            if (chrome.runtime?.lastError) return
+            autoSyncIntervalRef.current = stored?.syncAutoIntervalMinutes
+            autoSyncUsageRef.current = stored?.syncUsage
+          },
+        )
+      } catch {
+        // Depolama yoksa varsayılan aralık kullanılır.
+      }
+    }
+    readAutoSettings()
+    const listener = changes => {
+      if (changes?.syncAutoIntervalMinutes || changes?.syncUsage) readAutoSettings()
+    }
+    try {
+      chrome.storage?.onChanged?.addListener?.(listener)
+    } catch {
+      return undefined
+    }
+    return () => {
+      try {
+        chrome.storage?.onChanged?.removeListener?.(listener)
+      } catch {
+        // Dinleyici kaldırılamazsa sorun değil; efekt zaten kapanıyor.
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const sendSyncMessage = type => new Promise(resolve => {
+      try {
+        chrome.runtime?.sendMessage?.({ type }, () => {
+          void chrome.runtime?.lastError
+          resolve()
+        })
+      } catch {
+        resolve()
+      }
+    })
+    const scheduler = createAutoSyncScheduler({
+      // Periyodik tur: aralık eşiğine takılan "uyandır" yolu.
+      requestSync: () => sendSyncMessage('SYNC_WAKE'),
+      // Yerel değişiklik: eşiğe takılmayan yol, değişiklik hemen gitsin.
+      requestSyncAfterChange: () => sendSyncMessage('SYNC_NOW'),
+      isHidden: () => document.visibilityState === 'hidden',
+      getLastActivityAt: () => lastActivityAtRef.current,
+      getUsage: () => autoSyncUsageRef.current,
+      getIntervalMinutes: () => autoSyncIntervalRef.current,
+    })
+    autoSyncSchedulerRef.current = scheduler
+    scheduler.start()
+    return () => {
+      scheduler.stop()
+      autoSyncSchedulerRef.current = null
+    }
+  }, [])
+
   useEffect(() => { activeSessionIdRef.current = activeSessionId }, [activeSessionId])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { messagesRef.current = messages }, [messages])
@@ -840,6 +917,10 @@ function App() {
     const write = async () => {
       if (writeEpoch !== storageWriteEpochRef.current) return false
       await setChromeStorage(values)
+      if (touchesSyncedKeys(values)) {
+        // Yerel bir değişiklik buluta gidecek: kısa gecikmeyle otomatik eşitleme.
+        autoSyncSchedulerRef.current?.noteLocalChange()
+      }
       if (Array.isArray(values?.sessions)) {
         values.sessions.forEach(session => {
           if (session?.id) persistedSessionIdsRef.current.add(session.id)
@@ -4691,6 +4772,8 @@ function App() {
             setAppConfig(newConfig)
             applyTheme(newConfig.theme, newConfig.customPrimaryColor)
             setShowSettings(false)
+            // Ayar kaydı eşitlenen anahtarlara dokunur: kısa gecikmeyle otomatik eşitleme.
+            autoSyncSchedulerRef.current?.noteLocalChange()
           }}
         />
       </div>
@@ -4884,6 +4967,8 @@ function App() {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
               setShowSettings(false)
+              // Ayar kaydı eşitlenen anahtarlara dokunur: kısa gecikmeyle otomatik eşitleme.
+              autoSyncSchedulerRef.current?.noteLocalChange()
             }}
           />
         </div>

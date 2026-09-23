@@ -33,6 +33,13 @@ import {
   unwrapMasterSecretFromDevice,
   wrapMasterSecretForDevice,
 } from './syncCrypto'
+import {
+  AUTO_SYNC_INTERVAL_KEY,
+  AUTO_SYNC_USAGE_KEY,
+  isSlowMode,
+  normalizeAutoSyncMinutes,
+  quotaUsageRatio,
+} from './autoSyncScheduler'
 
 const DEVICE_ID_KEY = 'syncDeviceId'
 const SYNC_ENABLED_KEY = 'syncEnabled'
@@ -45,10 +52,17 @@ const ATTACHMENT_POLICY_MIGRATION_KEY = 'attachmentCloudPolicyV2MigratedAt'
 const KEY_CHANGE_MARKER = 'syncVaultUpdatedAt'
 const KEY_TOMBSTONES = 'syncKeyTombstones'
 const AUTO_SYNC_INTERVAL_MS = 15 * 60 * 1000
+/** Panel ayarı: otomatik eşitleme aralığı (dakika; 0 = kapalı). Cihaza özel. */
+const AUTO_SYNC_SETTING_KEY = AUTO_SYNC_INTERVAL_KEY
+/** Eşitleme kilidi: aynı anda iki koşu olmaz. Bayat kilit devralınır. */
+const SYNC_LEASE_KEY = 'syncLease'
+const SYNC_LEASE_TTL_MS = 5 * 60 * 1000
 
 let runtimePromise = null
 let cachedSubkeys = null
 let listenerInstalled = false
+/** Aynı anda tek eşitleme koşusu (bellek kilidi). */
+let activeRun = false
 const remoteWrites = new Map()
 
 function storageGet(keys) {
@@ -137,6 +151,69 @@ export function cloudSyncWakeReason(status, now = Date.now()) {
   if (Number(status?.[BLOCKED_UNTIL_KEY]) > now) return 'quota_blocked'
   if (now - Number(status?.[LAST_SYNC_KEY] || 0) < AUTO_SYNC_INTERVAL_MS) return 'recently_synced'
   return null
+}
+
+/**
+ * Kota Pasifik gece yarısında sıfırlandığı için sayaç da o güne göre tutulur;
+ * gün değişince önceki günün sayacı kendiliğinden sıfırlanır.
+ */
+export function pacificDayKey(now = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(now))
+}
+
+/** Bugünün kota sayacı (farklı günden kalan değer sıfır sayılır). */
+export function currentUsage(storedUsage, now = Date.now()) {
+  const dayKey = pacificDayKey(now)
+  const value = storedUsage?.dayKey === dayKey ? storedUsage : null
+  return {
+    dayKey,
+    reads: Math.max(0, Number(value?.reads) || 0),
+    writes: Math.max(0, Number(value?.writes) || 0),
+  }
+}
+
+/**
+ * Koşu başına işlem sayacı (tahmini). Panel bu değeri gösterir ve yavaş mod
+ * kararını verir. Tahmin: koşu başına 1 okuma (cihaz durumu) + 1 yazma
+ * ("son görülme"); gönderilen kayıt başına 1 işlem okuması + 2 yazma
+ * (kayıt + parça); çekilen kayıt başına 2 okuma (meta + parça).
+ */
+async function recordSyncUsage(result) {
+  const stored = await storageGet([AUTO_SYNC_USAGE_KEY])
+  const usage = currentUsage(stored[AUTO_SYNC_USAGE_KEY])
+  const pushed = Math.max(0, Number(result?.pushed) || 0)
+  const applied = Math.max(0, Number(result?.applied) || 0)
+  await storageSet({
+    [AUTO_SYNC_USAGE_KEY]: {
+      dayKey: usage.dayKey,
+      reads: usage.reads + 1 + pushed + applied * 2,
+      writes: usage.writes + 1 + pushed * 2,
+    },
+  })
+}
+
+/** Panel ayarı + bugünkü kota kullanımı. */
+export async function getAutoSyncSettings() {
+  const stored = await storageGet([AUTO_SYNC_SETTING_KEY, AUTO_SYNC_USAGE_KEY])
+  const usage = currentUsage(stored[AUTO_SYNC_USAGE_KEY])
+  return {
+    intervalMinutes: normalizeAutoSyncMinutes(stored[AUTO_SYNC_SETTING_KEY]),
+    usage,
+    ratio: quotaUsageRatio(usage),
+    slowMode: isSlowMode(usage),
+  }
+}
+
+/** Otomatik eşitleme aralığını kaydeder (cihaza özel; eşitlenmez). */
+export async function setAutoSyncInterval(minutes) {
+  const value = normalizeAutoSyncMinutes(minutes)
+  await storageSet({ [AUTO_SYNC_SETTING_KEY]: value })
+  return { intervalMinutes: value }
 }
 
 async function getOrCreateDeviceId() {
@@ -578,7 +655,7 @@ export async function getCloudSyncStatus() {
   }
 }
 
-export async function runCloudSync() {
+async function performCloudSyncRun() {
   try {
     const user = await waitForCurrentAuthUser()
     if (!user) throw new Error('sync_signed_out')
@@ -598,6 +675,7 @@ export async function runCloudSync() {
     })
     await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null, [BLOCKED_UNTIL_KEY]: null })
     await storageSet({ [KEY_TOMBSTONES]: {} })
+    await recordSyncUsage(result)
     return result
   } catch (error) {
     const errorCode = mapCloudSyncError(error)
@@ -605,6 +683,30 @@ export async function runCloudSync() {
     if (errorCode === 'quota_exceeded') update[BLOCKED_UNTIL_KEY] = nextPacificQuotaReset()
     await storageSet(update)
     throw new Error(errorCode)
+  }
+}
+
+/**
+ * Eşitlemeyi çalıştırır. Aynı anda iki koşu olmaz:
+ * - Bellek kilidi (`activeRun`) eşzamanlı çağrıları anında birleştirir; kontrol
+ *   ilk `await`'ten önce yapıldığı için iki çağrı kilidi birlikte geçemez.
+ * - Depolama kilidi (`syncLease`) service worker yeniden başladığında yarım
+ *   kalan bir koşunun üstüne binilmesini önler; bayat kilit devralınır.
+ */
+export async function runCloudSync() {
+  if (activeRun) return { skipped: 'already_running' }
+  activeRun = true
+  try {
+    const lease = await storageGet([SYNC_LEASE_KEY])
+    const leaseAt = Number(lease[SYNC_LEASE_KEY]) || 0
+    if (leaseAt > 0 && Date.now() - leaseAt < SYNC_LEASE_TTL_MS) {
+      return { skipped: 'already_running' }
+    }
+    await storageSet({ [SYNC_LEASE_KEY]: Date.now() })
+    return await performCloudSyncRun()
+  } finally {
+    activeRun = false
+    await storageSet({ [SYNC_LEASE_KEY]: 0 })
   }
 }
 

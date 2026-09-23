@@ -915,6 +915,29 @@ describe('HeraAi App', () => {
     }
   });
 
+  it('saves the API key usage mode picked in General Settings', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    openSettingsPanel();
+    fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
+
+    const primary = screen.getByRole('button', { name: /Use primary keys|Ana anahtarları kullan/ });
+    const rotation = screen.getByRole('button', { name: /Rotate healthy keys|Anahtarları sırayla kullan/ });
+    expect(primary).toHaveAttribute('aria-pressed', 'true');
+    expect(rotation).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(rotation);
+    expect(rotation).toHaveAttribute('aria-pressed', 'true');
+    expect(primary).toHaveAttribute('aria-pressed', 'false');
+
+    // Seçim Kaydet'e basmadan kalıcı olmamalı; basınca depoya yazılmalı.
+    expect(currentStorage.apiKeyUsageMode).not.toBe('balanced_rotation');
+    fireEvent.click(screen.getByRole('button', { name: /Save and Continue|Kaydet ve Devam Et/ }));
+
+    await waitFor(() => expect(currentStorage.apiKeyUsageMode).toBe('balanced_rotation'));
+  });
+
   it('adopts an atomic session and generation change that lands during bootstrap', async () => {
     const initialStorage = {
       theme: 'light',

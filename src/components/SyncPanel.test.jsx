@@ -24,11 +24,19 @@ const baseDevices = [
   { id: 'dev-2', label: 'Ofis dizüstü', disabledAt: 1_700_000, lastSyncedAt: 2 },
 ]
 
-function mockChrome({ status = baseStatus, devices = baseDevices } = {}) {
+const baseAuto = {
+  intervalMinutes: 60,
+  usage: { dayKey: '2026-09-24', reads: 120, writes: 40 },
+  ratio: { reads: 0.0024, writes: 0.002 },
+  slowMode: false,
+}
+
+function mockChrome({ status = baseStatus, devices = baseDevices, auto = baseAuto } = {}) {
   chrome.runtime.sendMessage.mockImplementation((message, callback) => {
     const respond = response => callback?.(response)
     if (message.type === 'SYNC_GET_STATUS') respond({ ok: true, status })
     else if (message.type === 'SYNC_LIST_DEVICES') respond({ ok: true, devices })
+    else if (message.type === 'SYNC_GET_AUTO_SETTINGS') respond({ ok: true, ...auto })
     else respond({ ok: true })
     return Promise.resolve()
   })
@@ -271,5 +279,72 @@ describe('SyncPanel cihaz bölümü katlanır (Varyant A)', () => {
     expect(within(heading).getByText(/Last sync/)).toBeInTheDocument()
     expect(within(heading).getByText(compact(newest))).toBeInTheDocument()
     expect(within(heading).queryByText(compact(older))).toBeNull()
+  })
+})
+
+describe('SyncPanel otomatik eşitleme', () => {
+  it('aralık seçeneklerini gösterir ve seçili olanı işaretler', async () => {
+    render(<SyncPanel />)
+
+    const grup = await screen.findByRole('group', { name: 'Automatic sync' })
+    expect(within(grup).getByRole('button', { name: '1 h' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(grup).getByRole('button', { name: 'Manual' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(grup).getByRole('button', { name: '2 h' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(grup).getByRole('button', { name: '6 h' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('seçim değişince aralığı kaydeder ve yeni seçimi işaretler', async () => {
+    render(<SyncPanel />)
+    const grup = await screen.findByRole('group', { name: 'Automatic sync' })
+
+    mockChrome({ auto: { ...baseAuto, intervalMinutes: 360 } })
+    fireEvent.click(within(grup).getByRole('button', { name: '6 h' }))
+
+    await waitFor(() => {
+      expect(sentMessages('SYNC_SET_AUTO_INTERVAL').some(message => message.minutes === 360)).toBe(true)
+    })
+    await waitFor(() => {
+      expect(within(grup).getByRole('button', { name: '6 h' })).toHaveAttribute('aria-pressed', 'true')
+    })
+  })
+
+  it('kapatıldığında kapanma notunu gösterir', async () => {
+    mockChrome({ auto: { ...baseAuto, intervalMinutes: 0 } })
+    render(<SyncPanel />)
+
+    const grup = await screen.findByRole('group', { name: 'Automatic sync' })
+    expect(within(grup).getByRole('button', { name: 'Manual' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/Automatic sync is off/)).toBeInTheDocument()
+  })
+
+  it('günlük kota kullanımını gösterir', async () => {
+    mockChrome({
+      auto: {
+        intervalMinutes: 60,
+        usage: { dayKey: '2026-09-24', reads: 120, writes: 40 },
+        ratio: { reads: 0.24, writes: 0.05 },
+        slowMode: false,
+      },
+    })
+    render(<SyncPanel />)
+
+    expect(await screen.findByText(/reads 24%/)).toBeInTheDocument()
+    expect(screen.getByText(/writes 5%/)).toBeInTheDocument()
+    expect(screen.queryByText('slow mode')).toBeNull()
+  })
+
+  it('yavaş modda rozeti ve uyarıyı gösterir', async () => {
+    mockChrome({
+      auto: {
+        intervalMinutes: 60,
+        usage: { dayKey: '2026-09-24', reads: 30_000, writes: 40 },
+        ratio: { reads: 0.6, writes: 0.05 },
+        slowMode: true,
+      },
+    })
+    render(<SyncPanel />)
+
+    expect(await screen.findByText('slow mode')).toBeInTheDocument()
+    expect(screen.getByText(/passed 50%/)).toBeInTheDocument()
   })
 })

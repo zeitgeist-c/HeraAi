@@ -54,6 +54,9 @@ const KEYS_USED_IN_CODE = [
   'ollamaApiKeys',
   // lib/stats.js
   'stats',
+  // lib/autoSyncScheduler.js + lib/cloudSyncCoordinator.js (otomatik eşitleme)
+  'syncAutoIntervalMinutes',
+  'syncUsage',
 ]
 
 const SOZLESME = describeSyncContract()
