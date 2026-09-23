@@ -604,7 +604,10 @@ export async function listCloudSyncDevices() {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
-  return runtime.transport.listDevices(user.uid)
+  const devices = await runtime.transport.listDevices(user.uid)
+  // Erişimi kaldırılmış cihaz arayüzde listelenmez: belge yalnız o cihazın
+  // kendiliğinden geri bağlanmasını engelleyen kayıt olarak durur.
+  return devices.filter(device => !device.revokedAt)
 }
 
 export async function revokeCloudSyncDevice(deviceId) {

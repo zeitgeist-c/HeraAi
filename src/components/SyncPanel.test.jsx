@@ -129,3 +129,19 @@ describe('SyncPanel kendi cihazı kapalıyken', () => {
     expect(screen.getByRole('button', { name: 'Sync now' })).toBeDisabled()
   })
 })
+
+describe('SyncPanel erişimi kaldırılmış cihaz', () => {
+  it('listede göstermez ve satırına buton koymaz', async () => {
+    mockChrome({
+      devices: [
+        ...baseDevices,
+        { id: 'dev-9', label: 'Eski cihaz', revokedAt: 123, lastSyncedAt: 3 },
+      ],
+    })
+    render(<SyncPanel />)
+
+    await waitFor(() => expect(screen.getByText('Ofis dizüstü')).toBeInTheDocument())
+    expect(screen.queryByText('Eski cihaz')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Revoke device access' })).toHaveLength(2)
+  })
+})
