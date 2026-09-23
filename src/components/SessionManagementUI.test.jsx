@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '../i18n'
+import { LATEST_VERSION } from '../data/changelog'
 import AppHeader from './AppHeader'
 import HistoryOverlay from './HistoryOverlay'
 
@@ -39,7 +40,8 @@ describe('session management UI', () => {
     )
 
     expect(screen.getByText('Current chat')).toBeInTheDocument()
-    expect(screen.getByText('HeraAi · AI assistant')).toBeInTheDocument()
+    expect(screen.getByText(`HeraAi ${LATEST_VERSION}`)).toBeInTheDocument()
+    expect(screen.queryByText(/AI assistant/i)).toBeNull()
 
     const renameButton = screen.getByRole('button', { name: 'Rename chat' })
     fireEvent.click(renameButton)

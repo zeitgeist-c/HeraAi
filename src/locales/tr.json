@@ -4,7 +4,6 @@
     "tabs": {
       "api": "API Yönetimi",
       "general": "Genel Ayarlar",
-      "ai": "Yapay Zeka",
       "sync": "Bulut"
     },
     "sync": {
@@ -54,16 +53,13 @@
       "device_toggle_off": "Cihazı kapat",
       "device_toggle_on": "Cihazı aç",
       "device_off_badge": "Kapalı",
+      "device_off_count": "{{count}} kapalı",
       "device_disabled": "Cihaz kapatıldı.",
       "device_enabled": "Cihaz açıldı.",
       "device_disabled_status": "Bu cihaz kapalı",
       "device_disabled_notice": "Bu cihaz başka bir cihazdan kapatıldı. Yeniden açılana kadar eşitleme yapılmaz; sohbetler ve ayarlar bu cihazda kalır.",
       "rename": "Cihazı yeniden adlandır",
       "rename_placeholder": "Cihaz adı",
-      "device_platform": "Platform",
-      "device_id": "Cihaz kimliği",
-      "device_details_show": "Ayrıntıları göster",
-      "device_details_hide": "Ayrıntıları gizle",
       "renamed": "Cihaz adı güncellendi.",
       "legacy_cleanup_title": "Eski bulut verileri",
       "legacy_cleanup_description": "Önceki sürümlerin yüklediği şifreli ekleri, revizyonları ve kullanılmayan bulut yedeklerini kalıcı olarak siler. Güncel sohbet ve ayarlara dokunmaz.",
@@ -93,13 +89,8 @@
       }
     },
     "api": {
-      "active": "Aktif",
-      "add_placeholder": "Yeni API Anahtarı Ekle (AIzaSy...)",
-      "add_btn": "Ekle",
-      "description": "Birden fazla anahtar ekleyin. Aktif olanı radyo butonu ile seçin.",
       "save_btn": "Kaydet ve Devam Et",
-      "saved_success": "Ayarlar kaydedildi!",
-      "provider": "AI Sağlayıcı"
+      "saved_success": "Ayarlar kaydedildi!"
     },
     "keys": {
       "title": "API Anahtarları",
@@ -178,9 +169,6 @@
   "chat": {
     "placeholder": "HeraAi'a istediğini sor...",
     "ai_disclaimer": "Yapay zeka hata yapabilir.\nÖnemli bilgileri kontrol edin.",
-    "you": "Sen",
-    "gemini": "HeraAi",
-    "assistant_label": "AI asistanı",
     "attachment": "Ek",
     "attachment_unavailable": "Mevcut değil",
     "drop_files": "Dosyaları buraya bırakın",
@@ -210,10 +198,10 @@
     "search_next": "Sonraki sonuç",
     "no_history": "Henüz sohbet geçmişi yok.",
     "new_chat": "Yeni Sohbet",
+    "storage_write_failed": "Sohbet kaydedilemedi: tarayıcı depolaması dolu olabilir. Yer açmak için eski sohbetleri silin.",
     "session_title": {
       "input_label": "Sohbet adı",
       "empty_error": "Sohbet adı boş bırakılamaz.",
-      "updated": "Sohbet adı güncellendi.",
       "renamed": "Sohbet yeniden adlandırıldı.",
       "save_error": "Sohbet adı kaydedilemedi."
     },
@@ -258,8 +246,6 @@
       "copy": "Kopyala",
       "copied": "Kopyalandı!",
       "copy_failed": "Kopyalanamadı. Pano iznini kontrol edin.",
-      "summarize": "Sayfayı Özetle",
-      "screenshot": "Ekran Görüntüsü Kırp",
       "screenshot_hint": "Sayfa üzerinde kırpmak istediğiniz alanı çizin.",
       "edit": "Düzenle",
       "crop_confirm": "Onayla",
@@ -276,10 +262,8 @@
       "close": "Kapat",
       "copy_code": "Kodu kopyala",
       "retry": "Yeniden yanıt oluştur",
-      "retry_short": "Yeniden dene",
       "stop": "Durdur",
       "model_selector": "AI Modeli",
-      "transcribing": "Metne dönüştürülüyor...",
       "requesting_microphone": "Mikrofon izni bekleniyor...",
       "cancel_transcription": "Dönüştürmeyi iptal et",
       "read_aloud": "Sesli oku",
@@ -319,7 +303,6 @@
       "summarize_context": "Ekli dosyaları ve herkese açık web sayfalarını özetleyip ilişkilendir.",
       "translate": "Çevir",
       "explain": "Açıkla",
-      "code": "Kod Açıkla",
       "ocr": "Ekli görsel veya görsellerde yalnızca görünen metni yaz. Açıklama, özet, çeviri, yorum veya görselde görünmeyen hiçbir metin ekleme. Başlıkları, paragrafları, listeleri, satır sırasını ve okuma düzenini mümkün olduğunca koru. Okunamayan her bölümü [okunamadı] olarak belirt. Birden fazla görsel varsa ek sırasına göre işle ve sonuçları Görsel 1, Görsel 2 ve devam eden başlıklarla ayır."
     },
     "exported": "Sohbet geçmişi dışa aktarıldı!",
@@ -332,7 +315,6 @@
     "speech_failed": "Bu yanıt sesli okunamadı.",
     "speech_too_long": "Bu yanıt güvenli biçimde sesli okumak için çok uzun.",
     "code_block_skipped": "Kod bloğu atlandı.",
-    "all_keys_cooldown": "Tüm API anahtarları rate limit sonrası beklemede. En erken deneme: {{time}}",
     "model_used": "Kullanılan model",
     "model_providers": {
       "gemini": "Gemini",
@@ -393,12 +375,6 @@
     "connection_error": "AI istegi basarisiz oldu. API anahtarinizi ve baglantinizi kontrol edin.",
     "cancelled": "İstek iptal edildi",
     "quick_actions": {
-      "crop": "Kırp",
-      "web": "Web",
-      "ocr": "Metni Çıkar",
-      "translate": "Çevir",
-      "summarize": "Özet",
-      "explain": "Açıkla",
       "crop_tooltip": "Ekrandan alan seç",
       "crop_cancel_tooltip": "Alan seçimini iptal et",
       "web_tooltip": "Web'de araştır",
@@ -415,8 +391,6 @@
   "stats": {
     "title": "Kullanım İstatistikleri",
     "total_messages": "Gönderilen istem",
-    "total_sessions": "Toplam Oturum",
-    "last_7_days": "Son 7 Gündeki Mesajlar",
     "activity_title": "Araç kullanımı",
     "voice_inputs": "Ses",
     "screenshots": "Ekran Görüntüleri",

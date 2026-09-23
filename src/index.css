@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tailwind preflight'in `[hidden]` kuralı :where() ile sıfır özgüllükte olduğu için
+   bir display yardımcı sınıfı (flex/grid) onu ezer ve öğe gizlenmez — akordeon
+   panelleri açık kalır. Özniteliğin her koşulda kazanması burada sabitlenir. */
+[hidden] {
+  display: none !important;
+}
+
 @layer base {
   :root,
   .light {

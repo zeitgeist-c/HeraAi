@@ -4,7 +4,6 @@
         "tabs": {
             "api": "API Management",
             "general": "General Settings",
-            "ai": "Artificial Intelligence",
             "sync": "Cloud"
         },
         "sync": {
@@ -54,16 +53,13 @@
             "device_toggle_off": "Turn off device",
             "device_toggle_on": "Turn on device",
             "device_off_badge": "Off",
+            "device_off_count": "{{count}} off",
             "device_disabled": "Device turned off.",
             "device_enabled": "Device turned on.",
             "device_disabled_status": "This device is off",
             "device_disabled_notice": "This device was turned off from another device. Sync stays stopped until it is turned back on; chats and settings remain on this device.",
             "rename": "Rename device",
             "rename_placeholder": "Device name",
-            "device_platform": "Platform",
-            "device_id": "Device ID",
-            "device_details_show": "Show details",
-            "device_details_hide": "Hide details",
             "renamed": "Device name updated.",
             "legacy_cleanup_title": "Legacy cloud data",
             "legacy_cleanup_description": "Permanently removes encrypted attachments, revisions, and unused cloud backups uploaded by earlier versions. Current chats and settings are not touched.",
@@ -93,13 +89,8 @@
             }
         },
         "api": {
-            "active": "Active",
-            "add_placeholder": "Add new API Key (AIzaSy...)",
-            "add_btn": "Add",
-            "description": "Add multiple keys. Select the active one via radio button.",
             "save_btn": "Save and Continue",
-            "saved_success": "Settings saved successfully!",
-            "provider": "AI Provider"
+            "saved_success": "Settings saved successfully!"
         },
         "keys": {
             "title": "API Keys",
@@ -178,9 +169,6 @@
     "chat": {
         "placeholder": "Ask HeraAi anything...",
         "ai_disclaimer": "AI can make mistakes.\nPlease double-check important info.",
-        "you": "You",
-        "gemini": "HeraAi",
-        "assistant_label": "AI assistant",
         "attachment": "Attachment",
         "attachment_unavailable": "Unavailable",
         "drop_files": "Drop files here",
@@ -210,10 +198,10 @@
         "search_next": "Next result",
         "no_history": "No chat history found.",
         "new_chat": "New Chat",
+        "storage_write_failed": "Chat could not be saved: browser storage may be full. Delete old chats to free space.",
         "session_title": {
             "input_label": "Chat name",
             "empty_error": "Chat name cannot be empty.",
-            "updated": "Chat updated.",
             "renamed": "Chat renamed.",
             "save_error": "Chat could not be saved."
         },
@@ -258,8 +246,6 @@
             "copy": "Copy",
             "copied": "Copied!",
             "copy_failed": "Could not copy. Check clipboard permission.",
-            "summarize": "Summarize active page",
-            "screenshot": "Crop Screenshot",
             "screenshot_hint": "Draw an area on the page to crop.",
             "edit": "Edit",
             "crop_confirm": "Confirm",
@@ -276,10 +262,8 @@
             "close": "Close",
             "copy_code": "Copy code",
             "retry": "Regenerate response",
-            "retry_short": "Try again",
             "stop": "Stop",
             "model_selector": "AI Model",
-            "transcribing": "Transcribing...",
             "requesting_microphone": "Waiting for microphone permission...",
             "cancel_transcription": "Cancel transcription",
             "read_aloud": "Read aloud",
@@ -319,7 +303,6 @@
             "summarize_context": "Summarize and relate the attached files and public web pages.",
             "translate": "Translate",
             "explain": "Explain",
-            "code": "Explain Code",
             "ocr": "Extract only the visible text from the attached image or images. Do not add explanations, summaries, translations, interpretations, or any text that is not visible. Preserve headings, paragraphs, lists, line order, and reading order as closely as possible. Mark every unreadable section as [unreadable]. If there is more than one image, process them in attachment order and separate the results with the headings Image 1, Image 2 and so on."
         },
         "exported": "Chat history exported!",
@@ -332,7 +315,6 @@
         "speech_failed": "This response could not be read aloud.",
         "speech_too_long": "This response is too long to read aloud safely.",
         "code_block_skipped": "Code block skipped.",
-        "all_keys_cooldown": "All API keys are waiting after rate limits. Earliest retry: {{time}}",
         "model_used": "Model used",
         "model_providers": {
             "gemini": "Gemini",
@@ -393,12 +375,6 @@
         "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",
         "quick_actions": {
-            "crop": "Crop",
-            "web": "Web",
-            "ocr": "Extract Text",
-            "translate": "Translate",
-            "summarize": "Summarize",
-            "explain": "Explain",
             "crop_tooltip": "Select an area on screen",
             "crop_cancel_tooltip": "Cancel area selection",
             "web_tooltip": "Search the web",
@@ -415,8 +391,6 @@
     "stats": {
         "title": "Usage Statistics",
         "total_messages": "Prompts sent",
-        "total_sessions": "Total Sessions",
-        "last_7_days": "Last 7 Days",
         "activity_title": "Tool activity",
         "voice_inputs": "Voice Inputs",
         "screenshots": "Screenshots",

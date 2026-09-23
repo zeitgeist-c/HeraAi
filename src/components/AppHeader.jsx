@@ -20,6 +20,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { LATEST_VERSION } from '../data/changelog'
+
 const MAX_SESSION_TITLE_LENGTH = 80
 
 function AppHeader({
@@ -190,7 +192,7 @@ function AppHeader({
             </div>
           )}
           <p className="mt-1 truncate text-[11px] leading-none text-muted-foreground">
-            HeraAi · {t('chat.assistant_label')}
+            HeraAi {LATEST_VERSION}
           </p>
         </div>
       </div>

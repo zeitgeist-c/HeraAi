@@ -512,3 +512,12 @@ describe('ChatMessage copy actions', () => {
     expect(screen.getByTestId('response-duration')).toBeInTheDocument()
   })
 })
+
+describe('ChatMessage malformed content', () => {
+  it('renders a message whose content is not a string without crashing the panel', () => {
+    render(<ChatMessage message={{ id: 'malformed-1', role: 'model', content: { unexpected: true } }} />)
+
+    expect(screen.getByTestId('assistant-content')).toBeInTheDocument()
+    expect(screen.getByTestId('assistant-content').textContent).toBe('')
+  })
+})

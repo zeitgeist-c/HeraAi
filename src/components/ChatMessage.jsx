@@ -93,6 +93,10 @@ const ChatMessage = ({
   const { t } = useTranslation()
   const isBot = message.role === 'model'
   const visibleContent = getMessageDisplayContent(message)
+  // content her zaman dizge olmayabilir (bozuk içe aktarma, eşitlenen eski sürüm
+  // kaydı, elle düzenlenmiş depo). ReactMarkdown dizge olmayan children'da
+  // fırlatır ve tüm panel ErrorBoundary'ye düşerdi.
+  const contentText = typeof message.content === 'string' ? message.content : ''
   const [copied, setCopied] = useState(false)
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
   const [retryMenuPlacement, setRetryMenuPlacement] = useState('up')
@@ -404,7 +408,7 @@ const ChatMessage = ({
       {...(isContextExcluded ? { 'data-context-excluded': 'true' } : {})}
       className={`group w-full min-w-0 py-1${searchCurrent ? ' rounded-xl ring-2 ring-primary/70' : searchMatch ? ' rounded-xl ring-1 ring-primary/30' : ''}${isContextExcluded ? ' opacity-60' : ''}`}
     >
-      {isPending && !message.content ? (
+      {isPending && !contentText ? (
         <div className="min-h-16 space-y-2 rounded-xl py-2">
           <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-muted-foreground/15" />
           <div className="h-2.5 w-1/2 animate-pulse rounded-full bg-muted-foreground/15" />
@@ -415,7 +419,7 @@ const ChatMessage = ({
       ) : (
         <div data-testid="assistant-content" className="prose prose-sm max-w-none break-words text-[14px] leading-relaxed text-foreground dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-headings:font-semibold prose-p:my-2 prose-p:whitespace-pre-wrap prose-p:leading-[1.65] prose-li:my-0.5 prose-a:text-primary prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto">
           {isPending ? (
-            <div className="whitespace-pre-wrap">{message.content}</div>
+            <div className="whitespace-pre-wrap">{contentText}</div>
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -433,7 +437,7 @@ const ChatMessage = ({
                 },
               }}
             >
-              {message.content || ''}
+              {contentText}
             </ReactMarkdown>
           )}
         </div>

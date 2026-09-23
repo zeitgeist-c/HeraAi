@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ChevronDown,
   Cloud,
   CloudOff,
   Copy,
@@ -16,7 +17,6 @@ import {
   Trash2,
   Download,
   Upload,
-  ChevronDown,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -46,6 +46,16 @@ function formatDate(value) {
   }
 }
 
+// Katlanır başlık için kısa biçim: "23.09 23:42" (dar side panelde tam tarih taşıyor).
+function formatCompactDateTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '—'
+  const day = date.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
+  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return `${day} ${time}`
+}
+
 function SyncPanel() {
   const { t } = useTranslation()
   const [status, setStatus] = useState(null)
@@ -56,11 +66,8 @@ function SyncPanel() {
   const [busy, setBusy] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
   const [labelDraft, setLabelDraft] = useState('')
-  const [expandedDevices, setExpandedDevices] = useState([])
-
-  const toggleDeviceExpanded = deviceId => setExpandedDevices(current => (
-    current.includes(deviceId) ? current.filter(item => item !== deviceId) : [...current, deviceId]
-  ))
+  // Cihaz listesi kapalı başlar (kullanıcı kararı): panel kısa kalır, liste tıklayınca açılır.
+  const [devicesExpanded, setDevicesExpanded] = useState(false)
   const backupInputRef = useRef(null)
   const renameInputRef = useRef(null)
 
@@ -323,6 +330,16 @@ function SyncPanel() {
 
   const syncBlocked = Number(status.blockedUntil) > Date.now()
   const deviceDisabled = status.deviceDisabled === true
+  // "Bu cihaz" her zaman en üstte; diğerleri mevcut sırasını korur (sort kararlı).
+  const visibleDevices = devices
+    .filter(device => !device.revokedAt)
+    .sort((a, b) => Number(b.id === status.deviceId) - Number(a.id === status.deviceId))
+  const disabledDeviceCount = visibleDevices.filter(device => device.disabledAt).length
+  // Başlıkta hesabın en son eşitlenme zamanı: cihazların en yeni lastSyncedAt değeri.
+  const latestDeviceSyncAt = visibleDevices.reduce((latest, device) => {
+    const value = Number(device.lastSyncedAt) || 0
+    return value > latest ? value : latest
+  }, 0) || null
 
   return (
     <div className="flex flex-col gap-4">
@@ -374,82 +391,90 @@ function SyncPanel() {
         <button type="button" onClick={handlePause} disabled={busy !== null} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-secondary disabled:opacity-50">{status.paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{status.paused ? t('setup.sync.resume') : t('setup.sync.pause')}</button>
       </div>
 
-      <section>
-        <h3 className="mb-2 text-xs font-semibold">{t('setup.sync.devices')}</h3>
-        <div className="flex flex-col gap-2">
-          {devices.filter(device => !device.revokedAt).map(device => {
+      <section className={`overflow-hidden rounded-xl border bg-background/35 transition-colors ${devicesExpanded ? 'border-primary/30 shadow-sm shadow-primary/10' : 'border-border/75'}`}>
+        <button
+          id="devices-heading"
+          type="button"
+          onClick={() => setDevicesExpanded(current => !current)}
+          aria-expanded={devicesExpanded}
+          aria-controls="devices-panel"
+          className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/45"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Smartphone className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate text-xs font-semibold text-foreground">{t('setup.sync.devices')}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {latestDeviceSyncAt && (
+              <span aria-hidden="true" className="whitespace-nowrap text-[10px] text-muted-foreground">
+                {t('setup.sync.last_sync')} <span className="font-medium text-foreground">{formatCompactDateTime(latestDeviceSyncAt)}</span>
+              </span>
+            )}
+            {disabledDeviceCount > 0 && (
+              <span aria-hidden="true" className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">
+                {t('setup.sync.device_off_count', { count: disabledDeviceCount })}
+              </span>
+            )}
+            <span aria-hidden="true" className="inline-flex min-w-5 items-center justify-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {visibleDevices.length}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${devicesExpanded ? 'rotate-180' : ''}`} />
+          </span>
+        </button>
+        {devicesExpanded && (
+          <div id="devices-panel" role="region" aria-labelledby="devices-heading" className="border-t border-border/70 p-3">
+            {visibleDevices.length === 0 && <p className="text-[10px] text-muted-foreground">—</p>}
+            <div className="flex flex-col gap-2">
+              {visibleDevices.map(device => {
             const isRenaming = renamingId === device.id
             const isDisabled = Boolean(device.disabledAt)
-            const isExpanded = expandedDevices.includes(device.id)
-            const panelId = `device-panel-${device.id}`
-            const detailsToggleLabel = isExpanded
-              ? t('setup.sync.device_details_hide')
-              : t('setup.sync.device_details_show')
             return (
-              <section key={device.id} className={`overflow-hidden rounded-xl border transition-colors ${isExpanded ? 'border-primary/30 shadow-sm shadow-primary/10' : isDisabled ? 'border-amber-500/25 bg-amber-500/[0.04]' : 'border-border/75'}`}>
-                <div className="flex min-h-11 items-center gap-2 px-2.5 py-2">
-                  <Smartphone className={`h-4 w-4 shrink-0 ${isDisabled ? 'text-amber-500' : 'text-primary'}`} />
-                  {isRenaming ? (
-                    <input
-                      ref={renameInputRef}
-                      type="text"
-                      value={labelDraft}
-                      maxLength={MAX_DEVICE_LABEL_LENGTH}
-                      aria-label={t('setup.sync.rename_placeholder')}
-                      placeholder={t('setup.sync.rename_placeholder')}
-                      onChange={event => setLabelDraft(event.target.value)}
-                      onBlur={() => saveDeviceLabel(device)}
-                      onKeyDown={event => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          saveDeviceLabel(device)
-                        } else if (event.key === 'Escape') {
-                          event.preventDefault()
-                          cancelRenaming()
-                        }
-                      }}
-                      className="h-7 min-w-0 flex-1 rounded-lg border border-primary/40 bg-background px-2 text-[11px] font-medium outline-none focus:ring-2 focus:ring-ring/40"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => toggleDeviceExpanded(device.id)}
-                      aria-expanded={isExpanded}
-                      aria-controls={panelId}
-                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                    >
+              <section key={device.id} className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${isDisabled ? 'border-amber-500/25 bg-amber-500/[0.04]' : 'border-border/75'}`}>
+                <Smartphone className={`h-4 w-4 shrink-0 ${isDisabled ? 'text-amber-500' : 'text-primary'}`} />
+                {isRenaming ? (
+                  <input
+                    ref={renameInputRef}
+                    type="text"
+                    value={labelDraft}
+                    maxLength={MAX_DEVICE_LABEL_LENGTH}
+                    aria-label={t('setup.sync.rename_placeholder')}
+                    placeholder={t('setup.sync.rename_placeholder')}
+                    onChange={event => setLabelDraft(event.target.value)}
+                    onBlur={() => saveDeviceLabel(device)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        saveDeviceLabel(device)
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        cancelRenaming()
+                      }
+                    }}
+                    className="h-7 min-w-0 flex-1 rounded-lg border border-primary/40 bg-background px-2 text-[11px] font-medium outline-none focus:ring-2 focus:ring-ring/40"
+                  />
+                ) : (
+                  <div className="min-w-0 flex-1">
+                    <p className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-xs font-semibold text-foreground">{device.label || device.id}</span>
                       {device.id === status.deviceId && <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground">{t('setup.sync.this_device')}</span>}
                       {isDisabled && <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">{t('setup.sync.device_off_badge')}</span>}
-                    </button>
-                  )}
-                  <span className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => handleToggleDevice(device)} disabled={busy !== null} className={`hera-icon-button h-7 w-7 ${isDisabled ? 'text-amber-500' : ''}`} aria-pressed={!isDisabled} aria-label={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')} title={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')}>{isDisabled ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</button>
-                    <button type="button" onClick={() => startRenaming(device)} disabled={busy !== null} className="hera-icon-button h-7 w-7" aria-label={t('setup.sync.rename')} title={t('setup.sync.rename')}><Pencil className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button h-7 w-7 text-destructive" aria-label={t('setup.sync.revoke')} title={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => toggleDeviceExpanded(device.id)} aria-expanded={isExpanded} aria-controls={panelId} aria-label={detailsToggleLabel} title={detailsToggleLabel} className="hera-icon-button h-7 w-7">
-                      <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                    </button>
-                  </span>
-                </div>
-                <div id={panelId} role="region" hidden={!isExpanded} className="flex flex-col gap-1.5 border-t border-border/70 px-2.5 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-muted-foreground">{t('setup.sync.last_sync')}</span>
-                    <span className="text-[10px] font-medium text-foreground">{device.lastSyncedAt ? formatDate(device.lastSyncedAt) : '—'}</span>
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {t('setup.sync.last_sync')} <span className="font-medium text-foreground">{device.lastSyncedAt ? formatDate(device.lastSyncedAt) : '—'}</span>
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-muted-foreground">{t('setup.sync.device_platform')}</span>
-                    <span className="truncate text-[10px] font-medium text-foreground">{device.platform || '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-muted-foreground">{t('setup.sync.device_id')}</span>
-                    <span className="font-mono text-[10px] font-medium text-foreground">{`${String(device.id || '').slice(0, 8)}…`}</span>
-                  </div>
-                </div>
+                )}
+                <span className="flex shrink-0 items-center gap-1">
+                  <button type="button" onClick={() => handleToggleDevice(device)} disabled={busy !== null} className={`hera-icon-button h-7 w-7 ${isDisabled ? 'text-amber-500' : ''}`} aria-pressed={!isDisabled} aria-label={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')} title={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')}>{isDisabled ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</button>
+                  <button type="button" onClick={() => startRenaming(device)} disabled={busy !== null} className="hera-icon-button h-7 w-7" aria-label={t('setup.sync.rename')} title={t('setup.sync.rename')}><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button h-7 w-7 text-destructive" aria-label={t('setup.sync.revoke')} title={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>
+                </span>
               </section>
             )
           })}
-        </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-border/70 p-3">
