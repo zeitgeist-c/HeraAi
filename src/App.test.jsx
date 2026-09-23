@@ -167,6 +167,24 @@ function openSettingsPanel() {
   fireEvent.click(settingsButton);
 }
 
+const PROVIDER_TITLE_PATTERNS = [
+  /Gemini API (Keys|Anahtarları)/i,
+  /OpenRouter API (Keys|Anahtarları)/i,
+  /Ollama \((No Image Support|Görsel Desteklemez)\) API (Keys|Anahtarları)/i,
+  /Tavily (Search API Keys|Arama API Anahtarları)/i,
+];
+
+// Sağlayıcı kartları kapalı gelir ve içerikleri yalnız açıkken DOM'da olur;
+// kart içeriğine dokunan testler önce kartı açmalı.
+function expandProviderCards(patterns = PROVIDER_TITLE_PATTERNS) {
+  patterns.forEach(pattern => {
+    const heading = screen.getByText(pattern).closest('button');
+    if (heading.getAttribute('aria-expanded') === 'false') {
+      fireEvent.click(heading);
+    }
+  });
+}
+
 describe('HeraAi App', () => {
   let currentStorage = {};
   let storageListeners = [];
@@ -875,6 +893,23 @@ describe('HeraAi App', () => {
       await waitFor(() => expect(i18n.resolvedLanguage).toBe('en'));
       expect(options[1]).toHaveAttribute('aria-checked', 'true');
       expect(options[0]).toHaveAttribute('aria-checked', 'false');
+      // Seçim anında arayüz metni de değişmeli
+      expect(await screen.findByRole('button', { name: /General Settings/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Genel Ayarlar/ })).toBeNull();
+      // Kaydet'e basmadan kalıcı olmalı
+      await waitFor(() => expect(currentStorage.language).toBe('en'));
+
+      // Seçim bir sonraki tikte geri alınmamalı: bootstrap efektinin yeniden
+      // koşması depodaki eski dili geri yazıp seçimi siliyordu.
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      expect(i18n.resolvedLanguage).toBe('en');
+      expect(screen.getByRole('button', { name: /General Settings/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Genel Ayarlar/ })).toBeNull();
+      // Dil değişimi bootstrap'ı yeniden koşturmamalı (eskiden koşuyordu ve
+      // depodaki eski dili geri yazıyordu): GET_STATE hâlâ tek kez çağrılmış olmalı.
+      expect(global.chrome.runtime.sendMessage.mock.calls.filter(([message]) => (
+        message?.type === 'GET_STATE'
+      ))).toHaveLength(1);
     } finally {
       await i18n.changeLanguage(previousLanguage);
     }
@@ -2501,6 +2536,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards([PROVIDER_TITLE_PATTERNS[0]]);
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBeGreaterThan(0);
@@ -2788,6 +2824,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -2804,6 +2841,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -2842,12 +2880,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     openSettingsPanel();
 
-    const providerHeadings = [
-      /Gemini API (Keys|Anahtarları)/i,
-      /OpenRouter API (Keys|Anahtarları)/i,
-      /Ollama \((No Image Support|Görsel Desteklemez)\) API (Keys|Anahtarları)/i,
-      /Tavily (Search API Keys|Arama API Anahtarları)/i,
-    ].map(pattern => screen.getByText(pattern).closest('button'));
+    const providerHeadings = PROVIDER_TITLE_PATTERNS.map(pattern => screen.getByText(pattern).closest('button'));
 
     expect(providerHeadings.map(button => button.getAttribute('aria-expanded'))).toEqual([
       'false',
@@ -2855,6 +2888,9 @@ describe('HeraAi App', () => {
       'false',
       'false',
     ]);
+    // Kapalı kartın içeriği DOM'da hiç bulunmaz; `hidden` özniteliği tek başına
+    // yetmiyordu (display sınıfı onu ezip paneli açık bırakıyordu).
+    expect(document.querySelector('a[href="https://aistudio.google.com/api-keys"]')).toBeNull();
 
     fireEvent.click(providerHeadings[1]);
     expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'false');
@@ -2867,6 +2903,9 @@ describe('HeraAi App', () => {
     fireEvent.click(providerHeadings[0]);
     expect(providerHeadings[0]).toHaveAttribute('aria-expanded', 'false');
     expect(providerHeadings[1]).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelector('a[href="https://aistudio.google.com/api-keys"]')).toBeNull();
+
+    expandProviderCards();
 
     const expectedLinks = [
       ['https://aistudio.google.com/api-keys', /Gemini/i],
@@ -2892,6 +2931,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -2966,6 +3006,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -3006,6 +3047,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -3054,6 +3096,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     openSettingsPanel();
+    expandProviderCards();
 
     await waitFor(() => {
       expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
@@ -5913,5 +5956,26 @@ describe('HeraAi App', () => {
     expect(rows).toHaveLength(2);
     expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.6-flash', attempts: 1, successes: 1 }));
     expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.7-flash', attempts: 1, successes: 1 }));
+  });
+
+  it('surfaces a failed storage write instead of losing the chat silently', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    currentStorage = { theme: 'light', sessions: [], activeSessionId: null };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const originalSet = global.chrome.storage.local.set;
+    global.chrome.storage.local.set = vi.fn(() => Promise.reject(new Error('QUOTA_BYTES quota exceeded')));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Start New Chat|Yeni Sohbet Başlat/i }));
+
+      await waitFor(() => expect(toastError).toHaveBeenCalledWith(
+        expect.stringMatching(/could not be saved|kaydedilemedi/i),
+        expect.any(Object),
+      ));
+    } finally {
+      global.chrome.storage.local.set = originalSet;
+    }
   });
 });

@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist', 'setup/HeraAi-Extension-*/**'] },
+  { ignores: ['dist'] },
   js.configs.recommended,
   reactHooks.configs?.flat?.recommended || { plugins: { 'react-hooks': reactHooks }, rules: reactHooks.configs.recommended.rules },
   {

@@ -513,6 +513,7 @@ function App() {
   const sessionsRef = useRef([])
   const messagesRef = useRef([])
   const activeGenerationRef = useRef(null)
+  const languageAppliedRef = useRef(false)
   const lastGenerationRevisionRef = useRef(0)
   const variantSnapshotRevisionsRef = useRef(new Map())
   const finalizingGenerationRef = useRef(null)
@@ -811,6 +812,18 @@ function App() {
     return generateTitle(nextMessages)
   }, [generateTitle])
 
+  const storageWriteFailureNotifiedRef = useRef(false)
+  // Depolama yazımı (kota/izin) sessizce kaybolursa sohbet yeniden açılışta
+  // kaybolur; kullanıcıya bir kez görünür uyarı göster. i18n.t kullanılıyor
+  // çünkü `t` bağımlılığı bu callback'i ve onu taşıyan bootstrap efektini
+  // kararsız yapardı.
+  const reportStorageWriteFailure = useCallback((context, error) => {
+    console.error(context, error)
+    if (storageWriteFailureNotifiedRef.current) return
+    storageWriteFailureNotifiedRef.current = true
+    notifyError(i18n.t('chat.storage_write_failed'))
+  }, [])
+
   const trackStructuralStorageWrite = useCallback((writePromise) => {
     pendingStructuralStorageWriteRef.current = writePromise
     const clearTrackedWrite = () => {
@@ -838,12 +851,12 @@ function App() {
       .catch(() => undefined)
       .then(write)
     storageWriteQueueRef.current = queuedWrite.catch(error => {
-      console.error('Chrome storage write failed', error)
+      reportStorageWriteFailure('Chrome storage write failed', error)
     })
     return Array.isArray(values?.sessions)
       ? trackStructuralStorageWrite(queuedWrite)
       : queuedWrite
-  }, [trackStructuralStorageWrite])
+  }, [reportStorageWriteFailure, trackStructuralStorageWrite])
 
   const mergeSessionMessages = useCallback((sessionId, nextMessages) => {
     if (!sessionId || !nextMessages?.length) return null
@@ -1146,7 +1159,10 @@ function App() {
       sessionsRef.current,
       msgIdCounter,
       authoritativeGeneration,
-      t('chat.new_chat'),
+      // i18n.t: `t` kullanılırsa dil değişiminde kimliği değişir, bu callback'i ve
+      // onu bağımlılık olarak taşıyan bootstrap efektini yeniden çalıştırırdı.
+      // i18n her çağrıda güncel dili kullanır.
+      i18n.t('chat.new_chat'),
     )
     if (!repaired.changed) return Promise.resolve(false)
 
@@ -1165,7 +1181,7 @@ function App() {
       sessions: repaired.sessions,
       activeSessionId: activeSessionIdRef.current,
     })
-  }, [enqueueStorageWrite, t])
+  }, [enqueueStorageWrite])
 
   const flushVisibleSession = useCallback((immediate = false) => {
     if (partialPersistTimerRef.current != null) {
@@ -1196,7 +1212,7 @@ function App() {
           ? pendingStructuralWrite.catch(() => undefined).then(writeImmediately)
           : writeImmediately()
       ).catch(error => {
-          console.error('Immediate Chrome storage flush failed', error)
+          reportStorageWriteFailure('Immediate Chrome storage flush failed', error)
         })
       storageWriteQueueRef.current = Promise.all([precedingWrites, immediateWrite]).then(() => undefined)
       return immediateWrite
@@ -1205,7 +1221,7 @@ function App() {
     const visibleMessages = messagesRef.current
     if (!sessionId || !visibleMessages?.length) return Promise.resolve()
     return persistSessionMessages(sessionId, visibleMessages)
-  }, [mergeSessionMessages, persistSessionMessages, writeSessionMessagesToLatestStorage])
+  }, [mergeSessionMessages, persistSessionMessages, reportStorageWriteFailure, writeSessionMessagesToLatestStorage])
 
   useEffect(() => {
     flushVisibleSessionRef.current = flushVisibleSession
@@ -2309,7 +2325,11 @@ function App() {
         if (disposed) return
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
-      if (currentLanguage !== config.language) {
+      // Depodaki dil yalnız ilk bootstrap'ta uygulanır. Bu efekt, kimliği dile
+      // bağlı bir callback (persistAuthoritativeSessionRepair → t) yüzünden
+      // yeniden koşabiliyor; koruma olmadan depodaki eski dili geri yazıp
+      // kullanıcının yeni seçimini siliyordu.
+      if (!languageAppliedRef.current && currentLanguage !== config.language) {
         try {
           await i18n.changeLanguage(config.language)
         } catch (error) {
@@ -2317,6 +2337,7 @@ function App() {
         }
         if (disposed) return
       }
+      languageAppliedRef.current = true
       const translate = i18n.getFixedT(config.language)
       setAppConfig(config)
       applyTheme(config.theme, config.customPrimaryColor)
@@ -2571,6 +2592,15 @@ function App() {
           hasPendingGenerationChange = true
         }
         return
+      }
+      // Dil panelden Kaydet beklemeden de değiştirilebiliyor; appConfig'i tazele ki
+      // üretim istekleri doğru dil ipucunu göndersin.
+      if (changes.language?.newValue) {
+        setAppConfig(previous => (
+          previous && previous.language !== changes.language.newValue
+            ? { ...previous, language: changes.language.newValue }
+            : previous
+        ))
       }
       if (changes.sessions && Array.isArray(changes.sessions.newValue)) {
         changes.sessions.newValue.forEach(session => {

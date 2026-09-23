@@ -106,6 +106,7 @@ export const importSessions = (file) => {
           activeWebUrls: Array.isArray(s.activeWebUrls) ? s.activeWebUrls : [],
           messages: sanitizeRetiredModelMessages(s.messages || []).messages.map(message => ({
             ...message,
+            content: typeof message?.content === 'string' ? message.content : '',
             ...(message.model && !message.provider
               ? { provider: getProviderForModel(message.model) }
               : {}),

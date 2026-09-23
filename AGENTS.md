@@ -52,7 +52,7 @@ npm run preview
 # Run ESLint
 npm run lint
 
-# Run Suite of TestSprite End-to-End Tests
+# Run the Vitest suite in watch mode (use `npm run test:run` for a single pass)
 npm run test
 ```
 

@@ -115,6 +115,10 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
     i18n.changeLanguage(langCode)
+    // Dil seçimi Kaydet beklemeden kalıcı olur: depo güncellenince App'in
+    // storage dinleyicisi appConfig.language'ı da tazeler, yeniden açılışta
+    // eski dile dönülmez.
+    chrome.storage.local.set({ language: langCode })
   }
 
   useEffect(() => {
@@ -495,15 +499,16 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
             <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
           </span>
         </button>
-        <div
-          id={panelId}
-          role="region"
-          aria-labelledby={headingId}
-          hidden={!isExpanded}
-          className="border-t border-border/70 p-3"
-        >
-          {renderKeySection(provider)}
-        </div>
+        {isExpanded && (
+          <div
+            id={panelId}
+            role="region"
+            aria-labelledby={headingId}
+            className="border-t border-border/70 p-3"
+          >
+            {renderKeySection(provider)}
+          </div>
+        )}
       </section>
     )
   }
