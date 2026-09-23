@@ -2,6 +2,32 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.11',
+    date: '2026-09-23',
+    changes: {
+      tr: [
+        "Genel Ayarlar'da dil seçimi artık anında uygulanıyor: İngilizce seçince arayüz gerçekten İngilizce oluyor",
+        'Bağlı cihazlar listesi katlanır oldu: başlığa tıklayınca açılıyor, kapalıyken hesabın son eşitlenme zamanı görünüyor',
+        'Kendi cihazın (Bu cihaz) cihaz listesinde her zaman en üstte',
+        'Cihaz satırları sadeleşti: platform ve cihaz kimliği satırları kaldırıldı, işlem düğmeleri başlıkta kaldı',
+        'Ayarlar bölümlerindeki aç/kapa hatası giderildi: kartlar artık gerçekten açılıp kapanıyor',
+        'Bozuk içerikli bir sohbet dosyası içe aktarıldığında panelin çökmesi engellendi',
+        'Sohbet kaydedilemezse (tarayıcı depolaması dolu) artık uyarı gösteriliyor, sohbet sessizce kaybolmuyor',
+        'Üst başlıkta sürüm numarası görünüyor',
+      ],
+      en: [
+        'Language switching in Settings now applies instantly: picking English really switches the interface',
+        "The linked-devices list is now collapsible: click the header to open it, and the account's last sync time shows while it is closed",
+        'Your own device always sorts first in the device list',
+        'Cleaner device rows: the platform and device-id lines are gone, action buttons stay in the header',
+        'Fixed the expand/collapse bug in settings sections: cards now actually open and close',
+        'Importing a chat file with malformed content no longer crashes the panel',
+        'A failed chat save (browser storage full) now shows a warning instead of losing the chat silently',
+        'The version number now appears in the top header',
+      ],
+    },
+  },
+  {
     version: '1.10.10',
     date: '2026-09-23',
     changes: {
