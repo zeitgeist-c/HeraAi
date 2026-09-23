@@ -2,6 +2,28 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.10',
+    date: '2026-09-23',
+    changes: {
+      tr: [
+        'Başka cihazdan eşitlenen yeni sohbet artık geçmiş listesinde anında görünür',
+        'Kurtarma koduyla bağlanan cihaz, bağlanmadan önce oluşturduğu sohbetleri de buluta yükler',
+        'API Yönetimi\'nde sağlayıcı kartları kapalı açılır; yalnızca tıkladığınız kart genişler',
+        'Bağlı cihazlar akordeon oldu: kapat/aç, ad ver ve sil düğmeleri başlıkta durur, ayrıntılar tıklayınca açılır',
+        'Yama notları ve tarih biçimleri artık arayüz diline göre gösterilir',
+        'Genel Ayarlar\'daki dil seçimi yenilendi: TR/EN etiketli düğmeler, bayrak emojisi kaldırıldı',
+      ],
+      en: [
+        'A chat synced from another device now appears in the history list immediately',
+        'A device linked with a recovery code also uploads the chats it created before linking',
+        'Provider cards in API Management start collapsed; only the card you click expands',
+        'Linked devices became accordions: pause/resume, rename and revoke buttons sit in the header, details expand on click',
+        'Patch notes and date formats now follow the interface language',
+        'The language picker in General Settings was redesigned: TR/EN labelled buttons, flag emoji removed',
+      ],
+    },
+  },
+  {
     version: '1.10.9',
     date: '2026-09-23',
     changes: {
