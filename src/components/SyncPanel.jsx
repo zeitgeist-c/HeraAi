@@ -14,12 +14,14 @@ import {
   RefreshCw,
   ShieldCheck,
   Smartphone,
+  Timer,
   Trash2,
   Download,
   Upload,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { AUTO_SYNC_OPTIONS_MINUTES, normalizeAutoSyncMinutes } from '../lib/autoSyncScheduler'
 import { notifyError, notifySuccess } from '../lib/notify'
 import { MAX_DEVICE_LABEL_LENGTH } from '../lib/syncModel'
 
@@ -68,6 +70,8 @@ function SyncPanel() {
   const [labelDraft, setLabelDraft] = useState('')
   // Cihaz listesi kapalı başlar (kullanıcı kararı): panel kısa kalır, liste tıklayınca açılır.
   const [devicesExpanded, setDevicesExpanded] = useState(false)
+  // Otomatik eşitleme: aralık + bugünkü kota kullanımı (cihaza özel ayar).
+  const [autoSettings, setAutoSettings] = useState(null)
   const backupInputRef = useRef(null)
   const renameInputRef = useRef(null)
 
@@ -80,6 +84,12 @@ function SyncPanel() {
       if (deviceResponse?.ok) setDevices(deviceResponse.devices || [])
     } else {
       setDevices([])
+    }
+    try {
+      const autoResponse = await sendMessage({ type: 'SYNC_GET_AUTO_SETTINGS' })
+      if (autoResponse?.ok) setAutoSettings(autoResponse)
+    } catch {
+      // Ayar okunamazsa panel çalışmaya devam eder; varsayılan aralık geçerli olur.
     }
   }, [])
 
@@ -147,6 +157,12 @@ function SyncPanel() {
     'pause',
     () => sendMessage({ type: 'SYNC_SET_PAUSED', paused: !status?.paused }),
     status?.paused ? t('setup.sync.resumed') : t('setup.sync.paused'),
+  )
+
+  const handleAutoInterval = minutes => perform(
+    `auto:${minutes}`,
+    () => sendMessage({ type: 'SYNC_SET_AUTO_INTERVAL', minutes }),
+    t('setup.sync.auto_sync_saved'),
   )
 
   const handleDisconnect = () => perform(
@@ -384,6 +400,53 @@ function SyncPanel() {
 
       <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-3 text-[10px] leading-relaxed text-muted-foreground">
         {t('setup.sync.attachments_local_notice')}
+      </div>
+
+      <div className="rounded-xl border border-border/70 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2 text-xs font-semibold">
+            <Timer className="h-4 w-4 text-primary" />
+            {t('setup.sync.auto_sync_title')}
+          </span>
+          {autoSettings?.slowMode && (
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">
+              {t('setup.sync.auto_sync_slow_badge')}
+            </span>
+          )}
+        </div>
+        <div role="group" aria-label={t('setup.sync.auto_sync_title')} className="mt-2 grid grid-cols-4 gap-1">
+          {AUTO_SYNC_OPTIONS_MINUTES.map(minutes => {
+            const active = normalizeAutoSyncMinutes(autoSettings?.intervalMinutes) === minutes
+            return (
+              <button
+                key={minutes}
+                type="button"
+                onClick={() => handleAutoInterval(minutes)}
+                disabled={busy !== null || status.paused || deviceDisabled}
+                aria-pressed={active}
+                className={`h-8 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50 ${active ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground hover:bg-secondary'}`}
+              >
+                {minutes === 0 ? t('setup.sync.auto_sync_off') : t('setup.sync.auto_sync_hours', { hours: minutes / 60 })}
+              </button>
+            )
+          })}
+        </div>
+        {autoSettings && (
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            {t('setup.sync.auto_sync_usage', {
+              reads: Math.round((autoSettings.ratio?.reads || 0) * 100),
+              writes: Math.round((autoSettings.ratio?.writes || 0) * 100),
+            })}
+          </p>
+        )}
+        {autoSettings?.slowMode && (
+          <p className="mt-1 text-[10px] text-amber-500">{t('setup.sync.auto_sync_slow')}</p>
+        )}
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {normalizeAutoSyncMinutes(autoSettings?.intervalMinutes) === 0
+            ? t('setup.sync.auto_sync_off_note')
+            : t('setup.sync.auto_sync_note')}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

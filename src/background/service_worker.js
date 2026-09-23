@@ -36,6 +36,7 @@ import {
   clearCloudSyncSession,
   disconnectCloudSync,
   exportEncryptedBackup,
+  getAutoSyncSettings,
   getCloudSyncStatus,
   initializeCloudSync,
   importEncryptedBackup,
@@ -46,6 +47,7 @@ import {
   renameCloudSyncDevice,
   revokeCloudSyncDevice,
   runCloudSync,
+  setAutoSyncInterval,
   setCloudSyncDeviceEnabled,
   setCloudSyncPaused,
   wakeCloudSync,
@@ -1832,6 +1834,8 @@ const SYNC_REQUEST_TYPES = new Set([
   'SYNC_IMPORT_BACKUP',
   'SYNC_REGENERATE_RECOVERY',
   'SYNC_WAKE',
+  'SYNC_GET_AUTO_SETTINGS',
+  'SYNC_SET_AUTO_INTERVAL',
   'SYNC_CLEAN_LEGACY_CLOUD_DATA',
 ]);
 
@@ -1892,6 +1896,10 @@ async function handleSyncRequest(message) {
         return { ok: true, ...(await regenerateCloudRecoveryCode()) };
       case 'SYNC_WAKE':
         return { ok: true, result: await wakeCloudSync() };
+      case 'SYNC_GET_AUTO_SETTINGS':
+        return { ok: true, ...(await getAutoSyncSettings()) };
+      case 'SYNC_SET_AUTO_INTERVAL':
+        return { ok: true, ...(await setAutoSyncInterval(message.minutes)) };
       case 'SYNC_CLEAN_LEGACY_CLOUD_DATA':
         return { ok: true, ...(await cleanLegacyCloudData()) };
       default:

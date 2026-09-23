@@ -61,6 +61,21 @@ function statusPillClasses(status) {
   return 'bg-secondary text-muted-foreground border-border'
 }
 
+// "Son kullanım" satırı tarih + saat gösterir; saat olmadan aynı gün içindeki
+// anahtar rotasyonu panelden izlenemiyordu.
+function formatLastUsed(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function friendlyTestMessage(t, errorType) {
   switch (errorType) {
     case 'invalid': return t('setup.keys.test_invalid')
@@ -320,7 +335,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         <div className="mt-1 flex min-w-0 items-center gap-2 pl-5">
           <div className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground">
             {key.label && <span className="font-mono">{key.masked}</span>}
-            {key.lastUsedAt && <span>{key.label ? ' · ' : ''}{t('setup.keys.last_used')}: {new Date(key.lastUsedAt).toLocaleDateString()}</span>}
+            {key.lastUsedAt && <span>{key.label ? ' · ' : ''}{t('setup.keys.last_used')}: {formatLastUsed(key.lastUsedAt)}</span>}
             {hasCooldown && <span className="text-amber-500">{key.label || key.lastUsedAt ? ' · ' : ''}{t('setup.keys.cooldown_until')}: {new Date(key.cooldownUntil).toLocaleTimeString()}</span>}
             {minutesAgo != null && <span>{key.label || key.lastUsedAt || hasCooldown ? ' · ' : ''}{t('setup.keys.last_error', { minutes: minutesAgo })}</span>}
           </div>

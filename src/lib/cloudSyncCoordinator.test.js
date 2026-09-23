@@ -30,7 +30,9 @@ vi.mock('./firestoreTransport', () => ({
 }))
 
 import {
+  currentUsage,
   exportEncryptedBackup,
+  getAutoSyncSettings,
   getCloudSyncStatus,
   initializeCloudSync,
   cloudSyncWakeReason,
@@ -38,9 +40,11 @@ import {
   listCloudSyncDevices,
   mapCloudSyncError,
   nextPacificQuotaReset,
+  pacificDayKey,
   regenerateCloudRecoveryCode,
   renameCloudSyncDevice,
   runCloudSync,
+  setAutoSyncInterval,
   setCloudSyncDeviceEnabled,
 } from './cloudSyncCoordinator'
 import { openMasterSecretFromRecovery } from './syncCrypto'
@@ -262,5 +266,96 @@ describe('cihaz kapatma ve ad verme', () => {
       .map(item => item.document)
     const gonderilenSohbetler = gonderilenler.filter(belge => belge.entityType === 'session')
     expect(gonderilenSohbetler).toHaveLength(1)
+  })
+})
+
+describe('otomatik eşitleme ayarı ve kota sayacı', () => {
+  it('varsayılan aralık bir saat; kaydedilen aralık okunur, geçersiz değer varsayılana döner', async () => {
+    delete storage.syncAutoIntervalMinutes
+    expect((await getAutoSyncSettings()).intervalMinutes).toBe(60)
+
+    await setAutoSyncInterval(120)
+    expect((await getAutoSyncSettings()).intervalMinutes).toBe(120)
+
+    await setAutoSyncInterval(0)
+    expect((await getAutoSyncSettings()).intervalMinutes).toBe(0)
+
+    await setAutoSyncInterval(45)
+    expect((await getAutoSyncSettings()).intervalMinutes).toBe(60)
+  })
+
+  it('başarılı koşudan sonra günlük sayaç artar ve panelde görünür', async () => {
+    delete storage.syncUsage
+
+    const result = await runCloudSync()
+
+    expect(result?.skipped).toBeUndefined()
+    const usage = storage.syncUsage
+    expect(usage.dayKey).toBe(pacificDayKey())
+    expect(usage.reads).toBeGreaterThanOrEqual(1)
+    expect(usage.writes).toBeGreaterThanOrEqual(1)
+
+    const ayarlar = await getAutoSyncSettings()
+    expect(ayarlar.usage.reads).toBe(usage.reads)
+    expect(ayarlar.slowMode).toBe(false)
+  })
+
+  it('dünkü sayaç bugüne taşınmaz', () => {
+    const bugun = pacificDayKey()
+    expect(currentUsage({ dayKey: bugun, reads: 10, writes: 5 }, Date.now()))
+      .toEqual({ dayKey: bugun, reads: 10, writes: 5 })
+    expect(currentUsage({ dayKey: '2000-01-01', reads: 999, writes: 999 }, Date.now()))
+      .toEqual({ dayKey: bugun, reads: 0, writes: 0 })
+    expect(currentUsage(undefined, Date.now())).toEqual({ dayKey: bugun, reads: 0, writes: 0 })
+  })
+
+  it('sayaç yarıyı geçince yavaş mod açılır', async () => {
+    storage.syncUsage = {
+      dayKey: pacificDayKey(),
+      reads: 30_000,
+      writes: 0,
+    }
+
+    const ayarlar = await getAutoSyncSettings()
+
+    expect(ayarlar.slowMode).toBe(true)
+    expect(ayarlar.ratio.reads).toBeCloseTo(0.6)
+  })
+
+  it('eşitleme sürerken ikinci çağrı kilide takılır, kilit sonra serbest kalır', async () => {
+    let serbest
+    transport.getDevice.mockImplementationOnce(async (_uid, id) => new Promise(resolve => {
+      serbest = () => resolve(cloud.devices.get(id) || null)
+    }))
+
+    const birinci = runCloudSync()
+    const ikinci = await runCloudSync()
+
+    expect(ikinci).toEqual({ skipped: 'already_running' })
+
+    // İlk koşu kilidi aldı ve cihaz durumunu okumakta bekliyor; bırakmadan önce
+    // o noktaya ulaştığını doğrula.
+    await vi.waitFor(() => expect(serbest).toBeTypeOf('function'))
+    serbest()
+    await expect(birinci).resolves.toBeDefined()
+    expect(storage.syncLease).toBe(0)
+  })
+
+  it('bayat kilit yeni koşuyu engellemez', async () => {
+    storage.syncLease = Date.now() - 10 * 60 * 1000
+
+    const result = await runCloudSync()
+
+    expect(result?.skipped).toBeUndefined()
+    expect(storage.syncLease).toBe(0)
+  })
+
+  it('depolama kilidi tazeyse koşu hiç başlamaz (yeniden başlatma sonrası koruma)', async () => {
+    storage.syncLease = Date.now()
+
+    const result = await runCloudSync()
+
+    expect(result).toEqual({ skipped: 'already_running' })
+    storage.syncLease = 0
   })
 })

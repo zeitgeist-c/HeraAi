@@ -86,6 +86,8 @@ const CONTRACT = {
   syncLease: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Eşitleme kilidi' },
   syncQueue: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Çevrimdışı kuyruk' },
   syncPullCursor: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Son çekme imleci' },
+  syncAutoIntervalMinutes: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Otomatik eşitleme aralığı; cihazın kendi tercihi' },
+  syncUsage: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Günlük kota sayacı' },
   deviceCryptoKey: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Cihaza özel sarma anahtarı' },
 
   // ---- Eşitlenmeyen (eski/artık) ----
