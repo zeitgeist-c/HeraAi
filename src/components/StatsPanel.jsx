@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Activity, Clock, Globe, MessageSquare, Mic, Percent, Scissors, Timer, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { currentLanguage } from '../lib/language'
 import { formatDurationMs } from '../lib/duration'
 import { getStatsSnapshot } from '../lib/stats'
 
@@ -177,7 +178,7 @@ function StatsPanel({ onClose }) {
             chartSummary={chartSummary}
             total={snapshot.promptsTotal ?? 0}
             t={t}
-            lang={i18n.language}
+            lang={currentLanguage(i18n)}
           />
         )}
 

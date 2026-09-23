@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '../i18n'
@@ -142,6 +142,56 @@ describe('SyncPanel erişimi kaldırılmış cihaz', () => {
 
     await waitFor(() => expect(screen.getByText('Ofis dizüstü')).toBeInTheDocument())
     expect(screen.queryByText('Eski cihaz')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Revoke device access' })).toHaveLength(2)
+  })
+})
+
+describe('SyncPanel cihaz akordeonu', () => {
+  it('cihazlar kapalı gelir, tıklayınca ayrıntılar açılır', async () => {
+    mockChrome({
+      devices: [
+        {
+          id: 'dev-1',
+          label: 'Ai-Home',
+          disabledAt: null,
+          lastSyncedAt: Date.parse('2026-09-23T20:38:13Z'),
+          platform: 'Windows',
+        },
+        { id: 'dev-2', label: 'Ofis dizüstü', disabledAt: null, lastSyncedAt: 1 },
+      ],
+    })
+    render(<SyncPanel />)
+
+    const aiHome = await screen.findByRole('button', { name: /^Ai-Home/ })
+    const aiHomeDetails = document.getElementById('device-panel-dev-1')
+    expect(aiHome).toHaveAttribute('aria-expanded', 'false')
+    expect(aiHomeDetails).toHaveAttribute('hidden')
+    expect(screen.getAllByRole('button', { name: 'Show details' })).toHaveLength(2)
+
+    fireEvent.click(aiHome)
+
+    expect(aiHome).toHaveAttribute('aria-expanded', 'true')
+    expect(aiHomeDetails).not.toHaveAttribute('hidden')
+    expect(within(aiHomeDetails).getByText('Last sync')).toBeVisible()
+    expect(within(aiHomeDetails).getByText('Platform')).toBeVisible()
+    expect(within(aiHomeDetails).getByText('Windows')).toBeVisible()
+    expect(within(aiHomeDetails).getByText('Device ID')).toBeVisible()
+    expect(within(aiHomeDetails).getByText('dev-1…')).toBeVisible()
+    expect(screen.getAllByRole('button', { name: 'Hide details' })).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide details' }))
+
+    expect(aiHome).toHaveAttribute('aria-expanded', 'false')
+    expect(aiHomeDetails).toHaveAttribute('hidden')
+  })
+
+  it('hızlı işlem butonları kapalıyken de görünür', async () => {
+    render(<SyncPanel />)
+
+    await waitFor(() => expect(screen.getByText('HeraAi - Windows')).toBeInTheDocument())
+    expect(screen.getAllByRole('button', { name: 'Turn off device' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Turn on device' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Rename device' })).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: 'Revoke device access' })).toHaveLength(2)
   })
 })

@@ -242,4 +242,25 @@ describe('cihaz kapatma ve ad verme', () => {
     expect(devices.map(device => device.label)).not.toContain('İptal edilmiş cihaz')
     expect(devices.length).toBeGreaterThan(0)
   })
+
+  it('baglanmadan once var olan yerel sohbet hesaba gonderilir', async () => {
+    const { recoveryCode } = await regenerateCloudRecoveryCode()
+    storage.sessions = [{
+      id: 'yerel-sohbet',
+      title: 'Yerel sohbet',
+      isStarred: true,
+      syncPolicy: 'synced',
+      updatedAt: 1,
+      messages: [{ id: 'm1', role: 'user', content: 'Merhaba' }],
+    }]
+    transport.pushEntities.mockClear()
+
+    await linkCloudSyncDevice(recoveryCode)
+
+    const gonderilenler = transport.pushEntities.mock.calls
+      .flatMap(([arg]) => arg.documents || [])
+      .map(item => item.document)
+    const gonderilenSohbetler = gonderilenler.filter(belge => belge.entityType === 'session')
+    expect(gonderilenSohbetler).toHaveLength(1)
+  })
 })
