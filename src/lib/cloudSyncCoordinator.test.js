@@ -35,6 +35,7 @@ import {
   initializeCloudSync,
   cloudSyncWakeReason,
   linkCloudSyncDevice,
+  listCloudSyncDevices,
   mapCloudSyncError,
   nextPacificQuotaReset,
   regenerateCloudRecoveryCode,
@@ -230,5 +231,15 @@ describe('cihaz kapatma ve ad verme', () => {
     expect(device.label).toBe('Özel Ad')
     expect(device.revokedAt).toBeNull()
     expect(device.disabledAt).toBeNull()
+  })
+
+  it('erisimi kaldirilmis cihaz listede gorunmez', async () => {
+    cloud.devices.set('dev-iptal', { label: 'İptal edilmiş cihaz', revokedAt: 1 })
+
+    const devices = await listCloudSyncDevices()
+
+    expect(devices.some(device => device.revokedAt)).toBe(false)
+    expect(devices.map(device => device.label)).not.toContain('İptal edilmiş cihaz')
+    expect(devices.length).toBeGreaterThan(0)
   })
 })

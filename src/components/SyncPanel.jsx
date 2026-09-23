@@ -371,7 +371,7 @@ function SyncPanel() {
       <section>
         <h3 className="mb-2 text-xs font-semibold">{t('setup.sync.devices')}</h3>
         <div className="flex flex-col gap-2">
-          {devices.map(device => {
+          {devices.filter(device => !device.revokedAt).map(device => {
             const isRenaming = renamingId === device.id
             const isDisabled = Boolean(device.disabledAt)
             return (
@@ -405,15 +405,11 @@ function SyncPanel() {
                       {isDisabled && <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">{t('setup.sync.device_off_badge')}</span>}
                     </p>
                   )}
-                  <p className="text-[10px] text-muted-foreground">{device.id === status.deviceId ? t('setup.sync.this_device') : formatDate(device.lastSyncedAt)}{device.revokedAt ? ` · ${t('setup.sync.revoked')}` : ''}</p>
+                  <p className="text-[10px] text-muted-foreground">{device.id === status.deviceId ? t('setup.sync.this_device') : formatDate(device.lastSyncedAt)}</p>
                 </div>
-                {!device.revokedAt && (
-                  <>
-                    <button type="button" onClick={() => handleToggleDevice(device)} disabled={busy !== null} className={`hera-icon-button h-7 w-7 ${isDisabled ? 'text-amber-500' : ''}`} aria-pressed={!isDisabled} aria-label={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')} title={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')}>{isDisabled ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</button>
-                    <button type="button" onClick={() => startRenaming(device)} disabled={busy !== null} className="hera-icon-button h-7 w-7" aria-label={t('setup.sync.rename')} title={t('setup.sync.rename')}><Pencil className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button h-7 w-7 text-destructive" aria-label={t('setup.sync.revoke')} title={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>
-                  </>
-                )}
+                <button type="button" onClick={() => handleToggleDevice(device)} disabled={busy !== null} className={`hera-icon-button h-7 w-7 ${isDisabled ? 'text-amber-500' : ''}`} aria-pressed={!isDisabled} aria-label={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')} title={isDisabled ? t('setup.sync.device_toggle_on') : t('setup.sync.device_toggle_off')}>{isDisabled ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</button>
+                <button type="button" onClick={() => startRenaming(device)} disabled={busy !== null} className="hera-icon-button h-7 w-7" aria-label={t('setup.sync.rename')} title={t('setup.sync.rename')}><Pencil className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => handleRevoke(device.id)} disabled={busy !== null} className="hera-icon-button h-7 w-7 text-destructive" aria-label={t('setup.sync.revoke')} title={t('setup.sync.revoke')}><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             )
           })}

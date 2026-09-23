@@ -49,7 +49,6 @@
             "resumed": "Sync resumed.",
             "devices": "Linked devices",
             "this_device": "This device",
-            "revoked": "Access revoked",
             "revoke": "Revoke device access",
             "device_revoked": "Device access revoked.",
             "device_toggle_off": "Turn off device",
