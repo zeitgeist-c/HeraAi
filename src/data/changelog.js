@@ -2,6 +2,30 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.15',
+    date: '2026-09-24',
+    changes: {
+      tr: [
+        'Google hesabına giriş ve uzun süren bulut işlemleri sırasında arka plan servisi uyanık tutuluyor; "İşlem tamamlanamadı: The message port closed..." hatası giderildi',
+        'Bağlantı yine koparsa işlem ham İngilizce hata metni yerine anlaşılır Türkçe açıklamayla bildiriliyor',
+        'Giriş gerçekten tamamlandıysa panel bunu doğrulayıp başarılı sayıyor; yarıda kalan girişte yeniden denemeniz isteniyor',
+        '"Şimdi eşitle" işlemi bağlantı kopmasına rağmen tamamlandıysa otomatik başarılı sayılıyor',
+        'Yeni uyanan arka plan servisi oturumun geri yüklenmesini bekliyor; giriş yapılmışken "giriş yok" görünmesi giderildi',
+        'Şifreli alan kurulumunda kurtarma kodu gösterilemezse uyarı veriliyor ve kurtarma kodu bölümünden yeni kod oluşturmanız isteniyor',
+        'Bozuk veya yanlış yedek dosyasında teknik ayrıştırma hatası yerine anlaşılır uyarı gösteriliyor; eksik hata nedenleri (şifreli alan zaten var, cihaz bağlı değil) artık açıkça yazılıyor',
+      ],
+      en: [
+        'The background service is kept awake during Google sign-in and long cloud operations; the "message port closed" failure is fixed',
+        'If the connection drops anyway, the operation now shows a clear explanation instead of a raw technical error',
+        'A sign-in that actually completed is verified and reported as successful; an interrupted one asks you to try again',
+        '"Sync now" is reported as successful when the sync finished on the server despite the dropped connection',
+        'A freshly woken background service waits for the session to be restored, so a signed-in account no longer looks signed out',
+        'If the recovery code cannot be shown during the first setup, you are warned and asked to create a new code from the recovery section',
+        'A corrupt or wrong backup file now shows a clear warning instead of a parser error, and missing causes (space already exists, device not linked) are spelled out',
+      ],
+    },
+  },
+  {
     version: '1.10.14',
     date: '2026-09-24',
     changes: {
