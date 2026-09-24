@@ -36,7 +36,11 @@ function HistoryOverlay({
   const cancelBulkDeleteRef = useRef(null)
   const bulkDeleteWasOpenRef = useRef(false)
 
-  const sortedSessions = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  // Geçmişte yalnız gerçekten başlamış sohbetler listelenir (en az bir kullanıcı mesajı).
+  const startedSessions = sessions.filter(session => (
+    (session?.messages || []).some(message => message?.role === 'user')
+  ))
+  const sortedSessions = [...startedSessions].sort((a, b) => b.updatedAt - a.updatedAt)
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase('tr')
   const filteredSessions = normalizedQuery
     ? sortedSessions.filter(session => (
@@ -295,7 +299,7 @@ function HistoryOverlay({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        {sessions.length === 0 && (
+        {startedSessions.length === 0 && (
           <div className="flex min-h-52 flex-col items-center justify-center rounded-2xl border border-dashed border-border px-5 text-center">
             <History className="mb-3 h-6 w-6 text-muted-foreground/55" />
             <p className="text-xs text-muted-foreground">{t('chat.no_history')}</p>

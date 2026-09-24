@@ -108,7 +108,6 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                     {group.models.map(model => {
                       const isSelected = model.modelId === selectedModel
                       const dot = PROVIDER_DOT[model.provider] || 'bg-muted-foreground'
-                      const quality = Number(model?.routing?.quality ?? model?.quality)
                       return (
                         <button
                           key={model.key || model.modelId}
@@ -128,14 +127,9 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                               <span aria-hidden="true" className="shrink-0 text-[10px] leading-none">📷</span>
                             )}
                           </span>
-                          {model.speed && (
+                          {model.purposeKey && (
                             <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
-                              {t(`chat.speeds.${model.speed}`)}
-                            </span>
-                          )}
-                          {Number.isFinite(quality) && (
-                            <span className="shrink-0 rounded-full border border-primary/40 px-1.5 py-px text-[10px] font-semibold text-primary">
-                              Q{quality}
+                              {t(model.purposeKey)}
                             </span>
                           )}
                           {isSelected && <Check className="h-4 w-4 shrink-0" />}

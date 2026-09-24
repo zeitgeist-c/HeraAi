@@ -336,8 +336,20 @@
     },
     "model_labels": {
       "gpt_oss_120b": "GPT-OSS 120B",
-      "nemotron_3_super": "Nemotron 3 Super",
-      "nemotron_3_ultra": "Nemotron 3 Ultra"
+      "nemotron_3_super": "Nemotron 3 Super"
+    },
+    "model_purposes": {
+      "quick_drafts": "Hızlı taslak",
+      "daily_chat": "Günlük sohbet",
+      "balanced": "Dengeli",
+      "docs_images": "Belge & görsel",
+      "most_capable": "En güçlü",
+      "fast_vision": "Hızlı & görselli",
+      "code_images": "Kod & görsel",
+      "code_analysis": "Kod & analiz",
+      "general_chat": "Genel sohbet",
+      "smartest": "En zeki",
+      "strong_visual": "Güçlü & görselli"
     },
     "speeds": {
       "fast": "Hızlı",
