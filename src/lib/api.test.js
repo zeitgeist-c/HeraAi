@@ -1064,7 +1064,7 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 9 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
+  it('exports the 11 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
     expect(MODELS).toEqual([
       'gemini-3.1-flash-lite',
@@ -1072,9 +1072,11 @@ describe('model selection', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'openrouter/free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nex-agi/nex-n2.5-pro:free',
+      'qwen/qwen3.8-27b:free',
+      'nvidia/nemotron-3.5-lightning:free',
       'gpt-oss:120b',
+      'nemotron-3-super',
       'nemotron-3-ultra',
     ])
   })

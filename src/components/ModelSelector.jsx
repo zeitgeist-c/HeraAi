@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Sparkles } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 const PROVIDER_DOT = {
@@ -8,7 +8,7 @@ const PROVIDER_DOT = {
   ollama: 'bg-amber-500',
 }
 
-function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelLabels, onModelChange, onAutoSelect }) {
+function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
   const { t } = useTranslation()
   const normalizedModels = (models || []).map(model => typeof model === 'string'
     ? { modelId: model, provider: 'gemini', label: modelLabels[model] || model }
@@ -47,11 +47,8 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
   }, [open ])
 
   const selected = normalizedModels.find(model => model.modelId === selectedModel)
-  const isAuto = selectionMode === 'auto'
-  const selectedLabel = isAuto
-    ? t('chat.auto.label')
-    : (selected?.label || modelLabels[selectedModel] || selectedModel)
-  const selectedDot = isAuto ? null : (PROVIDER_DOT[selectedProvider] || 'bg-muted-foreground')
+  const selectedLabel = selected?.label || modelLabels[selectedModel] || selectedModel
+  const selectedDot = PROVIDER_DOT[selectedProvider] || 'bg-muted-foreground'
 
   const toggleProvider = (provider) => {
     setUserCollapsed(current => current.includes(provider)
@@ -61,12 +58,7 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
 
   const chooseModel = (modelId) => {
     setOpen(false)
-    if (modelId !== selectedModel || selectionMode !== 'manual') onModelChange(modelId)
-  }
-
-  const chooseAuto = () => {
-    setOpen(false)
-    onAutoSelect?.()
+    if (modelId !== selectedModel) onModelChange(modelId)
   }
 
   return (
@@ -79,19 +71,13 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
         aria-label={t('chat.tooltips.model_selector')}
         title={t('chat.tooltips.model_selector')}
         onClick={() => setOpen(prev => !prev)}
-        className={`flex h-7 w-full items-center justify-between gap-1 truncate rounded-lg border py-0 pl-2.5 pr-1.5 text-[11px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-          isAuto
-            ? 'border-transparent bg-gradient-to-r from-primary to-violet-500 text-primary-foreground shadow-sm shadow-primary/25 hover:opacity-90'
-            : 'border-border/70 bg-secondary/55 text-foreground hover:bg-secondary'
-        }`}
+        className="flex h-7 w-full items-center justify-between gap-1 truncate rounded-lg border border-border/70 bg-secondary/55 py-0 pl-2.5 pr-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary/30"
       >
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {isAuto
-            ? <Sparkles className="h-3 w-3 shrink-0" aria-hidden="true" />
-            : (selectedDot && <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${selectedDot}`} />)}
+          {selectedDot && <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${selectedDot}`} />}
           <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
         </span>
-        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''} ${isAuto ? '' : 'text-muted-foreground'}`} />
+        <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div
@@ -99,21 +85,6 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
           aria-label={t('chat.tooltips.model_selector')}
           className="absolute bottom-full left-0 z-50 mb-1.5 max-h-56 w-60 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10"
         >
-          <button
-            type="button"
-            role="option"
-            aria-selected={selectionMode === 'auto'}
-            data-model-id="auto"
-            onClick={chooseAuto}
-            className={`mb-1 flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60 ${selectionMode === 'auto' ? 'font-semibold text-primary' : 'text-foreground'}`}
-          >
-            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{t('chat.auto.label')}</span>
-              <span className="block truncate text-[10px] font-normal text-muted-foreground">{t('chat.auto.description')}</span>
-            </span>
-            {selectionMode === 'auto' && <Check className="h-4 w-4 shrink-0" />}
-          </button>
           {groupedModels.map(group => {
             const collapsed = isCollapsed(group.provider)
             const headingId = `model-group-${group.provider}`
@@ -135,7 +106,7 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
                 {!collapsed && (
                   <div id={`${headingId}-models`} role="group" aria-labelledby={headingId} className="pb-0.5">
                     {group.models.map(model => {
-                      const isSelected = selectionMode === 'manual' && model.modelId === selectedModel
+                      const isSelected = model.modelId === selectedModel
                       const dot = PROVIDER_DOT[model.provider] || 'bg-muted-foreground'
                       const quality = Number(model?.routing?.quality ?? model?.quality)
                       return (
@@ -153,6 +124,9 @@ function ModelSelector({ selectedModel, selectionMode = 'manual', models, modelL
                             <span className="min-w-0 flex-1 truncate">
                               {model.label || modelLabels[model.modelId] || model.modelId}
                             </span>
+                            {model.capabilities?.supportsImage === true && (
+                              <span aria-hidden="true" className="shrink-0 text-[10px] leading-none">📷</span>
+                            )}
                           </span>
                           {model.speed && (
                             <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-px text-[10px] font-medium text-muted-foreground">

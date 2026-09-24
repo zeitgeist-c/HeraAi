@@ -291,7 +291,10 @@ describe('local fallback provider fairness and need signals', () => {
       text: '```js\nconst a = 1\n``` bu ne yapar?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
+      // Katalog 24.09.2026'da yenilendi: kodlama puanı 5 olan üç model var
+      // (Gemini 3.8 Flash, Nex-N2.5 Pro, Nemotron 3 Ultra) ve eşitlikte
+      // katalog sırası kazanır.
+      modelKey: 'gemini:gemini-3.8-flash',
       reasonCode: 'coding',
     })
   })
@@ -301,7 +304,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'X ve Y yaklaşımlarını karşılaştır, neden biri daha iyi? Hangisini seçmeliyim?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
+      // Qwen3.8 27B (Q4, orta hız) kalite barajını geçen en hızlı model.
+      modelKey: 'openrouter:qwen/qwen3.8-27b:free',
       reasonCode: 'complex_reasoning',
     })
   })
@@ -311,7 +315,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'Fotoğraf makinesi nasıl çalışır? Özetle anlat.',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'ollama:gpt-oss:120b',
+      // Nemotron 3.5 Lightning (hızlı) gpt-oss ile eşit puanda ve katalogda önde.
+      modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free',
       reasonCode: 'fast',
     })
   })
@@ -327,12 +332,15 @@ describe('local fallback provider fairness and need signals', () => {
   })
 
   it('routes hard image questions to a quality-gated image model', () => {
+    // Kural: kalite barajını geçen adaylar arasından en HIZLI olan seçilir.
+    // Qwen3.8 27B (Q4, orta hız) barajı geçer ve Gemini 3.8 Flash'tan (yavaş)
+    // hızlı olduğu için görsel işlerde onu geçer; ikisi de görsel desteklidir.
     expect(selectLocalFallback({
       text: 'Bu iki grafiği karşılaştır, neden farklı? Hangisi doğru?',
       mimeTypes: ['image/png'],
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'gemini:gemini-3.8-flash',
+      modelKey: 'openrouter:qwen/qwen3.8-27b:free',
       reasonCode: 'vision',
     })
   })
@@ -341,6 +349,6 @@ describe('local fallback provider fairness and need signals', () => {
     expect(selectLocalFallback({ text: 'm'.repeat(299), candidates: MODEL_CATALOG }).modelKey)
       .toBe('gemini:gemini-3.1-flash-lite')
     expect(selectLocalFallback({ text: 'm'.repeat(1501), candidates: MODEL_CATALOG }))
-      .toMatchObject({ modelKey: 'ollama:gpt-oss:120b', reasonCode: 'fast' })
+      .toMatchObject({ modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free', reasonCode: 'fast' })
   })
 })

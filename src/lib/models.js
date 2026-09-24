@@ -31,12 +31,12 @@ export const MODEL_CATALOG = Object.freeze([
   geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'slow', { quality: 4, coding: 4 }),
   geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'slow', { quality: 5, coding: 5 }),
   {
-    key: `${PROVIDERS.OPENROUTER}:openrouter/free`,
+    key: `${PROVIDERS.OPENROUTER}:nex-agi/nex-n2.5-pro:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'openrouter/free',
-    label: 'Free',
-    speed: 'medium',
-    routing: { quality: 2, coding: 2 },
+    modelId: 'nex-agi/nex-n2.5-pro:free',
+    label: 'Nex-N2.5 Pro',
+    speed: 'slow',
+    routing: { quality: 5, coding: 5 },
     capabilities: {
       supportsImage: true,
       supportsPdf: false,
@@ -44,12 +44,25 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-super-120b-a12b:free`,
+    key: `${PROVIDERS.OPENROUTER}:qwen/qwen3.8-27b:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'nvidia/nemotron-3-super-120b-a12b:free',
-    label: 'Nemotron 3 Super',
+    modelId: 'qwen/qwen3.8-27b:free',
+    label: 'Qwen3.8 27B',
     speed: 'medium',
-    routing: { quality: 4, coding: 5 },
+    routing: { quality: 4, coding: 4 },
+    capabilities: {
+      supportsImage: true,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+  {
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3.5-lightning:free`,
+    provider: PROVIDERS.OPENROUTER,
+    modelId: 'nvidia/nemotron-3.5-lightning:free',
+    label: 'Nemotron 3.5 Lightning',
+    speed: 'fast',
+    routing: { quality: 3, coding: 3 },
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -64,6 +77,20 @@ export const MODEL_CATALOG = Object.freeze([
     labelKey: 'chat.model_labels.gpt_oss_120b',
     speed: 'fast',
     routing: { quality: 3, coding: 3 },
+    capabilities: {
+      supportsImage: false,
+      supportsPdf: false,
+      supportsUrlContext: false,
+    },
+  },
+  {
+    key: `${PROVIDERS.OLLAMA}:nemotron-3-super`,
+    provider: PROVIDERS.OLLAMA,
+    modelId: 'nemotron-3-super',
+    label: 'Nemotron 3 Super',
+    labelKey: 'chat.model_labels.nemotron_3_super',
+    speed: 'medium',
+    routing: { quality: 4, coding: 4 },
     capabilities: {
       supportsImage: false,
       supportsPdf: false,
@@ -87,9 +114,12 @@ export const MODEL_CATALOG = Object.freeze([
 ])
 
 export const MODELS = Object.freeze(MODEL_CATALOG.map(model => model.modelId))
-export const MODEL_LABELS = Object.freeze(Object.fromEntries(
-  MODEL_CATALOG.map(model => [model.modelId, model.label]),
-))
+export const MODEL_LABELS = Object.freeze({
+  // The picker no longer lists the router, but the error fallback still routes
+  // to it; keep a readable label for the "… → Free" notice.
+  'openrouter/free': 'Free',
+  ...Object.fromEntries(MODEL_CATALOG.map(model => [model.modelId, model.label])),
+})
 export const MODEL_CAPABILITIES = Object.freeze(Object.fromEntries(
   MODEL_CATALOG.map(model => [model.modelId, Object.freeze({ ...model.capabilities })]),
 ))

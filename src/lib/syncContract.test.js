@@ -57,6 +57,8 @@ const KEYS_USED_IN_CODE = [
   // lib/autoSyncScheduler.js + lib/cloudSyncCoordinator.js (otomatik eşitleme)
   'syncAutoIntervalMinutes',
   'syncUsage',
+  // App.jsx yazı alanı yükseklik tercihi
+  'composerMaxHeight',
 ]
 
 const SOZLESME = describeSyncContract()

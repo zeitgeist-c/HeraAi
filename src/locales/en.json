@@ -205,6 +205,10 @@
         "search_no_results": "No results",
         "search_prev": "Previous result",
         "search_next": "Next result",
+        "show_full_message": "Show more",
+        "show_less_message": "Show less",
+        "resize_composer": "Composer height",
+        "resize_composer_hint": "Drag up to grow, drag down to shrink; double-click to reset",
         "no_history": "No chat history found.",
         "new_chat": "New Chat",
         "storage_write_failed": "Chat could not be saved: browser storage may be full. Delete old chats to free space.",
@@ -328,10 +332,11 @@
         "model_providers": {
             "gemini": "Gemini",
             "openrouter": "OpenRouter",
-            "ollama": "Ollama 🚫📷"
+            "ollama": "Ollama"
         },
         "model_labels": {
             "gpt_oss_120b": "GPT-OSS 120B",
+            "nemotron_3_super": "Nemotron 3 Super",
             "nemotron_3_ultra": "Nemotron 3 Ultra"
         },
         "speeds": {
@@ -372,7 +377,7 @@
             "attachment_empty": "The file contains no readable text.",
             "attachment_missing": "The original attachment is no longer available. Attach it again.",
             "pdf_requires_gemini": "PDF attachments are supported only with a Gemini model. Select Gemini and retry.",
-            "image_not_supported": "The selected model accepts text only. Choose Gemini or the Free model for images.",
+            "image_not_supported": "The selected model accepts text only. To send images, pick a model marked 📷.",
             "url_invalid": "Enter a valid HTTP or HTTPS URL.",
             "url_private": "Local, private-network, or credential-bearing URLs cannot be read.",
             "url_limit_exceeded": "You can read at most 10 public URLs in one request.",
