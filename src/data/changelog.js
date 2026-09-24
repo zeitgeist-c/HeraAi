@@ -2,6 +2,30 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.18',
+  date: '2026-09-25',
+  changes: {
+    tr: [
+      'Sesli okuma (cevabı dinleme) özelliği tamamen kaldırıldı; dikte (konuşmayı yazıya çevirme) korundu',
+      'Dikte model zinciri yenilendi: Gemini 3.5 Flash Lite ana, 3.1 Flash Lite yedek, 3.6 Flash son çare',
+      'Uzun dikte kayıtları 30 saniyelik parçalara bölünerek çevriliyor; 200 saniyelik kayıt sınırı korundu ve sayaç gerçek saniyeyi gösteriyor',
+      'Diktede kaydın son sözcüklerinin kesilmesi giderildi; bir parça çevrilemezse elde edilen metin kaybolmuyor',
+      'Mikrofon izni penceresi yanıt vermezse dikte artık kilitlenmiyor, doğrudan kayıt denemesi yapılıyor',
+      'Temizlikten sonra yıldızlı sohbet açılmıyor, yeni sohbet başlıyor; yıldızlı sohbetler listede kalıyor',
+      'Denetim düzeltmeleri: sağlayıcı ek dosya kapıları, bulut eşitleme karantinası ve deneme sınırları, özel ağ adresi filtresi, Tavily ağ hatası sınıflaması, depolama yazma hatası bildirimi',
+    ],
+    en: [
+      'Removed the read-aloud feature entirely; dictation (speech to text) is kept',
+      'Renewed the dictation model chain: Gemini 3.5 Flash Lite primary, 3.1 Flash Lite fallback, 3.6 Flash last resort',
+      'Long dictation recordings are transcribed in 30 second chunks; the 200 second recording limit stays and the counter shows real seconds',
+      'Fixed dictation cutting off the last words of a recording; when one chunk fails the captured text is no longer lost',
+      'Dictation no longer hangs when the microphone permission window never answers; it falls back to a direct recording attempt',
+      'Clearing unstarred chats now opens a fresh chat instead of a starred one; starred chats stay in the list',
+      'Audit fixes: provider attachment gates, cloud sync quarantine and retry limits, private network URL filtering, Tavily network classification, storage write failure notice',
+    ],
+  },
+},
+{
   version: '1.10.17',
   date: '2026-09-24',
   changes: {
