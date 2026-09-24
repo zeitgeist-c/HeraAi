@@ -2,6 +2,30 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.14',
+    date: '2026-09-24',
+    changes: {
+      tr: [
+        'Model listesindeki hız ve kalite (Q) rozetleri kaldırıldı; yerine her modelin ne işe yaradığını anlatan kısa etiketler geldi',
+        'Model sıralaması üç sağlayıcıda da hızlıdan yavaşa düzenlendi',
+        'OpenRouter\'da Nemotron 3.5 Lightning yerine Gemma 4 26B geldi (hızlı, görsel destekli)',
+        'Ollama\'da Nemotron 3 Ultra yerine Gemma 4 31B geldi (güçlü, görsel destekli)',
+        'Yeni sohbet artık ilk mesajınızı yazana kadar geçmiş listesinde görünmüyor; boş sohbet kayıtları birikmiyor',
+        'Sohbet geçmişi boşken "Sohbet geçmişi bulunamadı" yazısı gösteriliyor ve "Tümünü sil" düğmesi kapalı duruyor',
+        'Kaldırılan bir model seçili kalmışsa uygulama sizi sessizce güncel modele taşıyor (örnek: Nemotron 3 Ultra → Gemma 4 31B)',
+      ],
+      en: [
+        'Speed and quality (Q) badges in the model list were removed; each model now shows a short label describing what it is best for',
+        'Model ordering is now fastest-to-slowest across all three providers',
+        'OpenRouter: Nemotron 3.5 Lightning was replaced by Gemma 4 26B (fast, vision-capable)',
+        'Ollama: Nemotron 3 Ultra was replaced by Gemma 4 31B (strong, vision-capable)',
+        'A new chat no longer appears in history until you send the first message; empty chat records no longer pile up',
+        'An empty history now shows "No chat history found" and keeps "Bulk delete" disabled',
+        'If a removed model is still selected, the app quietly moves you to a current one (for example Nemotron 3 Ultra → Gemma 4 31B)',
+      ],
+    },
+  },
+  {
     version: '1.10.13',
     date: '2026-09-24',
     changes: {
