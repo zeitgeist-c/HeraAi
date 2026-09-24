@@ -209,7 +209,7 @@
     "welcome_subtitle": "Bir soru sorun, ekranınızdan bir alan seçin veya bir dosya ekleyerek başlayın.",
     "welcome_actions": {
       "research_title": "Web araştırması",
-      "research_description": "Güncel kaynaklarla araştır",
+      "research_description": "Güncel sorularda otomatik arar",
       "crop_title": "Ekrandan seç",
       "crop_description": "Bir alan kırpıp sor",
       "crop_cancel_title": "Seçimi iptal et",
@@ -426,7 +426,6 @@
     "quick_actions": {
       "crop_tooltip": "Ekrandan alan seç",
       "crop_cancel_tooltip": "Alan seçimini iptal et",
-      "web_tooltip": "Web'de araştır",
       "ocr_tooltip": "Ekli görselden metin çıkar",
       "translate_tooltip": "Seçili metni veya görseli çevir",
       "summarize_tooltip": "İçeriği özetle",

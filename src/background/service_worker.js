@@ -1158,18 +1158,6 @@ async function handleGenerationStart(message) {
     let tavilyResolution = { keys: [], allInCooldown: false };
     if (runningGeneration.mode === 'web') {
       tavilyResolution = await resolveKeysForRequest('tavily');
-      if (tavilyResolution.allInCooldown && startMessage.webContext?.kind !== 'url') {
-        const failedGeneration = await writeTerminalError(
-          runningGeneration,
-          'all_keys_cooldown',
-          { earliestCooldownEnd: tavilyResolution.earliestCooldownEnd },
-        );
-        return {
-          ok: false,
-          errorCode: 'all_keys_cooldown',
-          activeGeneration: generationSnapshot(failedGeneration),
-        };
-      }
     }
 
     let comparisonVariants = null;

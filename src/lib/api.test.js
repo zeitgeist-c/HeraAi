@@ -18,7 +18,7 @@ vi.mock('@google/genai', () => ({
   }),
 }))
 
-const { streamResearch, streamVision, streamChat, testKey, MODELS, DEFAULT_MODEL, parseDuckDuckGoHtml } = await import('./api')
+const { streamResearch, streamVision, streamChat, testKey, MODELS, DEFAULT_MODEL } = await import('./api')
 
 function geminiStream(text) {
   return (async function* stream() {
@@ -150,23 +150,21 @@ describe('streamResearch', () => {
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
 
-  it('returns tavily_key_missing when research has no Tavily key', async () => {
+  it('answers without research when research has no Tavily key', async () => {
     const events = await collectEvents(streamResearch(
       [{ role: 'user', content: 'bugunun haberlerini ara' }],
       [{ id: 'g1', key: 'gemini-key' }],
       [],
     ))
 
-    expect(events).toEqual([
-      expect.objectContaining({
-        event: 'error',
-        data: expect.objectContaining({ code: 'tavily_key_missing' }),
-      }),
-    ])
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(events.find(event => event.event === 'sources')).toBeUndefined()
     expect(global.fetch).not.toHaveBeenCalled()
+    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(contents).toBe('bugunun haberlerini ara')
   })
 
-  it('returns research_failed when Tavily search fails', async () => {
+  it('answers without research when Tavily search fails', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 })
 
     const events = await collectEvents(streamResearch(
@@ -175,12 +173,13 @@ describe('streamResearch', () => {
       [{ id: 't1', key: 'tavily-key' }],
     ))
 
-    expect(events.find(event => event.event === 'error')).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ code: 'research_failed' }),
-      }),
-    )
-    expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(events.find(event => event.event === 'sources')).toBeUndefined()
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'key_status', data: { provider: 'tavily', keyId: 't1', status: 'cooldown' } },
+    ]))
+    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(contents).toBe('bugunun haberlerini ara')
   })
 
   it('tries the next Tavily key when the primary key is rate-limited', async () => {
@@ -297,128 +296,59 @@ describe('streamResearch', () => {
   })
 })
 
-const DDG_FIXTURE_HTML = `
-<div class="result results_links results_links_deep web-result">
-<div class="links_main links_deep result__body">
-<h2 class="result__title">
-<a rel="nofollow" class="result__a" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fdolar&amp;rut=abc">Dolar kuru <b>bugün</b> ne kadar?</a>
-</h2>
-<a class="result__snippet" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fdolar&amp;rut=abc">Dolar bug&#252;n 41,50 TL &amp; y&#252;kselişte.</a>
-</div>
-</div>
-<div class="result results_links results_links_deep web-result">
-<div class="links_main links_deep result__body">
-<h2 class="result__title">
-<a rel="nofollow" class="result__a" href="https://example.com/altin">Altın fiyatları</a>
-</h2>
-</div>
-</div>`
-
-describe('parseDuckDuckGoHtml', () => {
-  it('decodes redirect URLs, titles and snippets', () => {
-    expect(parseDuckDuckGoHtml(DDG_FIXTURE_HTML)).toEqual([
-      {
-        title: 'Dolar kuru bugün ne kadar?',
-        url: 'https://example.com/dolar',
-        content: 'Dolar bugün 41,50 TL & yükselişte.',
-        score: null,
-      },
-      {
-        title: 'Altın fiyatları',
-        url: 'https://example.com/altin',
-        content: '',
-        score: null,
-      },
-    ])
-  })
-
-  it('returns an empty list for bot-protection or empty pages', () => {
-    expect(parseDuckDuckGoHtml('')).toEqual([])
-    expect(parseDuckDuckGoHtml(null)).toEqual([])
-    expect(parseDuckDuckGoHtml('<html><body>nothing here</body></html>')).toEqual([])
-  })
-})
-
-describe('streamResearch auto mode', () => {
+describe('streamResearch without the research toggle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Baglamli cevap'))
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            title: 'Dolar kuru bugun ne kadar?',
+            url: 'https://example.com/dolar',
+            content: 'Dolar bugun 41,50 TL.',
+            score: 0.9,
+          },
+        ],
+      }),
+    })
   })
 
-  function autoSearch(fetchImpl) {
-    global.fetch = fetchImpl
-    return collectEvents(streamResearch(
-      [{ role: 'user', content: 'bugün dolar kuru ne kadar?' }],
+  it('always searches with Tavily and never with DuckDuckGo', async () => {
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugun dolar kuru ne kadar?' }],
       [{ id: 'g1', key: 'gemini-key' }],
-      [],
+      [{ id: 't1', key: 'tavily-key' }],
       undefined,
       DEFAULT_MODEL,
-      { webContext: { kind: 'search', searchMode: 'auto' } },
+      { webContext: { kind: 'search', urls: [] } },
     ))
-  }
-
-  it('answers from DuckDuckGo without touching Tavily', async () => {
-    const events = await autoSearch(vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => DDG_FIXTURE_HTML,
-    }))
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    expect(global.fetch.mock.calls[0][0]).toContain('html.duckduckgo.com/html/')
+    expect(global.fetch.mock.calls[0][0]).toBe('https://api.tavily.com/search')
     expect(events.find(event => event.event === 'error')).toBeUndefined()
-    expect(events).toEqual(expect.arrayContaining([
-      { event: 'chunk', data: { text: 'Baglamli cevap' } },
-      expect.objectContaining({ event: 'sources' }),
-    ]))
     const sources = events.find(event => event.event === 'sources').data.sources
-    expect(sources.map(source => source.url)).toEqual([
-      'https://example.com/dolar',
-      'https://example.com/altin',
-    ])
+    expect(sources.map(source => source.url)).toEqual(['https://example.com/dolar'])
     const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
-    expect(finalPrompt).toContain('Dolar kuru bugün ne kadar?')
+    expect(finalPrompt).toContain('Dolar kuru bugun ne kadar?')
   })
 
-  it('falls back to plain chat when DuckDuckGo returns nothing', async () => {
-    const events = await autoSearch(vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => '<html><body>nothing here</body></html>',
-    }))
-
-    expect(events.find(event => event.event === 'error')).toBeUndefined()
-    expect(events.find(event => event.event === 'sources')).toBeUndefined()
-    expect(events).toEqual(expect.arrayContaining([
-      { event: 'chunk', data: { text: 'Baglamli cevap' } },
-    ]))
-    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
-    expect(contents).toBe('bugün dolar kuru ne kadar?')
-  })
-
-  it('falls back to plain chat when DuckDuckGo fails', async () => {
-    const events = await autoSearch(vi.fn().mockResolvedValue({ ok: false, status: 503 }))
-
-    expect(events.find(event => event.event === 'error')).toBeUndefined()
-    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
-    expect(contents).toBe('bugün dolar kuru ne kadar?')
-  })
-
-  it('keeps the Tavily key requirement for explicit search', async () => {
+  it('answers without research when no Tavily key is configured', async () => {
     const events = await collectEvents(streamResearch(
-      [{ role: 'user', content: 'bugün dolar kuru ne kadar?' }],
+      [{ role: 'user', content: 'bugun dolar kuru ne kadar?' }],
       [{ id: 'g1', key: 'gemini-key' }],
       [],
       undefined,
       DEFAULT_MODEL,
-      { webContext: { kind: 'search', searchMode: 'explicit' } },
+      { webContext: { kind: 'search', urls: [] } },
     ))
 
-    expect(events).toEqual([
-      expect.objectContaining({
-        event: 'error',
-        data: expect.objectContaining({ code: 'tavily_key_missing' }),
-      }),
-    ])
     expect(global.fetch).not.toHaveBeenCalled()
+    expect(events.find(event => event.event === 'error')).toBeUndefined()
+    expect(events.find(event => event.event === 'sources')).toBeUndefined()
+    const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+    expect(contents).toBe('bugun dolar kuru ne kadar?')
   })
 })
 

@@ -1,5 +1,10 @@
+import { OPENROUTER_MODEL_IDS, getOpenRouterFallbackModel } from './models'
+
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
-export const OPENROUTER_MODEL = 'openrouter/free'
+// Every OpenRouter request targets a model from the shared catalog. The
+// provider's own `openrouter/free` router is deliberately NOT used: it picks
+// a model on its own and the UI then showed ids this system never offered.
+export const OPENROUTER_MODEL = OPENROUTER_MODEL_IDS[0] || 'google/gemma-4-26b-a4b-it:free'
 export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api'
 export const OLLAMA_CLOUD_MODEL = 'gemma4:31b'
 export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
@@ -7,9 +12,10 @@ export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
 const REQUEST_TIMEOUT_MS = 180_000
 const STREAM_IDLE_TIMEOUT_MS = 180_000
 
-// Named OpenRouter models fall back to the free router when they fail before
-// producing content, so transient failures never duplicate a partial answer.
-const OPENROUTER_ROUTER_FALLBACKABLE = new Set([
+// A catalog OpenRouter model falls back to the next catalog model when it
+// fails before producing content, so transient failures never duplicate a
+// partial answer and the fallback can never leave the system.
+const OPENROUTER_MODEL_FALLBACKABLE = new Set([
   'model_unavailable',
   'rate_limited',
   'quota_exceeded',
@@ -339,6 +345,23 @@ async function* streamOllamaRequest(messages, options, key, signal, fallbackImag
   }
 }
 
+function requestCarriesImage(messages, fallbackImage) {
+  if (fallbackImage) return true
+  return (Array.isArray(messages) ? messages : []).some(message => (
+    Array.isArray(message?.attachments)
+    && message.attachments.some(attachment => attachment?.mimeType?.startsWith('image/') && attachment.data)
+  ))
+}
+
+function buildOpenRouterModelAttempts(requestedModel, messages, fallbackImage) {
+  const fallbackModel = getOpenRouterFallbackModel(requestedModel, {
+    hasImage: requestCarriesImage(messages, fallbackImage),
+  })
+  return fallbackModel && fallbackModel !== requestedModel
+    ? [requestedModel, fallbackModel]
+    : [requestedModel]
+}
+
 export async function* streamRemoteProvider(provider, messages, options = {}, keys = [], signal, fallbackImage = null, model = null) {
   const entries = validKeys(keys)
   if (entries.length === 0) {
@@ -349,11 +372,11 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
   const requestedModel = provider === 'ollama'
     ? (String(model || '').trim() || OLLAMA_CLOUD_MODEL)
     : (String(model || '').trim() || OPENROUTER_MODEL)
-  const modelAttempts = provider === 'openrouter' && requestedModel !== OPENROUTER_MODEL
-    ? [requestedModel, OPENROUTER_MODEL]
+  const modelAttempts = provider === 'openrouter'
+    ? buildOpenRouterModelAttempts(requestedModel, messages, fallbackImage)
     : [requestedModel]
   let lastError = createProviderError('generation_failed', 'Generation failed')
-  for (const attemptModel of modelAttempts) {
+  for (const [attemptIndex, attemptModel] of modelAttempts.entries()) {
     let attemptHadContent = false
     for (const entry of entries) {
     let hasContent = false
@@ -397,8 +420,12 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
       if (hasContent || !retryableKeyFailure) break
     }
   }
-    if (attemptHadContent || !OPENROUTER_ROUTER_FALLBACKABLE.has(lastError.code) || provider !== 'openrouter' || attemptModel === OPENROUTER_MODEL) break
-    yield { event: 'model_resolved', data: { provider: 'openrouter', requestedModel, resolvedModel: OPENROUTER_MODEL } }
+    const isLastAttempt = attemptIndex === modelAttempts.length - 1
+    if (attemptHadContent || isLastAttempt || !OPENROUTER_MODEL_FALLBACKABLE.has(lastError.code)) break
+    yield {
+      event: 'model_resolved',
+      data: { provider: 'openrouter', requestedModel, resolvedModel: modelAttempts[attemptIndex + 1] },
+    }
   }
 
   yield { event: 'error', data: { code: lastError.code || 'generation_failed' } }

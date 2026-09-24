@@ -477,7 +477,7 @@ describe('generation worker comparison runtime', () => {
 
     await runtime.handleMessage(comparisonStart('job-shared-web', {
       mode: 'web',
-      webContext: { kind: 'search', searchMode: 'explicit', urls: [] },
+      webContext: { kind: 'search', urls: [] },
       tavilyKeys: [{ id: 't1', key: 'tavily-secret' }],
     }))
 

@@ -755,86 +755,6 @@ async function searchTavily(question, tavilyKeys, signal) {
   return { error: lastError || new Error('Tavily search failed') }
 }
 
-const DDG_TIMEOUT_MS = 15000
-const DDG_MAX_RESULTS = 8
-
-function decodeHtmlEntities(text) {
-  return String(text || '')
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;|&#x27;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-}
-
-function resolveDuckDuckGoUrl(href) {
-  const raw = String(href || '').replace(/&amp;/g, '&').trim()
-  if (!raw) return null
-  const redirect = raw.match(/[?&]uddg=([^&]+)/)
-  if (redirect) {
-    try {
-      const decoded = decodeURIComponent(redirect[1])
-      if (/^https?:\/\//i.test(decoded)) return decoded
-    } catch {
-      return null
-    }
-    return null
-  }
-  if (/^https?:\/\//i.test(raw)) return raw
-  if (raw.startsWith('//')) return `https:${raw}`
-  return null
-}
-
-export function parseDuckDuckGoHtml(html) {
-  const results = []
-  if (typeof html !== 'string' || !html) return results
-  const anchorPattern = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
-  let match
-  while ((match = anchorPattern.exec(html)) !== null && results.length < DDG_MAX_RESULTS) {
-    const url = resolveDuckDuckGoUrl(match[1])
-    const title = decodeHtmlEntities(match[2].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
-    if (!url || !title) continue
-    const afterAnchor = html.slice(match.index + match[0].length)
-    const nextResult = afterAnchor.search(/result__title/i)
-    const window = nextResult >= 0 ? afterAnchor.slice(0, nextResult) : afterAnchor
-    const snippetMatch = window.match(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i)
-    const snippet = snippetMatch
-      ? decodeHtmlEntities(snippetMatch[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
-      : ''
-    results.push({ title, url, content: snippet, score: null })
-  }
-  return results
-}
-
-async function searchDuckDuckGo(question, signal) {
-  const controller = new AbortController()
-  let timedOut = false
-  const timeoutId = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, DDG_TIMEOUT_MS)
-  const abortHandler = () => controller.abort()
-  signal?.addEventListener('abort', abortHandler, { once: true })
-  try {
-    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(question)}`, {
-      headers: { Accept: 'text/html' },
-      signal: controller.signal,
-    })
-    if (!response.ok) return { error: new Error(`DuckDuckGo HTTP ${response.status}`) }
-    const html = await response.text()
-    if (/anomaly-modal/i.test(html)) return { error: new Error('DuckDuckGo bot korumasi') }
-    return { results: parseDuckDuckGoHtml(html) }
-  } catch (err) {
-    if (signal?.aborted) throw createAbortError()
-    return { error: timedOut || err?.name === 'AbortError' ? createTimeoutError() : err }
-  } finally {
-    clearTimeout(timeoutId)
-    signal?.removeEventListener('abort', abortHandler)
-  }
-}
-
 function truncateText(text, maxLength) {
   if (!text || text.length <= maxLength) return text || ''
   return `${text.slice(0, maxLength - 1).trim()}...`
@@ -1172,24 +1092,24 @@ export async function prepareSharedResearch(input, tavilyKeys = [], signal, opti
   }
 
   const queryResult = await generateResearchQuery(conversationMessages, question)
-  let searchResult
-  if (options?.webContext?.searchMode === 'auto') {
-    searchResult = await searchDuckDuckGo(queryResult.query, signal)
-    if (!searchResult?.results?.length) {
-      return { messages: conversationMessages, sources: [], keyStatuses: queryResult.keyStatuses || [] }
-    }
-  } else {
-    const entries = validKeys(tavilyKeys)
-    if (entries.length === 0) return { errorCode: 'tavily_key_missing', keyStatuses: [] }
-    for (const entry of entries) {
-      searchResult = await searchTavily(queryResult.query, [entry], signal)
-      if (searchResult.results || !searchResult.retryable) break
-    }
-    if (!searchResult?.results?.length) {
-      return {
-        errorCode: 'research_failed',
-        keyStatuses: searchResult?.keyStatus ? [searchResult.keyStatus] : [],
-      }
+  const entries = validKeys(tavilyKeys)
+  if (entries.length === 0) {
+    return { messages: conversationMessages, sources: [], keyStatuses: queryResult.keyStatuses || [] }
+  }
+  let searchResult = null
+  for (const entry of entries) {
+    searchResult = await searchTavily(queryResult.query, [entry], signal)
+    if (searchResult.results || !searchResult.retryable) break
+  }
+  if (!searchResult?.results?.length) {
+    // Tavily erisilemedi: arastirma sessizce atlanir, cevap normal uretilir.
+    return {
+      messages: conversationMessages,
+      sources: [],
+      keyStatuses: [
+        ...(queryResult.keyStatuses || []),
+        ...(searchResult?.keyStatus ? [searchResult.keyStatus] : []),
+      ],
     }
   }
 
@@ -1259,28 +1179,8 @@ export async function* streamResearch(
     }
   }
 
-  if (options?.webContext?.searchMode === 'auto') {
-    const duckResult = await searchDuckDuckGo(queryResult.query, signal)
-    if (duckResult.results && duckResult.results.length > 0) {
-      yield* answerWithResults(duckResult.results)
-      return
-    }
-    yield* streamChat(conversationMessages, options, providerKeys, signal, model, provider)
-    return
-  }
-
   let searchResult = null
   const entries = validKeys(tavilyKeys)
-  if (entries.length === 0) {
-    yield {
-      event: 'error',
-      data: {
-        code: 'tavily_key_missing',
-        message: 'Web arastirma icin Tavily API key gerekli. Ayarlardan Tavily anahtari ekleyin.',
-      },
-    }
-    return
-  }
   for (const entry of entries) {
     searchResult = await searchTavily(queryResult.query, [entry], signal)
     if (searchResult.keyStatus) {
@@ -1290,20 +1190,10 @@ export async function* streamResearch(
     if (!searchResult.retryable) break
   }
 
-  if (!searchResult?.results) {
-    console.error('Tavily search failed')
-    yield {
-      event: 'error',
-      data: {
-        code: 'research_failed',
-        message: searchResult?.error?.message || 'Web aramasi yapilamadi.',
-      },
-    }
-    return
-  }
-
-  if (searchResult.results.length === 0) {
-    yield { event: 'error', data: { code: 'research_failed', message: 'Web aramasi sonuc vermedi.' } }
+  if (!searchResult?.results?.length) {
+    // Tavily yok ya da erisilemedi: arastirma sessizce atlanir ve soru
+    // arastirma yapilmadan cevaplanir (kullaniciya hata gosterilmez).
+    yield* streamChat(conversationMessages, options, providerKeys, signal, model, provider)
     return
   }
 
