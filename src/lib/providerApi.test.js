@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { OPENROUTER_MODEL_IDS } from './models.js'
+
 import {
   OLLAMA_CLOUD_MODEL,
   OLLAMA_TEST_MODEL,
@@ -54,76 +56,89 @@ describe('OpenRouter provider adapter', () => {
 
   it('parses fragmented SSE frames, comments, DONE and resolved model data', async () => {
     global.fetch.mockResolvedValue(streamResponse([
-      ': keepalive\n\ndata: {"model":"meta-llama/free","choices":[{"delta":{"content":"Hel',
+      ': keepalive\n\ndata: {"model":"google/gemma-4-26b-a4b-it:free","choices":[{"delta":{"content":"Hel',
       'lo"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\n\ndata: [DONE]\n\n',
     ]))
 
     const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys))
 
     expect(events).toEqual([
-      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: OPENROUTER_MODEL, resolvedModel: 'meta-llama/free' } },
+      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: OPENROUTER_MODEL, resolvedModel: OPENROUTER_MODEL } },
       { event: 'key_status', data: { provider: 'openrouter', keyId: 'primary', status: 'success' } },
       { event: 'chunk', data: { text: 'Hello' } },
       { event: 'chunk', data: { text: ' world' } },
     ])
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(body.model).toBe('openrouter/free')
+    expect(body.model).toBe(OPENROUTER_MODEL)
   })
 
-  it('sends the selected OpenRouter model instead of the router', async () => {
+  it('sends the selected catalog model and routes nothing on its own', async () => {
     global.fetch.mockResolvedValue(streamResponse([
-      'data: {"model":"nvidia/nemotron-3-super-120b-a12b:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
+      'data: {"model":"qwen/qwen3.8-27b:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'qwen/qwen3.8-27b:free'))
 
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(body.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
+    expect(body.model).toBe('qwen/qwen3.8-27b:free')
+    expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(events).toEqual(expect.arrayContaining([
       { event: 'chunk', data: { text: 'hi' } },
     ]))
     expect(events.find(event => event.event === 'error')).toBeUndefined()
   })
 
-  it('falls back to the OpenRouter router when a named free model is gone', async () => {
+  it('falls back to the next catalog model when the selected one is gone', async () => {
     global.fetch
       .mockResolvedValueOnce(streamResponse([], 404))
       .mockResolvedValueOnce(streamResponse([
-        'data: {"model":"meta-llama/free","choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: {"model":"qwen/qwen3.8-27b:free","choices":[{"delta":{"content":"ok"}}]}\n\n',
       ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
     expect(events).toEqual(expect.arrayContaining([
-      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'nvidia/nemotron-3-super-120b-a12b:free', resolvedModel: 'openrouter/free' } },
+      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'google/gemma-4-26b-a4b-it:free', resolvedModel: 'qwen/qwen3.8-27b:free' } },
       { event: 'chunk', data: { text: 'ok' } },
     ]))
     expect(events.find(event => event.event === 'error')).toBeUndefined()
   })
 
-  it('falls back to the router when a named model is rate-limited', async () => {
+  it('never switches to a model outside the catalog, not even for an unknown id', async () => {
+    global.fetch.mockResolvedValue(streamResponse([], 404))
+
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'meta-llama/legacy-model:free'))
+
+    expect(global.fetch.mock.calls.map(call => JSON.parse(call[1].body).model)).toEqual([
+      'meta-llama/legacy-model:free',
+      OPENROUTER_MODEL_IDS[0],
+    ])
+    expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'model_unavailable' } })
+  })
+
+  it('falls back to the next catalog model when the selected one is rate-limited', async () => {
     global.fetch
       .mockResolvedValueOnce(streamResponse([], 429))
       .mockResolvedValueOnce(streamResponse([
         'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
       ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
     expect(events.find(event => event.event === 'error')).toBeUndefined()
   })
 
-  it('falls back to the router when a named model has a transient network failure', async () => {
+  it('falls back to a catalog model after a transient network failure and wraps at the end of the list', async () => {
     global.fetch
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(streamResponse([
-        'data: {"model":"meta-llama/free","choices":[{"delta":{"content":"recovered"}}]}\n\n',
+        'data: {"model":"google/gemma-4-26b-a4b-it:free","choices":[{"delta":{"content":"recovered"}}]}\n\n',
       ]))
 
     const events = await collect(streamRemoteProvider(
@@ -133,21 +148,36 @@ describe('OpenRouter provider adapter', () => {
       keys,
       undefined,
       null,
-      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nex-agi/nex-n2.5-pro:free',
     ))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('openrouter/free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('google/gemma-4-26b-a4b-it:free')
     expect(events).toContainEqual({ event: 'chunk', data: { text: 'recovered' } })
     expect(events.some(event => event.event === 'error')).toBe(false)
   })
 
-  it('does not fall back to the router after partial output', async () => {
+  it('keeps the image fallback inside the catalog too', async () => {
+    global.fetch
+      .mockResolvedValueOnce(streamResponse([], 429))
+      .mockResolvedValueOnce(streamResponse([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+      ]))
+    const imageMessages = [{ role: 'user', content: 'Look', attachments: [{ mimeType: 'image/png', data: 'BASE64' }] }]
+
+    const events = await collect(streamRemoteProvider('openrouter', imageMessages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
+    expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
+  })
+
+  it('does not fall back after partial output', async () => {
     global.fetch.mockResolvedValue(streamResponse([
       'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":429,"message":"rate limit"}}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'qwen/qwen3.8-27b:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')
@@ -155,11 +185,15 @@ describe('OpenRouter provider adapter', () => {
   })
 
   it('maps an error embedded in a 200 stream without falling across providers', async () => {
-    global.fetch.mockResolvedValue(streamResponse([
+    global.fetch.mockImplementation(() => streamResponse([
       'data: {"error":{"code":429,"message":"rate limit"}}\n\n',
     ]))
     const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys))
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'rate_limited' } })
+    expect(global.fetch.mock.calls.map(call => JSON.parse(call[1].body).model)).toEqual([
+      OPENROUTER_MODEL,
+      OPENROUTER_MODEL_IDS[1],
+    ])
   })
 
   it('tries the next key from the same provider before any output starts', async () => {
@@ -218,12 +252,14 @@ describe('OpenRouter provider adapter', () => {
     }))
     const pending = collect(streamRemoteProvider('openrouter', messages, {}, keys))
     await vi.advanceTimersByTimeAsync(180_000)
+    await vi.advanceTimersByTimeAsync(180_000)
     await expect(pending).resolves.toEqual(expect.arrayContaining([
       { event: 'error', data: { code: 'timeout' } },
     ]))
+    expect(global.fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('validates a key with a one-token OpenRouter Free generation', async () => {
+  it('validates a key with a one-token OpenRouter generation against a catalog model', async () => {
     global.fetch.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'O' } }] }))
     await expect(testOpenRouterKey(' secret ')).resolves.toMatchObject({ success: true })
     const [url, request] = global.fetch.mock.calls[0]
@@ -233,7 +269,7 @@ describe('OpenRouter provider adapter', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer secret' }),
     }))
     expect(JSON.parse(request.body)).toMatchObject({
-      model: 'openrouter/free',
+      model: OPENROUTER_MODEL,
       stream: false,
       max_tokens: 1,
     })

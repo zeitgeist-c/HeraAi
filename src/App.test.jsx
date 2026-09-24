@@ -2315,11 +2315,8 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
-
     const input = document.querySelector('textarea') || screen.getByRole('textbox');
-    fireEvent.change(input, { target: { value: 'research this' } });
+    fireEvent.change(input, { target: { value: 'Bugün borsa ne durumda?' } });
     fireEvent.click(getSendButton());
 
     expect(await screen.findByText('Answer with sources')).toBeInTheDocument();
@@ -2343,9 +2340,7 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'research privately' } });
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Bugün hava durumu nasıl?' } });
     fireEvent.click(getSendButton());
 
     expect(await screen.findByText('Answer with citation [1]')).toBeInTheDocument();
@@ -2377,10 +2372,7 @@ describe('HeraAi App', () => {
     fireEvent.click(getSendButton());
     expect(await screen.findByText('Earlier answer')).toBeInTheDocument();
 
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
-
-    fireEvent.change(input, { target: { value: 'Research that same topic' } });
+    fireEvent.change(input, { target: { value: 'Bugün borsa ne durumda?' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('Research follow-up')).toBeInTheDocument();
 
@@ -2388,7 +2380,7 @@ describe('HeraAi App', () => {
     expect(researchMessages.map(message => message.content)).toEqual([
       'Earlier question',
       'Earlier answer',
-      'Research that same topic',
+      'Bugün borsa ne durumda?',
     ]);
   });
 
@@ -2401,8 +2393,6 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     const input = document.querySelector('textarea');
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
     fireEvent.change(input, { target: { value: 'https://example.com/article' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('Page summary')).toBeInTheDocument();
@@ -2413,10 +2403,10 @@ describe('HeraAi App', () => {
     });
     expect(screen.getAllByText('https://example.com/article').length).toBeGreaterThanOrEqual(2);
 
-    fireEvent.change(input, { target: { value: 'What is the main conclusion?' } });
+    fireEvent.change(input, { target: { value: 'Bugün piyasa nasıl?' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('Independent follow-up')).toBeInTheDocument();
-    expect(api.streamResearch.mock.calls[1][5].webContext.urls).toEqual([]);
+    expect(api.streamResearch.mock.calls[1][5].webContext).toEqual({ kind: 'search', urls: [] });
 
     fireEvent.change(input, { target: { value: 'Önceki linkteki ana sonucu kontrol et' } });
     fireEvent.click(getSendButton());
@@ -2428,8 +2418,6 @@ describe('HeraAi App', () => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     const input = document.querySelector('textarea');
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
     fireEvent.change(input, {
       target: {
         value: 'Compare [first](https://example.com/a) with https://example.com/b and keep this text.',
@@ -2480,30 +2468,23 @@ describe('HeraAi App', () => {
     expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
       kind: 'search',
       urls: [],
-      searchMode: 'auto',
     });
     expect(api.streamChat).not.toHaveBeenCalled();
   });
 
-  it('marks toggle-driven search as explicit so it keeps using Tavily', async () => {
-    api.streamResearch.mockImplementationOnce(() => mockStream([
-      { event: 'chunk', data: { text: 'Explicit search answer' } },
+  it('keeps simple questions out of research now that the toggle is gone', async () => {
+    api.streamChat.mockImplementationOnce(() => mockStream([
+      { event: 'chunk', data: { text: 'Plain answer' } },
     ]));
 
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
     const input = document.querySelector('textarea');
-    const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
     fireEvent.change(input, { target: { value: 'Bana bir masal anlat' } });
     fireEvent.click(getSendButton());
 
-    expect(await screen.findByText('Explicit search answer')).toBeInTheDocument();
-    expect(api.streamResearch.mock.calls[0][5].webContext).toEqual({
-      kind: 'search',
-      urls: [],
-      searchMode: 'explicit',
-    });
+    expect(await screen.findByText('Plain answer')).toBeInTheDocument();
+    expect(api.streamResearch).not.toHaveBeenCalled();
   });
 
   it('does not retain a previous image for an independent vision follow-up', async () => {
@@ -2679,7 +2660,6 @@ describe('HeraAi App', () => {
 
     const quickActionIcons = [
       'scissors',
-      'globe',
       'scan-text',
       'languages',
       'text-align-start',
@@ -2690,7 +2670,7 @@ describe('HeraAi App', () => {
       Array.from(composer.querySelectorAll('button'))
         .find(button => button.querySelector(`svg.lucide-${icon}`))
     ));
-    const ocrButton = buttons[2];
+    const ocrButton = buttons[1];
 
     expect(ocrButton).toBeDisabled();
     expect(ocrButton).toHaveAttribute('title', expect.stringMatching(/Ekli görselden metin çıkar|Extract text from image/i));
@@ -2853,9 +2833,6 @@ describe('HeraAi App', () => {
 
     const input = document.querySelector('textarea');
     fireEvent.change(input, { target: { value: 'translate this extra instruction' } });
-    const webButton = Array.from(document.querySelectorAll('button'))
-      .find(button => button.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
 
     const ocrButton = Array.from(document.querySelectorAll('button'))
       .find(button => button.querySelector('svg.lucide-scan-text'));
@@ -5985,8 +5962,8 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const webButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-globe'));
-    fireEvent.click(webButton);
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'hello research' } });
+    expect(webButton).toBeUndefined();
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Bugün borsa ne durumda?' } });
     fireEvent.click(getSendButton());
 
     await waitFor(() => expect(currentStorage.stats?.lifetime?.prompts).toBe(1));

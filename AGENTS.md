@@ -12,9 +12,9 @@ The extension runs in two primary contexts:
 
 Hera uses four provider APIs:
 1. **Google Gemini (Direct)**: Streams chat and multimodal responses, accepts image/PDF inline data, and reads public URLs through URL Context.
-2. **Tavily**: Provides general web search and exact-page extraction fallback when Gemini URL Context cannot retrieve a public URL.
-3. **OpenRouter (Direct)**: Streams the catalogued OpenRouter models (Qwen3.8 27B, Nex-N2.5 Pro, Nemotron 3.5 Lightning) through SSE, falling back to the `openrouter/free` router when a model fails before producing content.
-4. **Ollama Cloud (Direct)**: Streams `nemotron-3-ultra`, `nemotron-3-super`, and `gpt-oss:120b` text responses through NDJSON.
+2. **Tavily**: Provides general web search and exact-page extraction fallback when Gemini URL Context cannot retrieve a public URL. Every research send goes through Tavily — there is no research toggle in the composer and no DuckDuckGo fallback; when Tavily is missing or unreachable the send silently answers without research.
+3. **OpenRouter (Direct)**: Streams the catalogued OpenRouter models (Gemma 4 26B, Qwen3.8 27B, Nex-N2.5 Pro) through SSE, falling back to the NEXT catalog model when a model fails before producing content — never to the provider's own `openrouter/free` router, which served model ids this system does not offer.
+4. **Ollama Cloud (Direct)**: Streams `gpt-oss:120b`, `nemotron-3-super`, and `gemma4:31b` text responses through NDJSON.
 
 ## Core Features & Data Flow
 

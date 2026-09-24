@@ -582,6 +582,27 @@ describe('background generation coordinator', () => {
     });
   });
 
+  it('starts a web generation without Tavily keys when every Tavily key is in cooldown', async () => {
+    keyManagerMocks.resolveKeysForRequest
+      .mockResolvedValueOnce({
+        keys: [{ id: 'g1', key: 'gemini-secret' }],
+        allInCooldown: false,
+      })
+      .mockResolvedValueOnce({
+        keys: [],
+        allInCooldown: true,
+        earliestCooldownEnd: Date.now() + 60_000,
+      });
+    const mock = createChromeMock({ initialStorage: { sessions: [] } });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage({ mode: 'web' }));
+
+    expect(response.ok).toBe(true);
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')[0].tavilyKeys).toEqual([]);
+    expect(mock.storage.activeGeneration).toMatchObject({ mode: 'web', status: 'running' });
+  });
+
   it('forwards only the selected provider key pool and keeps secrets out of persisted state', async () => {
     keyManagerMocks.resolveKeysForRequest.mockResolvedValueOnce({
       keys: [{ id: 'or1', key: 'openrouter-secret', isPrimary: true }],

@@ -209,7 +209,7 @@
         "welcome_subtitle": "Ask a question, select an area from your screen, or attach a file to get started.",
         "welcome_actions": {
             "research_title": "Web research",
-            "research_description": "Research with current sources",
+            "research_description": "Searches automatically when the answer needs current info",
             "crop_title": "Select from screen",
             "crop_description": "Crop an area and ask",
             "crop_cancel_title": "Cancel selection",
@@ -426,7 +426,6 @@
         "quick_actions": {
             "crop_tooltip": "Select an area on screen",
             "crop_cancel_tooltip": "Cancel area selection",
-            "web_tooltip": "Search the web",
             "ocr_tooltip": "Extract text from image",
             "translate_tooltip": "Translate selected text or image",
             "summarize_tooltip": "Summarize the content",

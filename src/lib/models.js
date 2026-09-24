@@ -120,9 +120,13 @@ export const MODEL_CATALOG = Object.freeze([
 ])
 
 export const MODELS = Object.freeze(MODEL_CATALOG.map(model => model.modelId))
+// OpenRouter requests may ONLY target these ids — see getOpenRouterFallbackModel.
+export const OPENROUTER_MODEL_IDS = Object.freeze(
+  MODEL_CATALOG.filter(model => model.provider === PROVIDERS.OPENROUTER).map(model => model.modelId),
+)
 export const MODEL_LABELS = Object.freeze({
-  // The picker no longer lists the router, but the error fallback still routes
-  // to it; keep a readable label for the "… → Free" notice.
+  // Sessions saved by earlier versions may carry the removed `openrouter/free`
+  // router id as their resolved model; keep a readable label for that badge.
   'openrouter/free': 'Free',
   ...Object.fromEntries(MODEL_CATALOG.map(model => [model.modelId, model.label])),
 })
@@ -168,6 +172,17 @@ export function getAutoCandidateKeys({ mimeTypes = [], mode = 'chat' } = {}) {
       return true
     })
     .map(model => model.key)
+}
+
+export function getOpenRouterFallbackModel(modelId, { hasImage = false } = {}) {
+  const candidates = MODEL_CATALOG
+    .filter(model => model.provider === PROVIDERS.OPENROUTER)
+    .filter(model => (hasImage ? model.capabilities?.supportsImage === true : true))
+    .map(model => model.modelId)
+  if (candidates.length === 0) return null
+  const index = candidates.indexOf(modelId)
+  const fallback = candidates[(index + 1) % candidates.length]
+  return fallback === modelId ? null : fallback
 }
 
 export function resolveModelSelection(provider, modelId) {

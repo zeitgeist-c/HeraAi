@@ -7,8 +7,10 @@ import {
   AUTO_MODEL_KEY,
   DEFAULT_MODEL,
   MODEL_CATALOG,
+  OPENROUTER_MODEL_IDS,
   describeModelFallback,
   getAutoCandidateKeys,
+  getOpenRouterFallbackModel,
   getProviderForModel,
   isAutoModelKey,
   resolveModelSelection,
@@ -87,6 +89,23 @@ describe('provider-aware model catalog', () => {
     expect(getProviderForModel('nemotron-3-super')).toBe('ollama')
     expect(getProviderForModel('gemma4:31b')).toBe('ollama')
     expect(getProviderForModel('gpt-oss:120b')).toBe('ollama')
+  })
+
+  it('keeps the OpenRouter fallback inside the catalog', () => {
+    expect(OPENROUTER_MODEL_IDS).toEqual([
+      'google/gemma-4-26b-a4b-it:free',
+      'qwen/qwen3.8-27b:free',
+      'nex-agi/nex-n2.5-pro:free',
+    ])
+    expect(getOpenRouterFallbackModel('google/gemma-4-26b-a4b-it:free')).toBe('qwen/qwen3.8-27b:free')
+    expect(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free')).toBe('nex-agi/nex-n2.5-pro:free')
+    expect(getOpenRouterFallbackModel('nex-agi/nex-n2.5-pro:free')).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free', { hasImage: true })).toBe('nex-agi/nex-n2.5-pro:free')
+    // An id this system does not know (an old session, a hand-edited export)
+    // lands on the first catalog model instead of the provider's own router.
+    expect(getOpenRouterFallbackModel('meta-llama/legacy-model:free')).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(getOpenRouterFallbackModel('gemini-3.6-flash')).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(MODEL_CATALOG.map(model => model.modelId)).toContain(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free'))
   })
 
   it('migrates the retired MiniMax and Nemotron 3 Ultra selections to the Ollama default', () => {

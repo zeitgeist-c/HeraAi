@@ -80,4 +80,18 @@ describe('needsWebSearch', () => {
   ])('leaves ordinary chat alone: %s', (text) => {
     expect(needsWebSearch(text)).toBe(false)
   })
+
+  it.each([
+    'Bu konuyu internette araştır',
+    '2026 hedefleri neler?',
+    'Enflasyon ne durumda?',
+    'Kripto piyasası nasıl?',
+    'Dolar kuru kaç oldu?',
+  ])('detects an explicit or current-data request: %s', (text) => {
+    expect(needsWebSearch(text)).toBe(true)
+  })
+
+  it('leaves a code request alone even when it mentions a current topic', () => {
+    expect(needsWebSearch('```js\n// borsa fiyatı hesaplama\nconsole.log(1)\n```')).toBe(false)
+  })
 })

@@ -505,7 +505,6 @@ function App() {
   const [chatSearchOpen, setChatSearchOpen] = useState(false)
   const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [chatSearchIndex, setChatSearchIndex] = useState(0)
-  const [enableResearch, setEnableResearch] = useState(false)
   const [activeMode, setActiveMode] = useState(null)
   const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
@@ -592,7 +591,7 @@ function App() {
   const hasImageAttachment = attachments.some(att => (
     att?.mimeType?.startsWith('image/')
   ))
-  const draftWebUrls = enableResearch ? listPublicUrls(input) : []
+  const draftWebUrls = listPublicUrls(input)
   const [isGenerating, setIsGeneratingState] = useState(false)
   const isGeneratingRef = useRef(false)
   const setGenerating = useCallback((val) => {
@@ -3818,7 +3817,7 @@ function App() {
       && !canReusePreviousImage
       && autoDetectedUrls.length === 0
       && needsWebSearch(userText)
-    const automaticMode = (enableResearch || canReusePreviousWeb || autoDetectedUrls.length > 0 || autoWebSearch)
+    const automaticMode = (canReusePreviousWeb || autoDetectedUrls.length > 0 || autoWebSearch)
       ? 'web'
       : (draftAttachments.length > 0 || canReusePreviousImage ? 'vision' : 'chat')
     let mode = supportedModes.has(actionOptions?.modeOverride)
@@ -3879,7 +3878,6 @@ function App() {
         : []
     } catch (error) {
       const autoTriggered = mode === 'web'
-        && !enableResearch
         && !canReusePreviousWeb
         && !retryUserMessage
         && error?.code === 'url_private'
@@ -3922,9 +3920,6 @@ function App() {
     const webContext = {
       kind: mode === 'web' ? (requestUrls.length > 0 ? 'url' : 'search') : 'none',
       urls: requestUrls,
-      ...(mode === 'web' && requestUrls.length === 0
-        ? { searchMode: (enableResearch || retryUserMessage?.mode === 'web') ? 'explicit' : 'auto' }
-        : {}),
     }
     let requestText = userText
     let displayContent = actionOptions?.displayContent
@@ -4273,7 +4268,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, selectedModel, selectedProvider, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -5045,8 +5040,6 @@ function App() {
             onCrop={handleScreenshot}
             isCropActive={isCropActive}
             onResearch={() => {
-              setEnableResearch(true)
-              setActiveMode('web')
               focusComposer()
             }}
             onAttach={() => fileInputRef.current?.click()}
@@ -5151,7 +5144,7 @@ function App() {
           >
             <span aria-hidden="true" className="h-0.5 w-9 rounded-full bg-muted-foreground/35 transition-colors group-hover:bg-primary/55" />
           </div>
-          {draftWebUrls.length > 0 && enableResearch && (
+          {draftWebUrls.length > 0 && (
             <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
               {draftWebUrls.map(url => (
                 <div key={url} className="group relative flex max-w-[240px] shrink-0 items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 py-1 pl-2 pr-7 text-[11px]">
@@ -5287,21 +5280,6 @@ function App() {
                 className={getQuickActionClass(isCropActive)}
               >
                 <Scissors className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                title={t('chat.quick_actions.web_tooltip')}
-                aria-label={t('chat.quick_actions.web_tooltip')}
-                aria-pressed={enableResearch}
-                onClick={() => {
-                  const next = !enableResearch
-                  setEnableResearch(next)
-                  setActiveMode(next ? 'web' : null)
-                }}
-                disabled={isGenerating || dictationPhase !== 'idle'}
-                className={getQuickActionClass(enableResearch)}
-              >
-                <Globe className="h-4 w-4" />
               </button>
               <button
                 type="button"
