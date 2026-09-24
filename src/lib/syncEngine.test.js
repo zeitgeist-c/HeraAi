@@ -496,6 +496,41 @@ describe('çekim ve uygulama', () => {
     expect(imlec).toBeNull()
   })
 
+  it('üst üste başarısız olan belgeyi karantinaya alır ve imleci ilerletir', async () => {
+    const motor = motorKur()
+    const opaque = await deriveOpaqueId(subkeys.hmacIdKey, 'session', 'bozuk-karantina')
+    const yanlisAad = buildAad({
+      ownerUid: UID,
+      opaqueEntityId: 'baska-kimlik',
+      entityType: 'session',
+    })
+    const zarf = await encryptJson(subkeys.dataEncryptionKey, { id: 'bozuk-karantina' }, yanlisAad)
+    transport.pullEntities.mockResolvedValue({
+      documents: [
+        {
+          schemaVersion: 1,
+          opaqueEntityId: opaque,
+          entityType: 'session',
+          entityVersion: { wallTimeMs: 3000, logicalCounter: 0, deviceId: 'cihaz-b' },
+          nonce: zarf.nonce,
+          ciphertext: zarf.ciphertext,
+          deleted: false,
+          serverUpdatedAt: 7000,
+        },
+      ],
+      cursor: null,
+    })
+
+    await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
+    await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
+    const sonuc = await motor.runOnce()
+
+    expect(sonuc.quarantined).toBe(1)
+    // Karantinadan sonra imleç ilerler: tek bozuk kayıt akışı kilitlemez.
+    const imlec = await motor.readCursor()
+    expect(imlec.serverUpdatedAt).toBe(7000)
+  })
+
   it('yerelde daha yeni sürüm varsa uzak kaydı uygulamaz', async () => {
     const motor = motorKur({
       readLocalVersion: async () => ({ wallTimeMs: 9000, logicalCounter: 0, deviceId: CIHAZ }),

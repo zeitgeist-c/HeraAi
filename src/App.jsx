@@ -24,14 +24,7 @@ import {
   getProviderForModel,
   resolveModelSelection,
 } from './lib/models'
-import {
-  bytesToBase64,
-  createAudioBufferFromPcm16,
-  normalizeMarkdownForSpeech,
-  recordedBlobToWav,
-  splitSpeechText,
-  TTS_MAX_CHARS,
-} from './lib/audioUtils'
+import { bytesToBase64, recordedBlobToWav, splitWavIntoChunks } from './lib/audioUtils'
 import { processAttachmentFile, validateAttachmentGroup } from './lib/fileParsers'
 import {
   attachmentIdsFromSessions,
@@ -60,7 +53,7 @@ import {
 import i18n from './i18n'
 import { recordGenerationResults, recordPromptStarted, recordToolUsage } from './lib/stats'
 import { resolveKeysForRequest } from './lib/keyManager'
-import { TTS_FALLBACK_MODEL, generateSpeech, isTtsFallbackableCode, transcribeAudio } from './lib/voiceApi'
+import { transcribeAudio } from './lib/voiceApi'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
 import {
   requestsPreviousImage,
@@ -114,6 +107,7 @@ function clampComposerHeight(value, allowedMax = composerAllowedMaxHeight()) {
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const DICTATION_MAX_DURATION_MS = 200000
+const MIC_PERMISSION_WAIT_MS = 120000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 function mergeAttachmentRefs(existing = [], additions = []) {
   const refs = new Map()
@@ -451,12 +445,6 @@ function applySessionMetadataPatch(session, metadataPatch = {}) {
   }
 }
 
-function sortSessionsByUpdatedAt(sessions) {
-  return [...(sessions || [])].sort((a, b) => (
-    Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0)
-  ))
-}
-
 function App() {
   const { t } = useTranslation()
   const localizedModelCatalog = useMemo(() => MODEL_CATALOG.map(model => ({
@@ -551,12 +539,6 @@ function App() {
   const dictationAbortRef = useRef(null)
   const dictationStartEpochRef = useRef(0)
   const micPermissionCancelRef = useRef(null)
-  const [speechState, setSpeechState] = useState({ messageId: null, phase: 'idle' })
-  const speechStateRef = useRef({ messageId: null, phase: 'idle' })
-  const speechAbortRef = useRef(null)
-  const speechSourceRef = useRef(null)
-  const speechContextRef = useRef(null)
-  const speechEpochRef = useRef(0)
   const hasImageAttachment = attachments.some(att => (
     att?.mimeType?.startsWith('image/')
   ))
@@ -3023,11 +3005,9 @@ function App() {
 
         if (preservedActiveSession) {
           nextMessages = preservedActiveSession.messages || nextMessages
-        } else if (preservedSessions.length > 0) {
-          const nextSession = sortSessionsByUpdatedAt(preservedSessions)[0]
-          nextActiveSessionId = nextSession.id
-          nextMessages = nextSession.messages || []
         } else {
+          // Temizlikten sonra yildizli sohbete atlanmaz: yildizlilar listede
+          // kalir, kullanici isterse kendisi acar. Aktif sohbet yeni sohbet olur.
           const nextSessionId = Date.now().toString()
           const welcomeMessages = [{
             id: createUniqueMessageId(msgIdCounter),
@@ -3039,7 +3019,7 @@ function App() {
             title: t('chat.new_chat'),
             messages: welcomeMessages,
           })
-          nextSessions = [nextSession]
+          nextSessions = [...preservedSessions, nextSession]
           nextActiveSessionId = nextSessionId
           nextMessages = welcomeMessages
         }
@@ -3192,23 +3172,6 @@ function App() {
     e.target.value = ''
   }, [cancelActiveGeneration, enqueueStorageWrite, stickToBottomOnNextRender, t])
 
-  const setSpeechStatus = useCallback((nextState) => {
-    speechStateRef.current = nextState
-    setSpeechState(nextState)
-  }, [])
-
-  const stopSpeech = useCallback(() => {
-    speechEpochRef.current += 1
-    speechAbortRef.current?.abort()
-    speechAbortRef.current = null
-    if (speechSourceRef.current) {
-      const source = speechSourceRef.current
-      speechSourceRef.current = null
-      try { source.stop() } catch (_error) { /* already stopped */ }
-    }
-    setSpeechStatus({ messageId: null, phase: 'idle' })
-  }, [setSpeechStatus])
-
   const reportVoiceKeyStatus = useCallback(({ keyId, status }) => {
     if (!keyId || !status || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return
     try {
@@ -3218,114 +3181,6 @@ function App() {
       // Key metadata is helpful but must never make a voice operation fail.
     }
   }, [])
-
-  const playPcm = useCallback((pcm, sampleRate, epoch) => new Promise((resolve, reject) => {
-    const context = speechContextRef.current
-    if (!context || epoch !== speechEpochRef.current) {
-      resolve()
-      return
-    }
-    try {
-      const source = context.createBufferSource()
-      source.buffer = createAudioBufferFromPcm16(context, pcm, sampleRate)
-      source.connect(context.destination)
-      speechSourceRef.current = source
-      source.onended = () => {
-        if (speechSourceRef.current === source) speechSourceRef.current = null
-        source.disconnect?.()
-        resolve()
-      }
-      source.start(0)
-    } catch (error) {
-      reject(error)
-    }
-  }), [])
-
-  const handleToggleSpeech = useCallback(async (message) => {
-    if (!message?.id || isGenerating || dictationPhaseRef.current !== 'idle') return
-    if (speechStateRef.current.messageId === message.id && speechStateRef.current.phase !== 'idle') {
-      stopSpeech()
-      return
-    }
-
-    stopSpeech()
-    const speechText = normalizeMarkdownForSpeech(message.content, t('chat.code_block_skipped'))
-    if (!speechText) return
-    if (speechText.length > TTS_MAX_CHARS) {
-      notifyError(t('chat.speech_too_long'))
-      return
-    }
-
-    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext
-    if (!AudioContextClass) {
-      notifyError(t('chat.speech_failed'))
-      return
-    }
-    if (!speechContextRef.current || speechContextRef.current.state === 'closed') {
-      speechContextRef.current = new AudioContextClass()
-    }
-    void speechContextRef.current.resume?.()
-
-    const resolution = await resolveKeysForRequest('gemini')
-    if (!resolution.keys.length) {
-      notifyError(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
-      return
-    }
-
-    const epoch = speechEpochRef.current
-    const controller = new AbortController()
-    speechAbortRef.current = controller
-    setSpeechStatus({ messageId: message.id, phase: 'loading' })
-    try {
-      const chunks = splitSpeechText(speechText)
-      let pinnedTtsModel = null
-      for (const chunk of chunks) {
-        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
-        let result = null
-        try {
-          result = await generateSpeech({
-            text: chunk,
-            keys: resolution.keys,
-            signal: controller.signal,
-            onKeyStatus: reportVoiceKeyStatus,
-            ...(pinnedTtsModel ? { model: pinnedTtsModel } : {}),
-          })
-        } catch (chunkError) {
-          const chunkCode = chunkError?.code || null
-          const pinnedPrimaryFailed = pinnedTtsModel
-            && pinnedTtsModel !== TTS_FALLBACK_MODEL
-            && chunkCode
-            && isTtsFallbackableCode(chunkCode)
-          if (!pinnedPrimaryFailed) throw chunkError
-          if (controller.signal.aborted || epoch !== speechEpochRef.current) return
-          result = await generateSpeech({
-            text: chunk,
-            keys: resolution.keys,
-            signal: controller.signal,
-            onKeyStatus: reportVoiceKeyStatus,
-            model: TTS_FALLBACK_MODEL,
-          })
-          pinnedTtsModel = result?.model || TTS_FALLBACK_MODEL
-        }
-        if (!pinnedTtsModel) pinnedTtsModel = result?.model || pinnedTtsModel
-        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
-        setSpeechStatus({ messageId: message.id, phase: 'playing' })
-        await playPcm(result.pcm, result.sampleRate, epoch)
-        if (controller.signal.aborted || epoch !== speechEpochRef.current) return
-        setSpeechStatus({ messageId: message.id, phase: 'loading' })
-      }
-    } catch (error) {
-      if (error?.name !== 'AbortError') {
-        console.error('Gemini speech generation failed', error)
-        notifyError(t('chat.speech_failed'))
-      }
-    } finally {
-      if (epoch === speechEpochRef.current) {
-        speechAbortRef.current = null
-        setSpeechStatus({ messageId: null, phase: 'idle' })
-      }
-    }
-  }, [isGenerating, playPcm, reportVoiceKeyStatus, setSpeechStatus, stopSpeech, t])
 
   const clearDictationTimers = useCallback(() => {
     if (dictationTimerRef.current != null) window.clearInterval(dictationTimerRef.current)
@@ -3355,16 +3210,22 @@ function App() {
     setDictationPhase('transcribing')
     const controller = new AbortController()
     dictationAbortRef.current = controller
+    let transcript = ''
     try {
       const wav = await recordedBlobToWav(blob)
-      const transcript = await transcribeAudio({
-        wavBase64: bytesToBase64(wav),
-        keys: dictationKeysRef.current,
-        signal: controller.signal,
-        onKeyStatus: reportVoiceKeyStatus,
-      })
+      const chunks = splitWavIntoChunks(wav)
+      for (const chunk of chunks) {
+        if (controller.signal.aborted) return
+        const part = await transcribeAudio({
+          wavBase64: bytesToBase64(chunk),
+          keys: dictationKeysRef.current,
+          signal: controller.signal,
+          onKeyStatus: reportVoiceKeyStatus,
+        })
+        if (part) transcript = transcript ? `${transcript} ${part}` : part
+      }
       if (controller.signal.aborted) return
-      if (!transcript) {
+      if (!transcript.trim()) {
         notifyError(t('chat.voice_empty'))
         return
       }
@@ -3373,8 +3234,19 @@ function App() {
       window.requestAnimationFrame(() => focusComposer())
     } catch (error) {
       if (error?.name !== 'AbortError') {
-        console.error('Gemini dictation failed', error)
-        notifyError(t('chat.voice_failed'))
+        console.error(
+          'Gemini dictation failed:',
+          error?.code || error?.name || 'unknown',
+          error?.cause?.message || error?.cause || '',
+          error,
+        )
+        // Parcalardan bazilari cevrildiyse metni kaybetmeyelim.
+        if (transcript) {
+          setInput(current => appendToInputValue(current, transcript))
+          notifyError(t('chat.voice_partial'))
+        } else {
+          notifyError(t(['service_unavailable', 'timeout'].includes(error?.code) ? 'chat.voice_unavailable' : 'chat.voice_failed'))
+        }
       }
     } finally {
       if (dictationAbortRef.current === controller) dictationAbortRef.current = null
@@ -3387,9 +3259,10 @@ function App() {
     if (!recorder || recorder.state === 'inactive') return
     dictationShouldTranscribeRef.current = shouldTranscribe
     clearDictationTimers()
+    // Mikrofon akisi onstop icinde birakilir; burada birakmak kodlayicinin
+    // son karelerini kesiyor ve dikte son sozcukleri kaybediyordu.
     recorder.stop()
-    releaseDictationStream()
-  }, [clearDictationTimers, releaseDictationStream])
+  }, [clearDictationTimers])
 
   const cancelDictation = useCallback(() => {
     dictationStartEpochRef.current += 1
@@ -3410,13 +3283,14 @@ function App() {
     } catch (_error) {
       // Open the permission page when the Permissions API cannot report state.
     }
-    if (!chrome?.windows?.create || !chrome.runtime?.onMessage) return false
+    if (!chrome?.windows?.create || !chrome.runtime?.onMessage) return 'unknown'
 
     const requestId = globalThis.crypto?.randomUUID?.() || `mic-${Date.now()}-${Math.random().toString(36).slice(2)}`
     return new Promise((resolve) => {
       let permissionWindowId = null
       let settled = false
       const cleanup = () => {
+        window.clearTimeout(permissionTimeoutId)
         chrome.runtime.onMessage.removeListener(handleMessage)
         chrome.windows.onRemoved?.removeListener?.(handleWindowRemoved)
         if (micPermissionCancelRef.current === cancelPermission) micPermissionCancelRef.current = null
@@ -3427,6 +3301,9 @@ function App() {
         cleanup()
         resolve(granted)
       }
+      // Pencere yanit vermezse akis kilitlenmesin: 'unknown' doner ve panel
+      // dogrudan getUserMedia dener; izin gercekten verilmisse dikte calisir.
+      const permissionTimeoutId = window.setTimeout(() => finish('unknown'), MIC_PERMISSION_WAIT_MS)
       const handleMessage = (message) => {
         if (message?.type !== 'HERAAI_MIC_PERMISSION_RESULT' || message.requestId !== requestId) return false
         finish(message.granted === true)
@@ -3461,17 +3338,16 @@ function App() {
       notifyError(t(`chat.generation_errors.${resolution.allInCooldown ? 'all_keys_cooldown' : 'api_key_missing'}`))
       return
     }
-    stopSpeech()
     const startEpoch = ++dictationStartEpochRef.current
     dictationPhaseRef.current = 'requesting'
     setDictationPhase('requesting')
-    if (!await requestMicrophonePermission()) {
-      if (startEpoch !== dictationStartEpochRef.current) return
+    const permissionGranted = await requestMicrophonePermission()
+    if (startEpoch !== dictationStartEpochRef.current) return
+    if (permissionGranted === false) {
       resetDictation()
       notifyError(t('chat.voice_permission_denied'))
       return
     }
-    if (startEpoch !== dictationStartEpochRef.current) return
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -3495,6 +3371,7 @@ function App() {
       recorder.onstop = () => {
         const shouldTranscribe = dictationShouldTranscribeRef.current
         const blob = new Blob(dictationChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        releaseDictationStream()
         if (shouldTranscribe && blob.size > 0) void processDictation(blob)
         else resetDictation()
       }
@@ -3508,16 +3385,19 @@ function App() {
       setDictationSeconds(0)
       const startedAt = Date.now()
       dictationTimerRef.current = window.setInterval(() => {
-        setDictationSeconds(Math.min(60, Math.floor((Date.now() - startedAt) / 1000)))
+        setDictationSeconds(Math.floor((Date.now() - startedAt) / 1000))
       }, 250)
-      dictationLimitRef.current = window.setTimeout(() => stopDictationRecording(true), DICTATION_MAX_DURATION_MS)
+      dictationLimitRef.current = window.setTimeout(() => {
+        notifyError(t('chat.voice_max_duration', { seconds: DICTATION_MAX_DURATION_MS / 1000 }))
+        stopDictationRecording(true)
+      }, DICTATION_MAX_DURATION_MS)
     } catch (error) {
       console.error('Microphone recording failed', error)
       releaseDictationStream()
       resetDictation()
       notifyError(error?.name === 'NotAllowedError' ? t('chat.voice_permission_denied') : t('chat.voice_error'))
     }
-  }, [isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, stopSpeech, t])
+  }, [isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, t])
 
   const handleDictationToggle = useCallback(() => {
     if (dictationPhaseRef.current === 'recording') stopDictationRecording(true)
@@ -3526,13 +3406,8 @@ function App() {
   }, [cancelDictation, startDictation, stopDictationRecording])
 
   useEffect(() => {
-    if (isGenerating) stopSpeech()
-  }, [isGenerating, stopSpeech])
-
-  useEffect(() => {
     const handleVoiceVisibility = () => {
       if (document.visibilityState !== 'hidden') return
-      stopSpeech()
       cancelDictation()
     }
     document.addEventListener('visibilitychange', handleVoiceVisibility)
@@ -3540,20 +3415,12 @@ function App() {
     return () => {
       document.removeEventListener('visibilitychange', handleVoiceVisibility)
       window.removeEventListener('pagehide', handleVoiceVisibility)
-      stopSpeech()
       cancelDictation()
-      speechContextRef.current?.close?.()
-      speechContextRef.current = null
     }
-  }, [cancelDictation, stopSpeech])
-
-  useEffect(() => {
-    stopSpeech()
-  }, [activeSessionId, stopSpeech])
+  }, [cancelDictation])
 
   const handleSend = useCallback(async (directActionText = null, actionOptions = {}) => {
     if (dictationPhaseRef.current !== 'idle') return
-    stopSpeech()
     const hasDirectActionText = typeof directActionText === 'string'
     const safeInput = typeof input === 'string' ? input : ''
     const userText = hasDirectActionText ? directActionText : safeInput.trim()
@@ -3960,7 +3827,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, selectedModel, selectedProvider, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, selectedModel, selectedProvider, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   handleSendRef.current = handleSend
 
@@ -4686,10 +4553,6 @@ function App() {
                   currentModel={selectedModel}
                   retryDisabled={isGenerating}
                   showSources={appConfig.showSources}
-                  speechEnabled
-                  speechDisabled={isGenerating || dictationPhase !== 'idle'}
-                  speechStatus={speechState.messageId === msg.id ? speechState.phase : 'idle'}
-                  onToggleSpeech={handleToggleSpeech}
                 />
               )
             })}

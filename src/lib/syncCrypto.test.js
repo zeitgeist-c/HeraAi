@@ -212,6 +212,11 @@ describe('syncCrypto kurtarma kodu', () => {
     await expect(sealMasterSecretForRecovery(masterBytes, 'kisa')).rejects.toThrow('recovery_code_invalid')
     await expect(openMasterSecretFromRecovery({}, generateRecoveryCode())).rejects.toThrow('recovery_envelope_invalid')
     await expect(openMasterSecretFromRecovery(null, generateRecoveryCode())).rejects.toThrow('recovery_envelope_invalid')
+    // Bozuk base64 tuzu da belgelenen hata koduna cevrilmeli (DOMException sizmamali).
+    await expect(openMasterSecretFromRecovery(
+      { ciphertext: 'AAAA', nonce: 'AAAA', salt: 'gecersiz!!' },
+      generateRecoveryCode(),
+    )).rejects.toThrow('recovery_envelope_invalid')
   })
 })
 

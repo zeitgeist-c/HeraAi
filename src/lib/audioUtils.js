@@ -1,7 +1,5 @@
 export const DICTATION_SAMPLE_RATE = 16000
-export const TTS_SAMPLE_RATE = 24000
-export const TTS_CHUNK_MAX_CHARS = 2000
-export const TTS_MAX_CHARS = 12000
+export const DICTATION_CHUNK_SECONDS = 30
 
 export function bytesToBase64(bytes) {
   let binary = ''
@@ -84,47 +82,33 @@ export async function recordedBlobToWav(blob, {
   }
 }
 
-export function normalizeMarkdownForSpeech(markdown, codeSkippedText = 'Code block skipped.') {
-  return String(markdown || '')
-    .replace(/```[\s\S]*?```/g, ` ${codeSkippedText} `)
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<https?:\/\/[^>]+>/g, ' ')
-    .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s*>\s?/gm, '')
-    .replace(/^\s*[-*+]\s+/gm, '')
-    .replace(/^\s*\d+[.)]\s+/gm, '')
-    .replace(/[|*_~`]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// Uzun dikte kayitlarini modele parca parca gondermek icin: 44 baytlik WAV
+// basligini koruyup PCM verisini sabit uzunlukta dilimlere boler. Boylece her
+// istek kucuk kalir ve tek bir 5xx/400 tum dikteyi oldurmez.
+export function splitWavIntoChunks(wavBytes, {
+  sampleRate = DICTATION_SAMPLE_RATE,
+  chunkSeconds = DICTATION_CHUNK_SECONDS,
+} = {}) {
+  const WAV_HEADER_BYTES = 44
+  const bytes = wavBytes instanceof Uint8Array ? wavBytes : new Uint8Array(wavBytes || [])
+  if (bytes.byteLength <= WAV_HEADER_BYTES) return [bytes]
+  const chunkBytes = Math.max(2, Math.floor(sampleRate * chunkSeconds) * 2)
+  const dataLength = bytes.byteLength - WAV_HEADER_BYTES
+  if (dataLength <= chunkBytes) return [bytes]
 
-export function splitSpeechText(text, maxChars = TTS_CHUNK_MAX_CHARS) {
-  const normalized = String(text || '').trim()
-  if (!normalized) return []
+  const header = bytes.subarray(0, WAV_HEADER_BYTES)
   const chunks = []
-  let remaining = normalized
-
-  while (remaining.length > maxChars) {
-    const candidate = remaining.slice(0, maxChars + 1)
-    const boundaries = [candidate.lastIndexOf('\n'), candidate.lastIndexOf('. '), candidate.lastIndexOf('! '), candidate.lastIndexOf('? '), candidate.lastIndexOf(' ')]
-    const boundary = Math.max(...boundaries)
-    const splitAt = boundary >= Math.floor(maxChars * 0.55) ? boundary + 1 : maxChars
-    chunks.push(remaining.slice(0, splitAt).trim())
-    remaining = remaining.slice(splitAt).trim()
+  for (let offset = 0; offset < dataLength; offset += chunkBytes) {
+    const end = Math.min(dataLength, offset + chunkBytes)
+    const sliceLength = end - offset
+    const chunk = new Uint8Array(WAV_HEADER_BYTES + sliceLength)
+    chunk.set(header, 0)
+    chunk.set(bytes.subarray(WAV_HEADER_BYTES + offset, WAV_HEADER_BYTES + end), WAV_HEADER_BYTES)
+    const view = new DataView(chunk.buffer)
+    view.setUint32(4, 36 + sliceLength, true)
+    view.setUint32(40, sliceLength, true)
+    chunks.push(chunk)
   }
-  if (remaining) chunks.push(remaining)
   return chunks
 }
 
-export function createAudioBufferFromPcm16(audioContext, pcmBytes, sampleRate = TTS_SAMPLE_RATE) {
-  const evenLength = pcmBytes.byteLength - (pcmBytes.byteLength % 2)
-  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, evenLength)
-  const audioBuffer = audioContext.createBuffer(1, evenLength / 2, sampleRate)
-  const channel = audioBuffer.getChannelData(0)
-  for (let index = 0; index < channel.length; index += 1) {
-    channel[index] = view.getInt16(index * 2, true) / 0x8000
-  }
-  return audioBuffer
-}

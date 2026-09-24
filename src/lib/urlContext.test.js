@@ -22,8 +22,18 @@ describe('public URL parsing', () => {
     'http://169.254.169.254/latest',
     'https://192.168.1.2/',
     'https://user:pass@example.com/',
+    'http://localhost./page',
+    'http://[::ffff:127.0.0.1]/page',
+    'http://[::ffff:7f00:1]/page',
+    'http://[::]/page',
+    'http://100.64.0.5/page',
   ])('rejects private or credential-bearing URL %s', url => {
     expect(() => normalizePublicUrl(url)).toThrow(expect.objectContaining({ code: 'url_private' }))
+  })
+
+  it('treats a URL-only message as a URL regardless of letter case', () => {
+    expect(isUrlOnlyText('HTTPS://Example.com/Article', ['https://example.com/Article'])).toBe(true)
+    expect(isUrlOnlyText('bu sayfayi ozetle https://example.com/Article', ['https://example.com/Article'])).toBe(false)
   })
 
   it('accepts ten public URLs and rejects the eleventh', () => {

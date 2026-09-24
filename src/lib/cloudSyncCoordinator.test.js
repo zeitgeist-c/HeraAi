@@ -35,6 +35,7 @@ import {
   getAutoSyncSettings,
   getCloudSyncStatus,
   initializeCloudSync,
+  installCloudSyncListeners,
   cloudSyncWakeReason,
   linkCloudSyncDevice,
   listCloudSyncDevices,
@@ -225,6 +226,22 @@ describe('cihaz kapatma ve ad verme', () => {
     expect(result?.skipped).toBeUndefined()
   })
 
+  it('atlanan esitleme turunu basarili saymaz ve bekleyen anahtar isaretlerini korur', async () => {
+    storage.syncLastSuccessAt = 111
+    storage.syncKeyTombstones = { 'anahtar-1': 5000 }
+    Object.defineProperty(globalThis.navigator, 'onLine', { value: false, configurable: true })
+
+    try {
+      const result = await runCloudSync()
+
+      expect(result?.skipped).toBe('offline')
+      expect(storage.syncLastSuccessAt).toBe(111)
+      expect(storage.syncKeyTombstones).toEqual({ 'anahtar-1': 5000 })
+    } finally {
+      Object.defineProperty(globalThis.navigator, 'onLine', { value: true, configurable: true })
+    }
+  })
+
   it('yeniden baglanma verilen adi korur ve cihazi acar', async () => {
     const { recoveryCode } = await regenerateCloudRecoveryCode()
     cloud.devices.set(deviceId, { ...cloud.devices.get(deviceId), label: 'Özel Ad', revokedAt: 1 })
@@ -266,6 +283,39 @@ describe('cihaz kapatma ve ad verme', () => {
       .map(item => item.document)
     const gonderilenSohbetler = gonderilenler.filter(belge => belge.entityType === 'session')
     expect(gonderilenSohbetler).toHaveLength(1)
+  })
+
+  it('yalniz bu cihazda isaretlenen sohbetin bulut kopyasini siler', async () => {
+    const { recoveryCode } = await regenerateCloudRecoveryCode()
+    await linkCloudSyncDevice(recoveryCode)
+    storage.sessions = [{
+      id: 'gizli-sohbet',
+      title: 'Gizli sohbet',
+      syncPolicy: 'local_only',
+      updatedAt: 2,
+      messages: [{ id: 'm1', role: 'user', content: 'Merhaba' }],
+    }]
+
+    installCloudSyncListeners()
+    const listener = chrome.storage.onChanged.addListener.mock.calls.at(-1)?.[0]
+    expect(typeof listener).toBe('function')
+    listener({
+      sessions: {
+        oldValue: [{ id: 'gizli-sohbet', syncPolicy: 'synced' }],
+        newValue: storage.sessions,
+      },
+    }, 'local')
+    // Dinleyici kuyruğa asenkron yazıyor.
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    transport.pushEntities.mockClear()
+    await runCloudSync()
+
+    const gonderilenler = transport.pushEntities.mock.calls
+      .flatMap(([arg]) => arg.documents || [])
+      .map(item => item.document)
+    // Politikası değişen sohbet için buluta silme (tombstone) gönderilmeli.
+    expect(gonderilenler.some(belge => belge.entityType === 'session' && belge.deleted === true)).toBe(true)
   })
 })
 

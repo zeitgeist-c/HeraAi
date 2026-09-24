@@ -111,9 +111,16 @@ export function createFirestoreTransport({ db = getFirebaseFirestore() } = {}) {
     },
 
     async deleteStaleEntityChunks(uid, opaqueEntityId, keepRevision = null) {
+      let revision = keepRevision
+      if (!revision) {
+        // Revizyon verilmediyse belgenin guncel revizyonunu koru: araya giren
+        // baska bir cihazin parcali surumunu silmek belgeyi bozar.
+        const snapshot = await getDoc(doc(db, cloudPaths.entity(uid, opaqueEntityId)))
+        revision = snapshot.exists() ? snapshot.data()?.chunkRevision || null : null
+      }
       const snapshots = await getDocs(collection(db, `users/${uid}/entities/${opaqueEntityId}/chunks`))
       const stale = snapshots.docs
-        .filter(snapshot => !keepRevision || snapshot.data()?.revision !== keepRevision)
+        .filter(snapshot => !revision || snapshot.data()?.revision !== revision)
         .map(snapshot => snapshot.ref)
       await deleteRefs(stale)
       return stale.length

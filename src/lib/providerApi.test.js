@@ -433,4 +433,25 @@ describe('Ollama Cloud provider adapter', () => {
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'pdf_requires_gemini' } })
     expect(global.fetch).not.toHaveBeenCalled()
   })
+
+  it('ignores metadata-only image and PDF references left in history', async () => {
+    // Geçmiş turların ek referansları data taşımaz (worker yalnız son mesajı
+    // hidratlar); bu ref'ler isteği düşürmemeli.
+    global.fetch.mockResolvedValue(streamResponse([
+      `${JSON.stringify({ model: 'gpt-oss:120b', message: { content: 'Metin yaniti' } })}\n`,
+    ]))
+    const historyMessages = [
+      { role: 'user', content: 'eski gorsel', attachments: [{ id: 'a1', name: 'a.png', mimeType: 'image/png' }] },
+      { role: 'model', content: 'tamam' },
+      { role: 'user', content: 'eski pdf', attachments: [{ id: 'a2', name: 'b.pdf', mimeType: 'application/pdf' }] },
+      { role: 'model', content: 'tamam' },
+      { role: 'user', content: 'yeni soru' },
+    ]
+
+    const events = await collect(streamRemoteProvider('ollama', historyMessages, {}, keys))
+
+    expect(events.some(event => event.event === 'error')).toBe(false)
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'Metin yaniti' } })
+    expect(global.fetch).toHaveBeenCalled()
+  })
 })

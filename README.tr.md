@@ -21,7 +21,7 @@ Chrome Yan Panel'de yaşayan özel yapay zekâ asistanı. Gemini, OpenRouter Fre
 - **Web Araştırma** — her mesajda otomatik araştırma: önce Gemini URL Context, yedekte Tavily; Tavily yoksa sessizce atlanır.
 - **Ekran kırpma** — `captureVisibleTab` + canvas katmanı; kırpıntılar `heraai-attachments` IndexedDB'de (`chrome://` sayfalarında çalışmaz).
 - **Dosya eki** — görsel (Gemini/OpenRouter), PDF + ses yalnız Gemini, Office metin çıkarma.
-- **Ses** — yalnız Gemini STT/TTS.
+- **Sesli giriş** — yalnız Gemini dikte (konuşmayı yazıya çevirme).
 - **Oturumlar** — geçmiş katmanı, sohbet arama, içe/dışa aktarma.
 - **Şifreli bulut eşitleme** — ayarları, sohbetleri, istatistikleri, şifreli API anahtarlarını ve ek metadatasını tarayıcılar arasında taşır; ek dosyaları kaynak cihazda kalır ve sohbet bazında yalnız cihaz seçeneği vardır.
 - **Kurtarma ve yedek** — kurtarma koduyla cihaz bağlama, cihaz erişimini kaldırma ve şifreli tam yedek alma/geri yükleme.
