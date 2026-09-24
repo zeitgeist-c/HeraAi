@@ -2,6 +2,30 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.16',
+    date: '2026-09-24',
+    changes: {
+      tr: [
+        'Web\'de araştır butonu kaldırıldı; araştırma artık her mesajda hazır ve gerektiğinde kendiliğinden çalışıyor',
+        'Güncel bilgi isteyen sorularda (bugün, güncel fiyat, hava durumu, haber, "internette araştır") cevap Tavily kaynakları ve kaynak listesiyle geliyor',
+        'Selamlama, çeviri, kod ve dosya sorularında gereksiz internet araması yapılmıyor',
+        'Arama motoru olarak yalnızca Tavily kullanılıyor; zayıf sonuç veren DuckDuckGo kaldırıldı',
+        'Tavily kotası bittiğinde veya anahtar hatalı olduğunda hata yerine normal cevap üretiliyor',
+        'Yapıştırılan sayfa bağlantıları eskisi gibi okunup özetleniyor',
+        'OpenRouter modeli yanıt vermezse sıradaki katalog modeline geçiliyor; katalogda olmayan model adı artık görünmüyor',
+      ],
+      en: [
+        'The "Search the web" button is gone; research is now ready on every message and runs automatically when needed',
+        'Questions about current information (today, current prices, weather, news, "search the web") are answered with Tavily sources and a source list',
+        'Greetings, translation, code and file questions no longer trigger a pointless web search',
+        'Tavily is the only search engine; the weak DuckDuckGo path was removed',
+        'When Tavily runs out of quota or the key fails, the answer is produced normally instead of showing an error',
+        'Pasted page links are still read and summarized as before',
+        'When an OpenRouter model stops responding, the next catalog model takes over; ids that are not in the catalog no longer appear',
+      ],
+    },
+  },
+  {
     version: '1.10.15',
     date: '2026-09-24',
     changes: {
