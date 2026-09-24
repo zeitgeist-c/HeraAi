@@ -2680,20 +2680,6 @@ describe('HeraAi App', () => {
       .toEqual([...buttons].map(button => Array.from(composer.querySelectorAll('button')).indexOf(button)).sort((a, b) => a - b));
   });
 
-  it('renders voice input before the comparison button', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    const composer = document.querySelector('textarea').closest('.hera-surface');
-    const buttons = Array.from(composer.querySelectorAll('button'));
-    const micIndex = buttons.findIndex(button => button.querySelector('svg.lucide-mic'));
-    const compareIndex = buttons.findIndex(button => button.querySelector('svg.lucide-columns-2'));
-    expect(micIndex).toBeGreaterThanOrEqual(0);
-    expect(compareIndex).toBeGreaterThanOrEqual(0);
-    expect(micIndex).toBeLessThan(compareIndex);
-  });
-
   it('toggles an active screen selection off with the same crop button', async () => {
     await i18n.changeLanguage('en');
     global.chrome.scripting.executeScript
@@ -3253,22 +3239,21 @@ describe('HeraAi App', () => {
     expect(screen.getByText('Ollama')).toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
       .filter(option => option.dataset.modelId === 'nex-agi/nex-n2.5-pro:free')
-      .map(option => option.textContent)).toEqual(['Nex-N2.5 Pro📷Code & analysis']);
+      .map(option => option.textContent)).toEqual(['Nex-N2.5 Pro📷']);
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-3).map(option => option.textContent)).toEqual([
-      'GPT-OSS 120BGeneral chat',
-      'Nemotron 3 SuperBalanced',
-      'Gemma 4 31B📷Strong & visual',
+      'GPT-OSS 120B',
+      'Nemotron 3 Super',
+      'Gemma 4 31B📷',
     ]);
     const rowText = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
-    expect(rowText('gpt-oss:120b')).toContain('General chat');
-    expect(rowText('gemma4:31b')).toContain('Strong & visual');
-    expect(rowText('google/gemma-4-26b-a4b-it:free')).toContain('Fast & visual');
-    expect(rowText('nex-agi/nex-n2.5-pro:free')).toContain('Code & analysis');
-    expect(rowText('gemini-3.1-flash-lite')).toContain('Quick drafts');
-    expect(rowText('gemini-3.5-flash-lite')).toContain('Daily chat');
-    expect(rowText('gemini-3.6-flash')).toContain('Balanced');
-    expect(rowText('gemini-3.7-flash')).toContain('Docs & images');
-    expect(rowText('gemini-3.8-flash')).toContain('Most capable');
+    expect(rowText('gpt-oss:120b')).toBe('GPT-OSS 120B');
+    expect(rowText('gemma4:31b')).toBe('Gemma 4 31B📷');
+    expect(rowText('google/gemma-4-26b-a4b-it:free')).toBe('Gemma 4 26B📷');
+    expect(rowText('nex-agi/nex-n2.5-pro:free')).toBe('Nex-N2.5 Pro📷');
+    expect(rowText('gemini-3.1-flash-lite')).toBe('Gemini 3.1 Flash Lite📷');
+    expect(rowText('gemini-3.8-flash')).toBe('Gemini 3.8 Flash📷');
+    // Model satırları yalnızca isim + görüntü simgesi taşır; amaç etiketleri kaldırıldı.
+    expect(listbox.textContent).not.toMatch(/Quick drafts|Daily chat|Balanced|Docs & images|Most capable|Fast & visual|Code & images|Code & analysis|General chat|Smartest|Strong & visual/)
   });
 
   it('marks image-capable models with a camera marker in the selector', async () => {
@@ -3589,232 +3574,6 @@ describe('HeraAi App', () => {
     const answer = await screen.findByText('Hello from AI');
     expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model'))
       .toHaveTextContent('Gemini 3.1 Flash Lite');
-  });
-
-  it('sends a follow-up without a winner and keeps both answers in context', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
-    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
-    expect(within(dialog).getByText(/two requests|iki istek/i)).toBeInTheDocument();
-    const selects = within(dialog).getAllByRole('combobox');
-    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
-    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
-
-    let startMessage;
-    await waitFor(() => {
-      startMessage = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
-      expect(startMessage).toBeDefined();
-    });
-    expect(startMessage.variants.map(variant => variant.model)).toEqual([
-      'gemini-3.6-flash',
-      'gemini-3.7-flash',
-    ]);
-    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
-    const snapshotFor = (status, revision, firstContent, secondContent) => ({
-      jobId,
-      kind: 'comparison',
-      comparisonId: jobId,
-      sessionId,
-      userMessageId,
-      assistantMessageId,
-      mode: 'chat',
-      status,
-      revision,
-      content: '',
-      sources: [],
-      variants: {
-        a: {
-          variantId: 'a', status, content: firstContent, sources: [], resolvedModel: null,
-          revision, errorCode: null, model: 'gemini-3.6-flash', provider: 'gemini',
-        },
-        b: {
-          variantId: 'b', status, content: secondContent, sources: [], resolvedModel: null,
-          revision, errorCode: null, model: 'gemini-3.7-flash', provider: 'gemini',
-        },
-      },
-    });
-
-    emitRuntimeMessage({ type: 'ACTIVE_GEN_CHANGED', snapshot: snapshotFor('running', 1, 'Answer A', 'Answer B') });
-    expect(await screen.findByText('Answer A')).toBeInTheDocument();
-    expect(await screen.findByText('Answer B')).toBeInTheDocument();
-
-    emitRuntimeMessage({ type: 'DONE', activeGeneration: snapshotFor('completed', 2, 'Answer A', 'Answer B') });
-    // The composer stays usable without picking a winner.
-    await waitFor(() => expect(document.querySelector('textarea')).not.toBeDisabled());
-
-    const winners = await screen.findAllByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i });
-    expect(winners).toHaveLength(2);
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Follow up' } });
-    fireEvent.click(getSendButton());
-
-    await waitFor(() => expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
-      message?.type === 'RESOLVE_COMPARISON_BOTH' && message?.comparisonId === jobId
-    ))).toBe(true));
-
-    let followUpStart;
-    await waitFor(() => {
-      followUpStart = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START'
-          && message?.requestMessages?.some(item => item.content === 'Follow up'));
-      expect(followUpStart).toBeDefined();
-    });
-    const followUpContents = followUpStart.requestMessages.map(item => item.content);
-    expect(followUpContents).toContain('Answer A');
-    expect(followUpContents).toContain('Answer B');
-
-    // Both answers stay on screen with a both-resolution note and no winner buttons.
-    expect(await screen.findByTestId('comparison-both-note')).toHaveTextContent(
-      /Continued with both answers|İki yanıtla devam edildi/i,
-    );
-    expect(screen.getByText('Answer A')).toBeInTheDocument();
-    expect(screen.getByText('Answer B')).toBeInTheDocument();
-    expect(screen.queryAllByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i }))
-      .toHaveLength(0);
-  });
-
-  it('keeps a single-winner follow-up limited to the winning answer', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
-    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
-    const selects = within(dialog).getAllByRole('combobox');
-    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
-    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
-
-    let startMessage;
-    await waitFor(() => {
-      startMessage = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
-      expect(startMessage).toBeDefined();
-    });
-    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
-    const snapshotFor = (status, revision, firstContent, secondContent) => ({
-      jobId,
-      kind: 'comparison',
-      comparisonId: jobId,
-      sessionId,
-      userMessageId,
-      assistantMessageId,
-      mode: 'chat',
-      status,
-      revision,
-      content: '',
-      sources: [],
-      variants: {
-        a: {
-          variantId: 'a', status, content: firstContent, sources: [], resolvedModel: null,
-          revision, errorCode: null, model: 'gemini-3.6-flash', provider: 'gemini',
-        },
-        b: {
-          variantId: 'b', status, content: secondContent, sources: [], resolvedModel: null,
-          revision, errorCode: null, model: 'gemini-3.7-flash', provider: 'gemini',
-        },
-      },
-    });
-
-    emitRuntimeMessage({ type: 'ACTIVE_GEN_CHANGED', snapshot: snapshotFor('running', 1, 'Answer A', 'Answer B') });
-    expect(await screen.findByText('Answer A')).toBeInTheDocument();
-
-    emitRuntimeMessage({ type: 'DONE', activeGeneration: snapshotFor('completed', 2, 'Answer A', 'Answer B') });
-
-    const winners = await screen.findAllByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i });
-    expect(winners).toHaveLength(2);
-    fireEvent.click(winners[0]);
-
-    await waitFor(() => expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
-      message?.type === 'SELECT_COMPARISON_WINNER' && message?.winnerSlot === 'a'
-    ))).toBe(true));
-    await waitFor(() => expect(document.querySelector('textarea')).not.toBeDisabled());
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Follow up' } });
-    fireEvent.click(getSendButton());
-
-    let followUpStart;
-    await waitFor(() => {
-      followUpStart = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START'
-          && message?.requestMessages?.some(item => item.content === 'Follow up'));
-      expect(followUpStart).toBeDefined();
-    });
-    const followUpContents = followUpStart.requestMessages.map(item => item.content);
-    expect(followUpContents).toContain('Answer A');
-    expect(followUpContents).not.toContain('Answer B');
-  });
-
-  it('keeps the comparison launcher disabled while a comparison is unresolved', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
-    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
-    const selects = within(dialog).getAllByRole('combobox');
-    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
-    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
-
-    let startMessage;
-    await waitFor(() => {
-      startMessage = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
-      expect(startMessage).toBeDefined();
-    });
-    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
-    emitRuntimeMessage({
-      type: 'DONE',
-      activeGeneration: {
-        jobId,
-        kind: 'comparison',
-        comparisonId: jobId,
-        sessionId,
-        userMessageId,
-        assistantMessageId,
-        mode: 'chat',
-        status: 'completed',
-        revision: 2,
-        content: '',
-        sources: [],
-        variants: {
-          a: {
-            variantId: 'a', status: 'completed', content: 'Answer A', sources: [],
-            resolvedModel: null, revision: 2, errorCode: null,
-            model: 'gemini-3.6-flash', provider: 'gemini',
-          },
-          b: {
-            variantId: 'b', status: 'completed', content: 'Answer B', sources: [],
-            resolvedModel: null, revision: 2, errorCode: null,
-            model: 'gemini-3.7-flash', provider: 'gemini',
-          },
-        },
-      },
-    });
-
-    await screen.findByText('Answer A');
-    // Normal composer input stays enabled, but the comparison launcher is locked.
-    await waitFor(() => expect(document.querySelector('textarea')).not.toBeDisabled());
-    await waitFor(() => expect(
-      screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }),
-    ).toBeDisabled());
   });
 
   it('blocks a PDF retry before starting OpenRouter generation', async () => {
@@ -5822,63 +5581,6 @@ describe('HeraAi App', () => {
     expect(screen.queryByText(/Voice features use your Gemini API key/i)).not.toBeInTheDocument();
   });
 
-  it('reloads a both-resolved comparison without locking the composer', async () => {
-    currentStorage = {
-      theme: 'light',
-      startupBehavior: 'resume',
-      activeSessionId: 'both-session',
-      sessions: [{
-        id: 'both-session',
-        title: 'Both resolved',
-        updatedAt: Date.now(),
-        messages: [
-          { id: 'both-user', role: 'user', content: 'Which model writes better?', mode: 'chat' },
-          {
-            id: 'both-assistant:a', role: 'model', content: 'Answer A', status: 'done',
-            comparisonId: 'cmp-both', variantId: 'a', comparisonSlot: 'a',
-            comparisonSelected: true, selectable: false, contextExcluded: false,
-            model: 'gemini-3.6-flash', provider: 'gemini', startedAt: Date.now() - 8000, completedAt: Date.now() - 3000,
-          },
-          {
-            id: 'both-assistant:b', role: 'model', content: 'Answer B', status: 'done',
-            comparisonId: 'cmp-both', variantId: 'b', comparisonSlot: 'b',
-            comparisonSelected: true, selectable: false, contextExcluded: false,
-            model: 'gemini-3.7-flash', provider: 'gemini', startedAt: Date.now() - 8000, completedAt: Date.now() - 1000,
-          },
-        ],
-      }],
-    };
-
-    render(<App />);
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    expect(await screen.findByText('Answer A')).toBeInTheDocument();
-    expect(screen.getByText('Answer B')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-both-note')).toBeInTheDocument();
-    expect(screen.queryAllByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i }))
-      .toHaveLength(0);
-    expect(document.querySelector('textarea')).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i })).not.toBeDisabled();
-
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Follow up after reload' } });
-    fireEvent.click(getSendButton());
-
-    let followUpStart;
-    await waitFor(() => {
-      followUpStart = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START'
-          && message?.requestMessages?.some(item => item.content === 'Follow up after reload'));
-      expect(followUpStart).toBeDefined();
-    });
-    const followUpContents = followUpStart.requestMessages.map(item => item.content);
-    expect(followUpContents).toContain('Answer A');
-    expect(followUpContents).toContain('Answer B');
-    expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => (
-      message?.type === 'RESOLVE_COMPARISON_BOTH'
-    ))).toBe(false);
-  });
-
   it('pins the remaining read-aloud chunks to the fallback TTS model', async () => {
     await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
     const longAnswer = `${'A clear spoken sentence. '.repeat(120)}`;
@@ -6063,66 +5765,6 @@ describe('HeraAi App', () => {
     });
     await waitFor(() => expect(currentStorage.stats?.lifetime?.byOutcome?.completed).toBe(1));
     expect(currentStorage.stats.lifetime.successDurationMs).toBe(5000);
-  });
-
-  it('records each comparison variant separately with a single prompt', async () => {
-    render(<App />);
-    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: /Compare models|Modelleri karşılaştır/i }));
-    const dialog = await screen.findByRole('dialog', { name: /Compare two models|İki modeli karşılaştır/i });
-    const selects = within(dialog).getAllByRole('combobox');
-    fireEvent.change(selects[0], { target: { value: 'gemini:gemini-3.6-flash' } });
-    fireEvent.change(selects[1], { target: { value: 'gemini:gemini-3.7-flash' } });
-    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Which model writes better?' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /Start comparison|Karşılaştırmayı başlat/i }));
-
-    let startMessage;
-    await waitFor(() => {
-      startMessage = global.chrome.runtime.sendMessage.mock.calls
-        .map(([message]) => message)
-        .find(message => message?.type === 'HERA_GENERATION_START' && message?.kind === 'comparison');
-      expect(startMessage).toBeDefined();
-    });
-    const { jobId, sessionId, userMessageId, assistantMessageId } = startMessage;
-    const doneAt = Date.now();
-    emitRuntimeMessage({
-      type: 'DONE',
-      activeGeneration: {
-        jobId,
-        kind: 'comparison',
-        comparisonId: jobId,
-        sessionId,
-        userMessageId,
-        assistantMessageId,
-        mode: 'chat',
-        status: 'completed',
-        revision: 2,
-        content: '',
-        sources: [],
-        completedAt: doneAt,
-        variants: {
-          a: {
-            variantId: 'a', status: 'completed', content: 'Answer A', sources: [],
-            resolvedModel: null, revision: 2, errorCode: null, completedAt: doneAt,
-            model: 'gemini-3.6-flash', provider: 'gemini',
-          },
-          b: {
-            variantId: 'b', status: 'completed', content: 'Answer B', sources: [],
-            resolvedModel: null, revision: 2, errorCode: null, completedAt: doneAt,
-            model: 'gemini-3.7-flash', provider: 'gemini',
-          },
-        },
-      },
-    });
-
-    expect(await screen.findByText('Answer A')).toBeInTheDocument();
-    await waitFor(() => expect(currentStorage.stats?.lifetime?.byOutcome?.completed).toBe(2));
-    expect(currentStorage.stats.lifetime.prompts).toBe(1);
-    const rows = Object.values(currentStorage.stats.lifetime.models);
-    expect(rows).toHaveLength(2);
-    expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.6-flash', attempts: 1, successes: 1 }));
-    expect(rows).toContainEqual(expect.objectContaining({ modelId: 'gemini-3.7-flash', attempts: 1, successes: 1 }));
   });
 
   it('surfaces a failed storage write instead of losing the chat silently', async () => {

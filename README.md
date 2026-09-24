@@ -18,14 +18,13 @@ Private AI assistant living in Chrome's Side Panel. Chat with Gemini, OpenRouter
 
 ## Features
 
-- **Web Research mode** — globe button; Tavily search/extract with Gemini URL Context first.
+- **Web Research** — automatic per-message research: Tavily search/extract with Gemini URL Context first, silently skipped when Tavily is unavailable.
 - **Screen crop** — `captureVisibleTab` + canvas overlay; crops stored in `heraai-attachments` IndexedDB (not on `chrome://` pages).
 - **File attachments** — images (Gemini/OpenRouter), PDF + audio Gemini-only, Office text extraction.
 - **Voice** — Gemini-only STT/TTS.
 - **Sessions** — history overlay, chat search, import/export.
 - **Encrypted cloud sync** — settings, chats, stats, encrypted API keys, and attachment metadata across browsers; attachment files stay on the originating device, with per-chat device-only mode.
 - **Recovery and backup** — recovery-code device linking, device revocation, and encrypted full backup/restore.
-- **Compare + auto-route** — model comparison panel and automatic provider routing.
 - **Bilingual UI** — TR/EN via i18next; light/dark/system themes; stats and response-time display.
 - **Background** — service worker + offscreen generation worker + context menus.
 
@@ -56,7 +55,7 @@ manifest.json        MV3 (sidePanel, storage, identity, activeTab, scripting, co
 src/App.jsx          Side Panel React app
 src/background/      service worker
 src/offscreen/       generation worker
-src/components/      Settings, ModelSelector, ChatMessage, History, Comparison, Stats, ...
+src/components/      Settings, ModelSelector, ChatMessage, History, Stats, ...
 src/lib/             providerApi, models, keyManager, fileParsers, voiceApi, autoRouter, ...
 src/locales/         en.json, tr.json
 ```

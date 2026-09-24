@@ -1,8 +1,8 @@
 /**
  * HeraAi 1.10.0 — API anahtarı rotasyonu testleri (Aşama 9).
  *
- * Kapsam: iki modun sıralaması, deterministik eşitlik çözümü, karşılaştırma
- * rezervasyonu, akış ortasında anahtar sabitliği ve kullanım metadata'sı.
+ * Kapsam: iki modun sıralaması, deterministik eşitlik çözümü ve kullanım
+ * metadata'sı.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -15,7 +15,6 @@ import {
   orderByPrimary,
   orderByRotation,
   orderKeysForRequest,
-  reserveComparisonKeys,
   selectCandidates,
   usageMetadata,
   usageModeLabel,
@@ -169,27 +168,6 @@ describe('istek rezervasyonu', () => {
     const liste = [anahtar('a', { lastUsedAt: 9000 }), anahtar('b', { lastUsedAt: 100 })]
     const kira = createKeyLease({ keys: liste, mode: KEY_USAGE_MODE.BALANCED_ROTATION })
     expect(kira.current().id).toBe('b')
-  })
-})
-
-describe('karşılaştırma rezervasyonu', () => {
-  it('iki varyanta farklı anahtar verir', () => {
-    const liste = [anahtar('a', { createdAt: 1 }), anahtar('b', { createdAt: 2 })]
-    const [ilk, ikinci] = reserveComparisonKeys({ keys: liste, mode: 'primary', variants: 2 })
-    expect(ilk.id).toBe('a')
-    expect(ikinci.id).toBe('b')
-  })
-
-  it('tek anahtar varsa paylaştırır', () => {
-    const liste = [anahtar('tek', { createdAt: 1 })]
-    const [ilk, ikinci] = reserveComparisonKeys({ keys: liste, mode: 'primary', variants: 2 })
-    expect(ilk.id).toBe('tek')
-    expect(ikinci.id).toBe('tek')
-  })
-
-  it('anahtar yoksa null döner', () => {
-    const sonuc = reserveComparisonKeys({ keys: [], variants: 2 })
-    expect(sonuc).toEqual([null, null])
   })
 })
 

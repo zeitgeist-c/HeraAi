@@ -44,7 +44,6 @@ const KEYS_USED_IN_CODE = [
   'selectedModel',
   'selectedProvider',
   'modelSelectionMode',
-  'comparisonModelKeys',
   // background/service_worker.js (bağlam menüsü)
   'pendingPageUrl',
   // lib/keyManager.js
@@ -101,7 +100,6 @@ describe('syncContract sınıflandırması', () => {
   it.each([
     ['theme', SYNC_CLASS.SETTING],
     ['systemInstructionDefaultVersion', SYNC_CLASS.SETTING],
-    ['comparisonModelKeys', SYNC_CLASS.SETTING],
     ['sessions', SYNC_CLASS.ENTITY],
     ['geminiApiKeys', SYNC_CLASS.ENTITY],
     ['ollamaApiKeys', SYNC_CLASS.ENTITY],

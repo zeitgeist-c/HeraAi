@@ -8,7 +8,7 @@
  * - Havuzlar mutlak izole: her çağrı yalnız kendi sağlayıcısının listesiyle
  *   çalışır; başka sağlayıcının anahtarı listeye karışamaz.
  * - İstek ortasında anahtar değişmez: akış başladıktan sonra kullanılan anahtar
- *   sabit kalır (TTS parçaları, Tavily zinciri, karşılaştırma varyantları).
+ *   sabit kalır (TTS parçaları, Tavily zinciri).
  * - `primary` modunda ana anahtar önce gelir; `balanced_rotation` modunda en
  *   uzun süredir kullanılmayan anahtar öne geçer.
  */
@@ -88,8 +88,7 @@ export function orderKeysForRequest(keys, mode) {
  * @param {object} options
  * @param {Array} options.keys Sağlayıcının çözülmüş anahtarları.
  * @param {string} [options.mode] `primary` | `balanced_rotation`.
- * @param {string[]} [options.excludeIds] Bu istekte kullanılmayacak kimlikler
- *   (karşılaştırma modunda diğer varyanta rezerve edilenler).
+ * @param {string[]} [options.excludeIds] Bu istekte kullanılmayacak kimlikler.
  * @param {string[]} [options.reservedIds] Rezerve edilmiş kimlikler; varsa
  *   önce onlar denenir (akış ortasında anahtar değişmemesi için).
  */
@@ -133,21 +132,6 @@ export function createKeyLease({ keys, mode, excludeIds = [], count = 1 } = {}) 
     },
     used: () => rezerve.map(k => kimlik(k)),
   }
-}
-
-/**
- * Model karşılaştırma modu: aynı sağlayıcıyı kullanan iki varyant için farklı
- * anahtarlar rezerve edilir (yeterli anahtar varsa).
- */
-export function reserveComparisonKeys({ keys, mode, variants = 2 } = {}) {
-  const adet = Math.max(1, Number(variants) || 2)
-  const sirali = selectCandidates({ keys, mode })
-  const rezervasyonlar = []
-  for (let i = 0; i < adet; i += 1) {
-    // Yeterli anahtar yoksa ilk anahtar paylaşılır.
-    rezervasyonlar.push(sirali[i % Math.max(1, sirali.length)] || null)
-  }
-  return rezervasyonlar
 }
 
 /** Kullanım sonrası güncellenecek metadata (kasa `updateKeyMetadata` ile yazar). */

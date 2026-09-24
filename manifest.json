@@ -18,7 +18,6 @@
         "<all_urls>",
         "https://generativelanguage.googleapis.com/*",
         "https://api.tavily.com/*",
-        "https://html.duckduckgo.com/*",
         "https://openrouter.ai/*",
         "https://ollama.com/*",
         "https://*.firebaseio.com/*",

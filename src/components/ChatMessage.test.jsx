@@ -347,38 +347,16 @@ describe('ChatMessage copy actions', () => {
     expect(screen.getByTestId('auto-chain')).toHaveTextContent('Auto → Gemini 3.5 Flash Lite')
   })
 
-  it('offers the winning answer control for selectable comparison variants', () => {
-    const onSelectWinner = vi.fn()
-    const message = {
-      id: 22,
-      role: 'model',
-      content: 'Variant A',
-      status: 'done',
-      comparisonId: 'comparison-1',
-      variantId: 'a',
-      selectable: true,
-      model: 'gemini-3.6-flash',
-    }
-    render(<ChatMessage message={message} modelLabels={modelLabels} onSelectWinner={onSelectWinner} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /Continue with this answer|Bu yanıtla devam et/i }))
-
-    expect(onSelectWinner).toHaveBeenCalledWith(message)
-  })
-
-  it('dims context-excluded comparison losers', () => {
+  it('dims a message that is excluded from the request context', () => {
     render(<ChatMessage
       message={{
         id: 23,
         role: 'model',
-        content: 'Loser answer',
+        content: 'Excluded answer',
         status: 'done',
-        comparisonId: 'comparison-1',
-        variantId: 'b',
         contextExcluded: true,
       }}
       modelLabels={modelLabels}
-      onSelectWinner={vi.fn()}
     />)
 
     expect(screen.getByTestId('assistant-message')).toHaveAttribute('data-context-excluded', 'true')

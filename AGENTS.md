@@ -24,6 +24,7 @@ The application relies heavily on local Chrome storage for state persistence. Ke
 - `activeKeyIndex` (Int): Currently selected API key index.
 - `sessions` (Array): Chat history structured locally.
 - `theme` (String): UI theme (`light`, `dark`, or `system`).
+- `systemInstruction` (String) + `systemInstructionDefaultVersion` (Int): user-editable system prompt (Settings → Sistem Komutu). The shipped default lives in `src/lib/systemInstruction.js`; bumping `SYSTEM_INSTRUCTION_DEFAULT_VERSION` migrates an untouched install to the new default and lists the superseded text in `LEGACY_DEFAULT_SYSTEM_INSTRUCTIONS`, while a user-written instruction is preserved.
 
 ### 2. Screen Capture (Cropping)
 Hera allows users to crop sections of the active website.

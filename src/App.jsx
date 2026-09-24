@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, TextAlignStart, ArrowUpToLine, ArrowDownToLine, Columns2 } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, TextAlignStart, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import { notifyError, notifySuccess } from './lib/notify'
 
 import { useTranslation } from 'react-i18next'
@@ -13,8 +13,6 @@ import StatsPanel from './components/StatsPanel'
 import ChangelogPanel from './components/ChangelogPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
-import ComparisonPanel from './components/ComparisonPanel'
-import ComparisonResponse from './components/ComparisonResponse'
 import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
 import {
   DEFAULT_MODEL,
@@ -75,13 +73,6 @@ import {
   sanitizeRetiredModelSessions,
   stripRetiredModelProvenance,
 } from './lib/modelMigration'
-import {
-  COMPARISON_SLOTS,
-  allVariantsTerminal,
-  applyBothSelection,
-  applyWinnerSelection,
-  isComparisonJob,
-} from './lib/comparison'
 import { createAutoSyncScheduler, touchesSyncedKeys } from './lib/autoSyncScheduler'
 import { WHEEL_TARGET_INNER, resolveWheelTarget } from './lib/composerWheel'
 
@@ -240,14 +231,7 @@ function repairStoredSessions(sessions, counterRef, activeGeneration = null, new
       const belongsToActiveGeneration = (
         activeGeneration
         && session?.id === activeGeneration.sessionId
-        && (
-          message.id === activeGeneration.assistantMessageId
-          || (
-            isComparisonJob(activeGeneration)
-            && message.comparisonId === activeGeneration.comparisonId
-            && COMPARISON_SLOTS.includes(message.variantId)
-          )
-        )
+        && message.id === activeGeneration.assistantMessageId
         && (
           ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)
           || TERMINAL_GENERATION_STATUSES.has(activeGeneration.status)
@@ -389,8 +373,6 @@ function createAssistantMessage({
   selectionMode,
   selectionReasonCode,
   routerModel,
-  comparisonId,
-  comparisonSlot,
 }) {
   return {
     id,
@@ -408,13 +390,6 @@ function createAssistantMessage({
     ...(selectionMode === 'auto' ? { selectionMode: 'auto' } : {}),
     ...(selectionReasonCode ? { selectionReasonCode } : {}),
     ...(routerModel ? { routerModel } : {}),
-    ...(comparisonId ? {
-      comparisonId,
-      variantId: comparisonSlot,
-      comparisonSlot,
-      comparisonSelected: false,
-      contextExcluded: false,
-    } : {}),
   }
 }
 
@@ -509,11 +484,6 @@ function App() {
   const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDER)
-  const [showComparison, setShowComparison] = useState(false)
-  const [comparisonModelKeys, setComparisonModelKeys] = useState(() => (
-    MODEL_CATALOG.slice(0, 2).map(model => model.key)
-  ))
-  const [modelAvailability, setModelAvailability] = useState({})
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const composerInputRef = useRef(null)
@@ -533,7 +503,6 @@ function App() {
   const activeGenerationRef = useRef(null)
   const languageAppliedRef = useRef(false)
   const lastGenerationRevisionRef = useRef(0)
-  const variantSnapshotRevisionsRef = useRef(new Map())
   const finalizingGenerationRef = useRef(null)
   const finalizationPromiseRef = useRef(null)
   const finalizationRetryRef = useRef({ jobId: null, attempts: 0, timerId: null })
@@ -726,21 +695,6 @@ function App() {
     : chatSearchMatchIds.length === 0
       ? t('chat.search_no_results')
       : `${clampedChatSearchIndex + 1}/${chatSearchMatchIds.length}`
-  const unresolvedComparison = useMemo(() => {
-    const groups = new Map()
-    for (const message of messages) {
-      if (!message?.comparisonId || message.role !== 'model') continue
-      const group = groups.get(message.comparisonId) || []
-      group.push(message)
-      groups.set(message.comparisonId, group)
-    }
-    return Array.from(groups.entries()).reverse().find(([, variants]) => (
-      variants.length >= 2
-      && !variants.some(message => message.comparisonSelected === true)
-      && variants.every(message => ['done', 'error', 'cancelled', 'interrupted'].includes(message.status))
-      && variants.some(message => message.status === 'done')
-    ))?.[0] || null
-  }, [messages])
 
   const stepChatSearch = useCallback((delta) => {
     if (chatSearchMatchIds.length === 0) return
@@ -1849,171 +1803,11 @@ function App() {
 
   finalizeGenerationHandlerRef.current = finalizeGeneration
 
-  const handleComparisonVariantState = useCallback((incomingGeneration) => {
-    const variantId = incomingGeneration?.variantId
-    const comparisonId = incomingGeneration?.comparisonId
-    if (variantId == null || comparisonId == null) return false
-    if (!COMPARISON_SLOTS.includes(variantId)) return false
-    const currentGeneration = activeGenerationRef.current
-    if (currentGeneration?.jobId && currentGeneration.jobId !== incomingGeneration.jobId) return true
-    const revisionKey = `${incomingGeneration.jobId}:${variantId}`
-    const incomingRevision = Number(incomingGeneration.revision ?? incomingGeneration.rev ?? 0)
-    const lastRevision = variantSnapshotRevisionsRef.current.get(revisionKey) || 0
-    if (incomingRevision < lastRevision) return true
-    variantSnapshotRevisionsRef.current.set(revisionKey, Math.max(lastRevision, incomingRevision))
-    const content = typeof incomingGeneration.content === 'string' ? incomingGeneration.content : ''
-    const status = incomingGeneration.status === 'completed'
-      ? 'done'
-      : (incomingGeneration.status === 'cancelled' || incomingGeneration.status === 'error'
-        ? incomingGeneration.status
-        : (content ? 'streaming' : 'thinking'))
-    const patch = {
-      content,
-      status,
-      sources: Array.isArray(incomingGeneration.sources) ? incomingGeneration.sources : [],
-      errorCode: incomingGeneration.errorCode || incomingGeneration.code || null,
-      ...(typeof incomingGeneration.model === 'string' && incomingGeneration.model
-        ? { model: incomingGeneration.model } : {}),
-      ...(typeof incomingGeneration.provider === 'string' && incomingGeneration.provider
-        ? { provider: incomingGeneration.provider } : {}),
-      ...(typeof incomingGeneration.resolvedModel === 'string' && incomingGeneration.resolvedModel
-        ? { resolvedModel: incomingGeneration.resolvedModel } : {}),
-    }
-    const applyPatch = (messages) => (messages || []).map(message => {
-      if (message?.comparisonId !== comparisonId) return message
-      if ((message?.variantId || message?.comparisonSlot) !== variantId) return message
-      return { ...message, ...patch }
-    })
-    const sessionId = currentGeneration?.sessionId || activeSessionIdRef.current
-    if (!sessionId) return true
-    const storedSession = sessionsRef.current.find(session => session?.id === sessionId)
-    if (storedSession) {
-      mergeSessionMessages(sessionId, applyPatch(storedSession.messages))
-    }
-    if (sessionId === activeSessionIdRef.current) {
-      messagesRef.current = applyPatch(messagesRef.current)
-      if (mountedRef.current) setMessages(messagesRef.current)
-      setGenerating(true)
-    }
-    return true
-  }, [mergeSessionMessages, setGenerating])
-
-  const handleComparisonGenerationState = useCallback((incomingGeneration) => {
-    if (!isComparisonJob(incomingGeneration)) return false
-    const currentGeneration = activeGenerationRef.current
-    if (currentGeneration?.jobId && currentGeneration.jobId !== incomingGeneration.jobId) return true
-
-    const previousVariants = isComparisonJob(currentGeneration) ? currentGeneration.variants : {}
-    const variants = Object.fromEntries(COMPARISON_SLOTS.map(slot => {
-      const previous = previousVariants?.[slot] || {}
-      const incoming = incomingGeneration.variants?.[slot] || {}
-      const previousRevision = Number(previous.revision || 0)
-      const incomingRevision = Number(incoming.revision || 0)
-      return [slot, incomingRevision >= previousRevision ? { ...previous, ...incoming } : previous]
-    }))
-    const generation = { ...currentGeneration, ...incomingGeneration, variants }
-    activeGenerationRef.current = generation
-    lastGenerationRevisionRef.current = Math.max(
-      lastGenerationRevisionRef.current,
-      Number(generation.revision || 0),
-    )
-
-    const statusFor = variant => {
-      if (variant.status === 'completed') return 'done'
-      if (variant.status === 'queued' || variant.status === 'running') {
-        return variant.content ? 'streaming' : 'thinking'
-      }
-      return variant.status || 'error'
-    }
-    const comparisonId = generation.comparisonId || generation.jobId
-    const storedSession = sessionsRef.current.find(session => session.id === generation.sessionId)
-    if (storedSession) {
-      const nextMessages = (storedSession.messages || []).map(message => {
-        if (message.comparisonId !== comparisonId) return message
-        const variant = variants[message.variantId || message.comparisonSlot]
-        if (!variant) return message
-        const variantStatus = statusFor(variant)
-        return {
-          ...message,
-          content: variant.content || '',
-          status: variantStatus,
-          sources: Array.isArray(variant.sources) ? variant.sources : [],
-          errorCode: variant.errorCode || null,
-          model: variant.model || message.model,
-          provider: variant.provider || message.provider,
-          ...(variant.resolvedModel ? { resolvedModel: variant.resolvedModel } : {}),
-          completedAt: variantStatus === 'done'
-            ? (variant.completedAt ?? generation.completedAt ?? message.completedAt ?? null)
-            : null,
-        }
-      })
-      mergeSessionMessages(generation.sessionId, nextMessages)
-      if (generation.sessionId === activeSessionIdRef.current) {
-        messagesRef.current = nextMessages
-        setMessages(nextMessages)
-      }
-
-      const terminal = TERMINAL_GENERATION_STATUSES.has(generation.status)
-        || allVariantsTerminal(generation)
-      if (terminal) {
-        if (finalizingGenerationRef.current === generation.jobId) return true
-        finalizingGenerationRef.current = generation.jobId
-        void recordGenerationResults(
-          nextMessages
-            .filter(message => (
-              message.comparisonId === comparisonId
-              && message.role === 'model'
-              && ['done', 'error', 'cancelled'].includes(message.status)
-            ))
-            .map(message => {
-              const slot = message.variantId || message.comparisonSlot
-              const startedAt = Number(message.startedAt)
-              const completedAt = Number(message.completedAt)
-              return {
-                dedupId: `${generation.jobId}:${slot}`,
-                outcome: message.status === 'done' ? 'completed' : message.status,
-                modelId: message.resolvedModel || message.model,
-                provider: message.provider,
-                durationMs: message.status === 'done' && Number.isFinite(startedAt) && Number.isFinite(completedAt)
-                  ? Math.max(0, completedAt - startedAt)
-                  : null,
-              }
-            }),
-        )
-        void persistSessionMessages(generation.sessionId, nextMessages).then(async () => {
-          const response = await sendRuntimeMessage({
-            type: 'DONE_ACK',
-            jobId: generation.jobId,
-            finalRevision: generation.revision || 0,
-          })
-          if (response?.ok === true && activeGenerationRef.current?.jobId === generation.jobId) {
-            activeGenerationRef.current = null
-            lastGenerationRevisionRef.current = 0
-            setGenerating(false)
-          }
-        }).catch(error => console.error('Comparison finalization failed', error)).finally(() => {
-          if (finalizingGenerationRef.current === generation.jobId) {
-            finalizingGenerationRef.current = null
-          }
-        })
-      } else {
-        setGenerating(true)
-      }
-    }
-    return true
-  }, [mergeSessionMessages, persistSessionMessages, setGenerating])
 
   const handleGenerationState = useCallback((incomingGeneration) => {
     if (!incomingGeneration?.jobId) return
-    if (handleComparisonVariantState(incomingGeneration)) return
-    if (handleComparisonGenerationState(incomingGeneration)) return
     const currentGeneration = activeGenerationRef.current
     if (currentGeneration?.jobId && currentGeneration.jobId !== incomingGeneration.jobId) return
-    if (
-      currentGeneration?.kind === 'comparison'
-      && incomingGeneration?.variantId == null
-      && !isComparisonJob(incomingGeneration)
-    ) return
 
     const incomingRevision = Number(incomingGeneration.revision || 0)
     const isTerminal = TERMINAL_GENERATION_STATUSES.has(incomingGeneration.status)
@@ -2053,7 +1847,7 @@ function App() {
     }
 
     if (isTerminal) finalizeGeneration(generation)
-  }, [finalizeGeneration, handleComparisonGenerationState, handleComparisonVariantState, prepareGenerationPresentation, queueGenerationContent, setGenerating])
+  }, [finalizeGeneration, prepareGenerationPresentation, queueGenerationContent, setGenerating])
 
   generationStateHandlerRef.current = handleGenerationState
 
@@ -2133,20 +1927,6 @@ function App() {
         notifyError(t(`chat.generation_errors.${message.errorCode || 'already_running'}`, {
           defaultValue: t('chat.connection_error'),
         }))
-      } else if (message?.type === 'COMPARISON_WINNER_SELECTED') {
-        const { comparisonId, winnerSlot } = message
-        if (comparisonId && COMPARISON_SLOTS.includes(winnerSlot)) {
-          const nextMessages = applyWinnerSelection(messagesRef.current, comparisonId, winnerSlot)
-          messagesRef.current = nextMessages
-          if (mountedRef.current) setMessages(nextMessages)
-        }
-      } else if (message?.type === 'COMPARISON_BOTH_SELECTED') {
-        const { comparisonId } = message
-        if (comparisonId) {
-          const nextMessages = applyBothSelection(messagesRef.current, comparisonId)
-          messagesRef.current = nextMessages
-          if (mountedRef.current) setMessages(nextMessages)
-        }
       }
       return false
     }
@@ -2393,7 +2173,6 @@ function App() {
           'selectedModel',
           'selectedProvider',
           'modelSelectionMode',
-          'comparisonModelKeys',
           'apiKeyUsageMode',
         ])
       } catch (error) {
@@ -2446,12 +2225,6 @@ function App() {
       // Otomatik model seçimi 24.09.2026'da kaldırıldı. Depoda 'auto' kalmışsa
       // aşağıdaki karşılaştırma onu 'manual'e göç ettirir.
       const resolvedSelectionMode = 'manual'
-      const storedComparisonKeys = Array.isArray(result.comparisonModelKeys)
-        ? result.comparisonModelKeys.filter(key => MODEL_CATALOG.some(model => model.key === key)).slice(0, 2)
-        : []
-      if (storedComparisonKeys.length === 2 && storedComparisonKeys[0] !== storedComparisonKeys[1]) {
-        setComparisonModelKeys(storedComparisonKeys)
-      }
       if (
         result.selectedModel !== resolvedSelectedModel
         || result.selectedProvider !== resolvedSelection.provider
@@ -3823,52 +3596,11 @@ function App() {
     let mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
       : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
-    const requestedComparisonKeys = Array.isArray(actionOptions?.comparisonModelKeys)
-      ? actionOptions.comparisonModelKeys.slice(0, 2)
-      : []
-    const comparisonModels = requestedComparisonKeys.map(key => (
-      MODEL_CATALOG.find(model => model.key === key)
-    )).filter(Boolean)
-    const isComparison = comparisonModels.length === 2
-      && comparisonModels[0].key !== comparisonModels[1].key
     const hasModelOverride = MODELS.includes(actionOptions?.modelOverride)
-    if (unresolvedComparison) {
-      if (isComparison) {
-        notifyError(t('chat.comparison.locked'))
-        return
-      }
-      const pendingComparisonId = unresolvedComparison
-      let resolveResponse = null
-      try {
-        resolveResponse = await sendRuntimeMessage({
-          type: 'RESOLVE_COMPARISON_BOTH',
-          comparisonId: pendingComparisonId,
-          sessionId: requestSessionId,
-        })
-      } catch (_error) {
-        resolveResponse = null
-      }
-      if (resolveResponse?.ok !== true) {
-        notifyError(t('chat.connection_error'))
-        return
-      }
-      const bothMessages = applyBothSelection(messagesRef.current, pendingComparisonId)
-      messagesRef.current = bothMessages
-      if (mountedRef.current) setMessages(bothMessages)
-      const bothPersisted = await persistSessionMessages(requestSessionId, bothMessages)
-      if (!bothPersisted) {
-        notifyError(t('chat.connection_error'))
-        return
-      }
-    }
-    let requestModel = isComparison
-      ? comparisonModels[0].modelId
-      : hasModelOverride
+    let requestModel = hasModelOverride
       ? actionOptions.modelOverride
       : selectedModel
-    let requestProvider = isComparison
-      ? comparisonModels[0].provider
-      : getProviderForModel(requestModel, selectedProvider)
+    let requestProvider = getProviderForModel(requestModel, selectedProvider)
     let explicitUrls = []
     try {
       explicitUrls = mode === 'web'
@@ -3933,9 +3665,9 @@ function App() {
       displayContent = ''
     }
 
-    const selectedRequestModels = isComparison
-      ? comparisonModels
-      : [{ modelId: requestModel, provider: requestProvider, capabilities: MODEL_CAPABILITIES[requestModel] }]
+    const selectedRequestModels = [
+      { modelId: requestModel, provider: requestProvider, capabilities: MODEL_CAPABILITIES[requestModel] },
+    ]
     if (sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
       && selectedRequestModels.some(model => model.capabilities?.supportsPdf !== true)) {
       notifyError(t('chat.generation_errors.pdf_requires_gemini'))
@@ -4005,7 +3737,6 @@ function App() {
           mode,
           webUrls: requestUrls,
         })
-    const comparisonId = isComparison ? jobId : null
     const assistantMsg = createAssistantMessage({
       id: assistantMessageId,
       requestId,
@@ -4015,19 +3746,7 @@ function App() {
       provider: requestProvider,
       selectionMode: 'manual',
     })
-    const assistantMessages = isComparison
-      ? COMPARISON_SLOTS.map((slot, index) => createAssistantMessage({
-          id: `${assistantMessageId}:${slot}`,
-          requestId,
-          userMessageId,
-          startedAt,
-          model: comparisonModels[index].modelId,
-          provider: comparisonModels[index].provider,
-          selectionMode: 'manual',
-          comparisonId,
-          comparisonSlot: slot,
-        }))
-      : [assistantMsg]
+    const assistantMessages = [assistantMsg]
     const retryUserIndex = retryUserMessage
       ? messagesRef.current.findIndex(message => message.id === retryUserMessage.id)
       : -1
@@ -4069,22 +3788,6 @@ function App() {
       errorCode: null,
       cancelReason: null,
       updatedAt: startedAt,
-      ...(isComparison ? {
-        kind: 'comparison',
-        comparisonId,
-        variants: Object.fromEntries(COMPARISON_SLOTS.map((slot, index) => [slot, {
-          variantId: slot,
-          status: 'queued',
-          content: '',
-          sources: [],
-          resolvedModel: null,
-          revision: 0,
-          errorCode: null,
-          model: comparisonModels[index].modelId,
-          provider: comparisonModels[index].provider,
-        }])),
-        selection: { winnerSlot: null, decidedAt: null },
-      } : {}),
     }
 
     activeGenerationRef.current = generation
@@ -4095,7 +3798,7 @@ function App() {
     }
     finalizationRetryRef.current = { jobId: null, attempts: 0, timerId: null }
     presentationCancellationRef.current = null
-    streamTargetMessageIdRef.current = isComparison ? null : assistantMessageId
+    streamTargetMessageIdRef.current = assistantMessageId
     streamBufferRef.current = ''
     displayedAssistantContentRef.current = ''
     streamLastDisplayAtRef.current = 0
@@ -4120,9 +3823,7 @@ function App() {
       if (storedSession) {
         let found = false
         let failedMessages = (storedSession.messages || []).map(message => {
-          const matchesAssistant = isComparison
-            ? message.comparisonId === comparisonId
-            : message.id === assistantMessageId
+          const matchesAssistant = message.id === assistantMessageId
           if (!matchesAssistant || message.role !== 'model') return message
           found = true
           return {
@@ -4131,7 +3832,7 @@ function App() {
             errorCode,
           }
         })
-        if (!found && !isComparison) {
+        if (!found) {
           failedMessages = [
             ...failedMessages,
             {
@@ -4217,15 +3918,6 @@ function App() {
         activeAttachmentIds: nextActiveAttachmentIds,
         activeWebUrls: nextActiveWebUrls,
         webContext,
-        ...(isComparison ? {
-          kind: 'comparison',
-          comparisonId,
-          variants: COMPARISON_SLOTS.map((slot, index) => ({
-            variantId: slot,
-            model: comparisonModels[index].modelId,
-            provider: comparisonModels[index].provider,
-          })),
-        } : {}),
       })
       if (response?.activeGeneration) {
         await applyAuthoritativeStartState(
@@ -4268,7 +3960,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, selectedModel, selectedProvider, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, selectedModel, selectedProvider, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -4896,64 +4588,6 @@ function App() {
     }
   }
 
-  const comparisonCandidates = localizedModelCatalog.map(model => {
-    const hasPdf = attachments.some(attachment => attachment?.mimeType === 'application/pdf')
-    const hasImage = attachments.some(attachment => attachment?.mimeType?.startsWith('image/'))
-    const unavailable = modelAvailability[model.key]?.hasKey === false
-    const incompatible = (hasPdf && model.capabilities?.supportsPdf !== true)
-      || (hasImage && model.capabilities?.supportsImage !== true)
-    return {
-      ...model,
-      disabled: unavailable || incompatible,
-      disabledReason: incompatible ? t('chat.comparison.incompatible') : undefined,
-    }
-  })
-
-  const openComparisonPanel = async () => {
-    if (isGenerating || unresolvedComparison) return
-    setShowComparison(true)
-    try {
-      const response = await sendRuntimeMessage({ type: 'GET_MODEL_AVAILABILITY' })
-      const availability = Object.fromEntries((response?.models || []).map(model => [
-        model.modelKey,
-        model,
-      ]))
-      if (mountedRef.current) setModelAvailability(availability)
-    } catch (error) {
-      console.error('Model availability could not be loaded', error)
-    }
-  }
-
-  const startComparison = pair => {
-    setComparisonModelKeys(pair)
-    setShowComparison(false)
-    if (chrome?.storage?.local) void chrome.storage.local.set({ comparisonModelKeys: pair })
-    void handleSend(null, { comparisonModelKeys: pair })
-  }
-
-  const selectComparisonWinner = async (comparisonId, winnerSlot) => {
-    const response = await sendRuntimeMessage({
-      type: 'SELECT_COMPARISON_WINNER',
-      comparisonId,
-      winnerSlot,
-      sessionId: activeSessionIdRef.current,
-    })
-    if (response?.ok !== true) {
-      notifyError(t('chat.connection_error'))
-      return
-    }
-    const nextMessages = applyWinnerSelection(messagesRef.current, comparisonId, winnerSlot)
-    messagesRef.current = nextMessages
-    setMessages(nextMessages)
-    sessionsRef.current = sessionsRef.current.map(session => session.id === activeSessionIdRef.current
-      ? { ...session, messages: nextMessages, updatedAt: Date.now() }
-      : session)
-    setSessions(sessionsRef.current)
-    void Promise.resolve(
-      persistSessionMessages(activeSessionIdRef.current, nextMessages),
-    ).catch(error => console.error('Comparison winner persist failed', error))
-  }
-
   return (
     <div
       className="hera-panel relative flex h-screen min-h-0 min-w-0 flex-col overflow-hidden text-foreground"
@@ -4973,14 +4607,6 @@ function App() {
           </div>
         </div>
       )}
-      <ComparisonPanel
-        open={showComparison}
-        candidates={comparisonCandidates}
-        initialPair={comparisonModelKeys}
-        availability={modelAvailability}
-        onStart={startComparison}
-        onClose={() => setShowComparison(false)}
-      />
       <AppHeader
         activeSessionTitle={activeSessionTitle}
         onRenameSession={(nextTitle) => renameSession(activeSessionId, nextTitle)}
@@ -5047,30 +4673,6 @@ function App() {
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-5 pb-8">
             {messages.map((msg, idx) => {
-              if (msg.comparisonId && (msg.variantId || msg.comparisonSlot) === 'b') return null
-              if (msg.comparisonId && (msg.variantId || msg.comparisonSlot) === 'a') {
-                const comparisonMessages = messages.filter(message => (
-                  message.comparisonId === msg.comparisonId && message.role === 'model'
-                ))
-                return (
-                  <ComparisonResponse
-                    key={msg.comparisonId}
-                    messages={comparisonMessages}
-                    onSelect={selectComparisonWinner}
-                    onEdit={handleEditMessage}
-                    onRetry={handleRetryMessage}
-                    retryModels={localizedModelCatalog}
-                    modelLabels={localizedModelLabels}
-                    currentModel={selectedModel}
-                    retryDisabled={isGenerating || Boolean(unresolvedComparison)}
-                    showSources={appConfig.showSources}
-                    speechEnabled
-                    speechDisabled={isGenerating || dictationPhase !== 'idle'}
-                    speechStatus="idle"
-                    onToggleSpeech={handleToggleSpeech}
-                  />
-                )
-              }
               return (
                 <ChatMessage
                   key={msg.id ?? idx}
@@ -5250,16 +4852,6 @@ function App() {
                   : dictationPhase === 'recording'
                     ? <Square className="h-3.5 w-3.5 fill-current" />
                     : <Mic className="h-4 w-4" />}
-              </button>
-              <button
-                type="button"
-                title={t('chat.comparison.open')}
-                aria-label={t('chat.comparison.open')}
-                onClick={openComparisonPanel}
-                disabled={isGenerating || dictationPhase !== 'idle' || Boolean(unresolvedComparison)}
-                className={getQuickActionClass(showComparison)}
-              >
-                <Columns2 className="h-4 w-4" />
               </button>
               {dictationPhase === 'recording' && (
                 <span className="shrink-0 px-1 text-[10px] font-medium tabular-nums text-destructive">
