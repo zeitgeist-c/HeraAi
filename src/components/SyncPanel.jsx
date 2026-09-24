@@ -23,21 +23,8 @@ import { useTranslation } from 'react-i18next'
 
 import { AUTO_SYNC_OPTIONS_MINUTES, normalizeAutoSyncMinutes } from '../lib/autoSyncScheduler'
 import { notifyError, notifySuccess } from '../lib/notify'
+import { SYNC_CHANNEL_LOST, describeRuntimeError, pollForResult, sendRuntimeMessage } from '../lib/runtimeChannel'
 import { MAX_DEVICE_LABEL_LENGTH } from '../lib/syncModel'
-
-function sendMessage(message) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage(message, response => {
-        const error = chrome.runtime?.lastError
-        if (error) reject(new Error(error.message))
-        else resolve(response)
-      })
-    } catch (error) {
-      reject(error)
-    }
-  })
-}
 
 function formatDate(value) {
   if (!value) return '—'
@@ -76,17 +63,17 @@ function SyncPanel() {
   const renameInputRef = useRef(null)
 
   const refresh = useCallback(async () => {
-    const response = await sendMessage({ type: 'SYNC_GET_STATUS' })
+    const response = await sendRuntimeMessage({ type: 'SYNC_GET_STATUS' })
     if (!response?.ok) throw new Error(response?.errorCode || 'sync_failed')
     setStatus(response.status)
     if (response.status?.linked) {
-      const deviceResponse = await sendMessage({ type: 'SYNC_LIST_DEVICES' })
+      const deviceResponse = await sendRuntimeMessage({ type: 'SYNC_LIST_DEVICES' })
       if (deviceResponse?.ok) setDevices(deviceResponse.devices || [])
     } else {
       setDevices([])
     }
     try {
-      const autoResponse = await sendMessage({ type: 'SYNC_GET_AUTO_SETTINGS' })
+      const autoResponse = await sendRuntimeMessage({ type: 'SYNC_GET_AUTO_SETTINGS' })
       if (autoResponse?.ok) setAutoSettings(autoResponse)
     } catch {
       // Ayar okunamazsa panel çalışmaya devam eder; varsayılan aralık geçerli olur.
@@ -95,13 +82,19 @@ function SyncPanel() {
 
   useEffect(() => {
     refresh().catch(error => {
-      setStatus({ signedIn: false, state: 'error', lastError: error.message })
+      // Ham Chrome metni panele taşınmaz; kod haritası üzerinden gösterilir.
+      setStatus({ signedIn: false, state: 'error', lastError: describeRuntimeError(error) })
     })
   }, [refresh])
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.focus()
   }, [renamingId])
+
+  // Hata kodu -> arayüz metni. Ham Chrome metinleri koda indirgendiği için
+  // ekrana yalnızca iki dilde karşılığı yazılmış cümleler çıkar.
+  const syncErrorMessage = code => t(`setup.sync.errors.${code}`, { defaultValue: '' })
+    || t('setup.sync.error', { code })
 
   const perform = async (name, action, successMessage) => {
     setBusy(name)
@@ -112,74 +105,155 @@ function SyncPanel() {
       await refresh()
       return response
     } catch (error) {
-      const translated = t(`setup.sync.errors.${error.message}`, { defaultValue: '' })
-      notifyError(translated || t('setup.sync.error', { code: error.message }))
+      notifyError(syncErrorMessage(describeRuntimeError(error)))
       return null
     } finally {
       setBusy(null)
     }
   }
 
-  const handleSignIn = () => perform(
-    'signin',
-    () => sendMessage({ type: 'AUTH_SIGN_IN' }),
-    t('setup.sync.signed_in'),
-  )
+  // Google girişi: panel, giriş penceresi açıkken mesaj kanalına bağlı beklemez.
+  // Kanal koparsa (Chrome arka plan servisini kapatmış olabilir) girişin gerçekten
+  // tamamlanıp tamamlanmadığı taze bir oturum sorgusuyla doğrulanır.
+  const handleSignIn = async () => {
+    setBusy('signin')
+    try {
+      const response = await sendRuntimeMessage({ type: 'AUTH_SIGN_IN' })
+      if (!response?.ok) throw new Error(response?.errorCode || 'auth_failed')
+      notifySuccess(t('setup.sync.signed_in'))
+      await refresh()
+      return response
+    } catch (error) {
+      const code = describeRuntimeError(error)
+      if (code === SYNC_CHANNEL_LOST) {
+        const user = await pollForResult({
+          check: async () => {
+            const state = await sendRuntimeMessage({ type: 'AUTH_GET_STATE' })
+            return state?.user || null
+          },
+        })
+        if (user) {
+          notifySuccess(t('setup.sync.signed_in'))
+          await refresh()
+          return { ok: true, user }
+        }
+        notifyError(t('setup.sync.sign_in_unfinished'))
+        return null
+      }
+      notifyError(syncErrorMessage(code))
+      return null
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const handleSignOut = () => perform(
     'signout',
-    () => sendMessage({ type: 'AUTH_SIGN_OUT' }),
+    () => sendRuntimeMessage({ type: 'AUTH_SIGN_OUT' }),
     t('setup.sync.signed_out'),
   )
 
+  // Şifreli alan kurulumu: kanal koptuğunda alan gerçekten oluşmuş olabilir ama
+  // kurtarma kodu panele ulaşmaz. Kod yalnızca yanıtla gösterildiği için
+  // kullanıcıya yeni kod oluşturması açıkça söylenir.
   const handleInitialize = async () => {
-    const response = await perform(
-      'initialize',
-      () => sendMessage({ type: 'SYNC_INITIALIZE' }),
-      t('setup.sync.initialized'),
-    )
-    if (response?.recoveryCode) setRecoveryCode(response.recoveryCode)
+    setBusy('initialize')
+    try {
+      const response = await sendRuntimeMessage({ type: 'SYNC_INITIALIZE' })
+      if (!response?.ok) throw new Error(response?.errorCode || 'sync_failed')
+      if (response.recoveryCode) setRecoveryCode(response.recoveryCode)
+      notifySuccess(t('setup.sync.initialized'))
+      await refresh()
+      return response
+    } catch (error) {
+      const code = describeRuntimeError(error)
+      if (code === SYNC_CHANNEL_LOST) {
+        const created = await pollForResult({
+          check: async () => {
+            const current = await sendRuntimeMessage({ type: 'SYNC_GET_STATUS' })
+            return current?.ok && current.status?.accountExists === true ? current.status : null
+          },
+        })
+        if (created) {
+          notifyError(t('setup.sync.initialized_without_code'))
+          await refresh()
+          return { ok: true, accountExists: true }
+        }
+      }
+      notifyError(syncErrorMessage(code))
+      return null
+    } finally {
+      setBusy(null)
+    }
   }
 
   const handleLink = () => perform(
     'link',
-    () => sendMessage({ type: 'SYNC_LINK_DEVICE', recoveryCode: recoveryInput }),
+    () => sendRuntimeMessage({ type: 'SYNC_LINK_DEVICE', recoveryCode: recoveryInput }),
     t('setup.sync.linked'),
   )
 
-  const handleSync = () => perform(
-    'sync',
-    () => sendMessage({ type: 'SYNC_NOW' }),
-    t('setup.sync.completed'),
-  )
+  // Şimdi eşitle: kanal koptuğunda eşitleme servis tarafında tamamlanmış olabilir.
+  // Son eşitleme damgası ilerlediyse iş başarılı sayılır, kullanıcı boşuna tekrar basmaz.
+  const handleSync = async () => {
+    const previousSyncAt = Number(status?.lastSyncAt) || 0
+    setBusy('sync')
+    try {
+      const response = await sendRuntimeMessage({ type: 'SYNC_NOW' })
+      if (!response?.ok) throw new Error(response?.errorCode || 'sync_failed')
+      notifySuccess(t('setup.sync.completed'))
+      await refresh()
+      return response
+    } catch (error) {
+      const code = describeRuntimeError(error)
+      if (code === SYNC_CHANNEL_LOST) {
+        const fresh = await pollForResult({
+          check: async () => {
+            const current = await sendRuntimeMessage({ type: 'SYNC_GET_STATUS' })
+            const lastSyncAt = Number(current?.status?.lastSyncAt) || 0
+            return current?.ok && lastSyncAt > previousSyncAt ? current.status : null
+          },
+        })
+        if (fresh) {
+          notifySuccess(t('setup.sync.completed'))
+          await refresh()
+          return { ok: true, status: fresh }
+        }
+      }
+      notifyError(syncErrorMessage(code))
+      return null
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const handlePause = () => perform(
     'pause',
-    () => sendMessage({ type: 'SYNC_SET_PAUSED', paused: !status?.paused }),
+    () => sendRuntimeMessage({ type: 'SYNC_SET_PAUSED', paused: !status?.paused }),
     status?.paused ? t('setup.sync.resumed') : t('setup.sync.paused'),
   )
 
   const handleAutoInterval = minutes => perform(
     `auto:${minutes}`,
-    () => sendMessage({ type: 'SYNC_SET_AUTO_INTERVAL', minutes }),
+    () => sendRuntimeMessage({ type: 'SYNC_SET_AUTO_INTERVAL', minutes }),
     t('setup.sync.auto_sync_saved'),
   )
 
   const handleDisconnect = () => perform(
     'disconnect',
-    () => sendMessage({ type: 'SYNC_DISCONNECT' }),
+    () => sendRuntimeMessage({ type: 'SYNC_DISCONNECT' }),
     t('setup.sync.disconnected'),
   )
 
   const handleRevoke = deviceId => perform(
     `revoke:${deviceId}`,
-    () => sendMessage({ type: 'SYNC_REVOKE_DEVICE', deviceId }),
+    () => sendRuntimeMessage({ type: 'SYNC_REVOKE_DEVICE', deviceId }),
     t('setup.sync.device_revoked'),
   )
 
   const handleToggleDevice = device => perform(
     `device:${device.id}`,
-    () => sendMessage({
+    () => sendRuntimeMessage({
       type: 'SYNC_SET_DEVICE_ENABLED',
       deviceId: device.id,
       enabled: Boolean(device.disabledAt),
@@ -205,7 +279,7 @@ function SyncPanel() {
     if (!next || next === current) return
     await perform(
       `rename:${device.id}`,
-      () => sendMessage({ type: 'SYNC_RENAME_DEVICE', deviceId: device.id, label: next }),
+      () => sendRuntimeMessage({ type: 'SYNC_RENAME_DEVICE', deviceId: device.id, label: next }),
       t('setup.sync.renamed'),
     )
   }
@@ -214,7 +288,7 @@ function SyncPanel() {
     if (!globalThis.confirm(t('setup.sync.regenerate_recovery_confirm'))) return
     const response = await perform(
       'recovery-regenerate',
-      () => sendMessage({ type: 'SYNC_REGENERATE_RECOVERY' }),
+      () => sendRuntimeMessage({ type: 'SYNC_REGENERATE_RECOVERY' }),
       t('setup.sync.recovery_regenerated'),
     )
     if (response?.recoveryCode) setRecoveryCode(response.recoveryCode)
@@ -224,7 +298,7 @@ function SyncPanel() {
     if (!globalThis.confirm(t('setup.sync.legacy_cleanup_confirm'))) return
     const response = await perform(
       'legacy-cleanup',
-      () => sendMessage({ type: 'SYNC_CLEAN_LEGACY_CLOUD_DATA' }),
+      () => sendRuntimeMessage({ type: 'SYNC_CLEAN_LEGACY_CLOUD_DATA' }),
       t('setup.sync.legacy_cleanup_completed'),
     )
     if (response?.counts) setCleanupResult(response.counts)
@@ -233,7 +307,7 @@ function SyncPanel() {
   const handleExportBackup = async () => {
     const response = await perform(
       'backup-export',
-      () => sendMessage({ type: 'SYNC_EXPORT_BACKUP' }),
+      () => sendRuntimeMessage({ type: 'SYNC_EXPORT_BACKUP' }),
       t('setup.sync.backup_exported'),
     )
     if (!response?.backup) return
@@ -254,11 +328,12 @@ function SyncPanel() {
       const backup = JSON.parse(await file.text())
       await perform(
         'backup-import',
-        () => sendMessage({ type: 'SYNC_IMPORT_BACKUP', backup }),
+        () => sendRuntimeMessage({ type: 'SYNC_IMPORT_BACKUP', backup }),
         t('setup.sync.backup_imported'),
       )
-    } catch (error) {
-      notifyError(t('setup.sync.error', { code: error.message }))
+    } catch {
+      // Bozuk/yanlış dosyada ayrıştırıcının ham İngilizce metni gösterilmez.
+      notifyError(t('setup.sync.errors.backup_invalid'))
     }
   }
 
@@ -275,8 +350,11 @@ function SyncPanel() {
         </div>
         <button type="button" onClick={handleSignIn} disabled={busy !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground disabled:opacity-50">
           {busy === 'signin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-          {t('setup.sync.sign_in')}
+          {busy === 'signin' ? t('setup.sync.sign_in_pending') : t('setup.sync.sign_in')}
         </button>
+        {busy === 'signin' && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{t('setup.sync.sign_in_waiting')}</p>
+        )}
       </div>
     )
   }
