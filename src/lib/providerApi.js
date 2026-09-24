@@ -1,7 +1,7 @@
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const OPENROUTER_MODEL = 'openrouter/free'
 export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api'
-export const OLLAMA_CLOUD_MODEL = 'nemotron-3-ultra'
+export const OLLAMA_CLOUD_MODEL = 'gemma4:31b'
 export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
 
 const REQUEST_TIMEOUT_MS = 180_000

@@ -16,11 +16,14 @@ const headerProps = {
   onStats: vi.fn(),
 }
 
+// Geçmişte yalnız başlamış sohbetler listelenir; kurgu verisi de en az bir
+// kullanıcı mesajı taşımalı.
+const startedMessage = (id) => [{ id, role: 'user', content: `Question ${id}` }]
 const sessions = [
-  { id: 'other-old', title: 'Other old', updatedAt: 100, isStarred: false },
-  { id: 'star-old', title: 'Star old', updatedAt: 200, isStarred: true },
-  { id: 'other-new', title: 'Other new', updatedAt: 400, isStarred: false },
-  { id: 'star-new', title: 'Star new', updatedAt: 300, isStarred: true },
+  { id: 'other-old', title: 'Other old', updatedAt: 100, isStarred: false, messages: startedMessage('m1') },
+  { id: 'star-old', title: 'Star old', updatedAt: 200, isStarred: true, messages: startedMessage('m2') },
+  { id: 'other-new', title: 'Other new', updatedAt: 400, isStarred: false, messages: startedMessage('m3') },
+  { id: 'star-new', title: 'Star new', updatedAt: 300, isStarred: true, messages: startedMessage('m4') },
 ]
 
 describe('session management UI', () => {
@@ -170,6 +173,59 @@ describe('session management UI', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove star' })[0])
     expect(onToggleStar).toHaveBeenCalledWith('star-new')
+  })
+
+  it('hides chats that never started from the history list', () => {
+    render(
+      <HistoryOverlay
+        sessions={[
+          ...sessions,
+          {
+            id: 'never-started',
+            title: 'New Chat',
+            updatedAt: 500,
+            isStarred: false,
+            messages: [{ id: 'welcome', role: 'model', content: 'Welcome' }],
+          },
+        ]}
+        activeSessionId="star-new"
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleStar={vi.fn()}
+        onRequestBulkDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText('New Chat')).toBeNull()
+    expect(screen.getByText('Other new')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when every stored chat never started', () => {
+    render(
+      <HistoryOverlay
+        sessions={[
+          {
+            id: 'never-started',
+            title: 'New Chat',
+            updatedAt: 500,
+            isStarred: false,
+            messages: [{ id: 'welcome', role: 'model', content: 'Welcome' }],
+          },
+        ]}
+        activeSessionId="never-started"
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleStar={vi.fn()}
+        onRequestBulkDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('No chat history found.')).toBeInTheDocument()
+    expect(screen.queryByText('New Chat')).toBeNull()
   })
 
   it('filters sessions by title through the history search box', () => {

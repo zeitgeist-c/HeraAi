@@ -6,16 +6,17 @@ export const PROVIDERS = Object.freeze({
 
 export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
-export const DEFAULT_OLLAMA_MODEL = 'nemotron-3-ultra'
+export const DEFAULT_OLLAMA_MODEL = 'gemma4:31b'
 export const AUTO_MODEL_KEY = 'auto'
-export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud'])
+export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud', 'nemotron-3-ultra'])
 
-const geminiModel = (modelId, label, speed, routing = {}) => ({
+const geminiModel = (modelId, label, speed, routing = {}, purposeKey) => ({
   key: `${PROVIDERS.GEMINI}:${modelId}`,
   provider: PROVIDERS.GEMINI,
   modelId,
   label,
   ...(speed ? { speed } : {}),
+  ...(purposeKey ? { purposeKey } : {}),
   routing,
   capabilities: {
     supportsImage: true,
@@ -25,18 +26,19 @@ const geminiModel = (modelId, label, speed, routing = {}) => ({
 })
 
 export const MODEL_CATALOG = Object.freeze([
-  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', 'fast', { quality: 1, coding: 1 }),
-  geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite', 'fast', { quality: 2, coding: 2 }),
-  geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash', 'medium', { quality: 3, coding: 3 }),
-  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'slow', { quality: 4, coding: 4 }),
-  geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'slow', { quality: 5, coding: 5 }),
+  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', 'fast', { quality: 1, coding: 1 }, 'chat.model_purposes.quick_drafts'),
+  geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite', 'fast', { quality: 2, coding: 2 }, 'chat.model_purposes.daily_chat'),
+  geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash', 'medium', { quality: 3, coding: 3 }, 'chat.model_purposes.balanced'),
+  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'slow', { quality: 4, coding: 4 }, 'chat.model_purposes.docs_images'),
+  geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'slow', { quality: 5, coding: 5 }, 'chat.model_purposes.most_capable'),
   {
-    key: `${PROVIDERS.OPENROUTER}:nex-agi/nex-n2.5-pro:free`,
+    key: `${PROVIDERS.OPENROUTER}:google/gemma-4-26b-a4b-it:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'nex-agi/nex-n2.5-pro:free',
-    label: 'Nex-N2.5 Pro',
-    speed: 'slow',
-    routing: { quality: 5, coding: 5 },
+    modelId: 'google/gemma-4-26b-a4b-it:free',
+    label: 'Gemma 4 26B',
+    speed: 'fast',
+    purposeKey: 'chat.model_purposes.fast_vision',
+    routing: { quality: 3, coding: 3 },
     capabilities: {
       supportsImage: true,
       supportsPdf: false,
@@ -48,6 +50,7 @@ export const MODEL_CATALOG = Object.freeze([
     provider: PROVIDERS.OPENROUTER,
     modelId: 'qwen/qwen3.8-27b:free',
     label: 'Qwen3.8 27B',
+    purposeKey: 'chat.model_purposes.code_images',
     speed: 'medium',
     routing: { quality: 4, coding: 4 },
     capabilities: {
@@ -57,14 +60,15 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3.5-lightning:free`,
+    key: `${PROVIDERS.OPENROUTER}:nex-agi/nex-n2.5-pro:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'nvidia/nemotron-3.5-lightning:free',
-    label: 'Nemotron 3.5 Lightning',
-    speed: 'fast',
-    routing: { quality: 3, coding: 3 },
+    modelId: 'nex-agi/nex-n2.5-pro:free',
+    label: 'Nex-N2.5 Pro',
+    purposeKey: 'chat.model_purposes.code_analysis',
+    speed: 'slow',
+    routing: { quality: 5, coding: 5 },
     capabilities: {
-      supportsImage: false,
+      supportsImage: true,
       supportsPdf: false,
       supportsUrlContext: false,
     },
@@ -75,6 +79,7 @@ export const MODEL_CATALOG = Object.freeze([
     modelId: 'gpt-oss:120b',
     label: 'GPT-OSS 120B',
     labelKey: 'chat.model_labels.gpt_oss_120b',
+    purposeKey: 'chat.model_purposes.general_chat',
     speed: 'fast',
     routing: { quality: 3, coding: 3 },
     capabilities: {
@@ -89,6 +94,7 @@ export const MODEL_CATALOG = Object.freeze([
     modelId: 'nemotron-3-super',
     label: 'Nemotron 3 Super',
     labelKey: 'chat.model_labels.nemotron_3_super',
+    purposeKey: 'chat.model_purposes.balanced',
     speed: 'medium',
     routing: { quality: 4, coding: 4 },
     capabilities: {
@@ -98,15 +104,15 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:nemotron-3-ultra`,
+    key: `${PROVIDERS.OLLAMA}:gemma4:31b`,
     provider: PROVIDERS.OLLAMA,
-    modelId: 'nemotron-3-ultra',
-    label: 'Nemotron 3 Ultra',
-    labelKey: 'chat.model_labels.nemotron_3_ultra',
+    modelId: 'gemma4:31b',
+    label: 'Gemma 4 31B',
+    purposeKey: 'chat.model_purposes.strong_visual',
     speed: 'slow',
     routing: { quality: 5, coding: 5 },
     capabilities: {
-      supportsImage: false,
+      supportsImage: true,
       supportsPdf: false,
       supportsUrlContext: false,
     },

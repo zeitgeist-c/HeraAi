@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import tr from '../locales/tr.json'
+import en from '../locales/en.json'
+
 import {
   AUTO_MODEL_KEY,
   DEFAULT_MODEL,
@@ -20,12 +23,12 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.6-flash'],
       ['gemini', 'gemini-3.7-flash'],
       ['gemini', 'gemini-3.8-flash'],
-      ['openrouter', 'nex-agi/nex-n2.5-pro:free'],
+      ['openrouter', 'google/gemma-4-26b-a4b-it:free'],
       ['openrouter', 'qwen/qwen3.8-27b:free'],
-      ['openrouter', 'nvidia/nemotron-3.5-lightning:free'],
+      ['openrouter', 'nex-agi/nex-n2.5-pro:free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-super'],
-      ['ollama', 'nemotron-3-ultra'],
+      ['ollama', 'gemma4:31b'],
     ])
   })
 
@@ -40,10 +43,10 @@ describe('provider-aware model catalog', () => {
       'gemini-3.8-flash': 'slow',
       'nex-agi/nex-n2.5-pro:free': 'slow',
       'qwen/qwen3.8-27b:free': 'medium',
-      'nvidia/nemotron-3.5-lightning:free': 'fast',
+      'google/gemma-4-26b-a4b-it:free': 'fast',
       'gpt-oss:120b': 'fast',
       'nemotron-3-super': 'medium',
-      'nemotron-3-ultra': 'slow',
+      'gemma4:31b': 'slow',
     })
   })
 
@@ -58,30 +61,42 @@ describe('provider-aware model catalog', () => {
     })
   })
 
+  it('gives every model a purpose label that exists in both locales', () => {
+    expect(MODEL_CATALOG.every(model => typeof model.purposeKey === 'string' && model.purposeKey.length > 0)).toBe(true)
+    const read = (source, path) => path.split('.').reduce((acc, part) => acc?.[part], source)
+    MODEL_CATALOG.forEach(model => {
+      expect(read(tr, model.purposeKey), `tr: ${model.purposeKey}`).toBeTruthy()
+      expect(read(en, model.purposeKey), `en: ${model.purposeKey}`).toBeTruthy()
+    })
+  })
+
   it('declares PDF as Gemini-only and marks text-only models accurately', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
-      'nvidia/nemotron-3.5-lightning:free',
       'gpt-oss:120b',
       'nemotron-3-super',
-      'nemotron-3-ultra',
     ])
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsPdf).every(model => model.provider === 'gemini')).toBe(true)
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage && model.provider === 'openrouter').map(model => model.modelId)).toEqual([
-      'nex-agi/nex-n2.5-pro:free',
+      'google/gemma-4-26b-a4b-it:free',
       'qwen/qwen3.8-27b:free',
+      'nex-agi/nex-n2.5-pro:free',
     ])
     expect(getProviderForModel('nex-agi/nex-n2.5-pro:free')).toBe('openrouter')
     expect(getProviderForModel('qwen/qwen3.8-27b:free')).toBe('openrouter')
-    expect(getProviderForModel('nvidia/nemotron-3.5-lightning:free')).toBe('openrouter')
+    expect(getProviderForModel('google/gemma-4-26b-a4b-it:free')).toBe('openrouter')
     expect(getProviderForModel('nemotron-3-super')).toBe('ollama')
-    expect(getProviderForModel('nemotron-3-ultra')).toBe('ollama')
+    expect(getProviderForModel('gemma4:31b')).toBe('ollama')
     expect(getProviderForModel('gpt-oss:120b')).toBe('ollama')
   })
 
-  it('migrates the retired MiniMax selection to Nemotron', () => {
+  it('migrates the retired MiniMax and Nemotron 3 Ultra selections to the Ollama default', () => {
     expect(resolveModelSelection('ollama', 'minimax-m3')).toMatchObject({
       provider: 'ollama',
-      modelId: 'nemotron-3-ultra',
+      modelId: 'gemma4:31b',
+    })
+    expect(resolveModelSelection('ollama', 'nemotron-3-ultra')).toMatchObject({
+      provider: 'ollama',
+      modelId: 'gemma4:31b',
     })
   })
 
@@ -123,8 +138,10 @@ describe('provider-aware model catalog', () => {
       'gemini:gemini-3.6-flash',
       'gemini:gemini-3.7-flash',
       'gemini:gemini-3.8-flash',
-      'openrouter:nex-agi/nex-n2.5-pro:free',
+      'openrouter:google/gemma-4-26b-a4b-it:free',
       'openrouter:qwen/qwen3.8-27b:free',
+      'openrouter:nex-agi/nex-n2.5-pro:free',
+      'ollama:gemma4:31b',
     ])
     expect(getAutoCandidateKeys({ mode: 'web' })).toEqual([
       'gemini:gemini-3.1-flash-lite',

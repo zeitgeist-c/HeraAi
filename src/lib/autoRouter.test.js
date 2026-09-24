@@ -292,7 +292,7 @@ describe('local fallback provider fairness and need signals', () => {
       candidates: MODEL_CATALOG,
     })).toMatchObject({
       // Katalog 24.09.2026'da yenilendi: kodlama puanı 5 olan üç model var
-      // (Gemini 3.8 Flash, Nex-N2.5 Pro, Nemotron 3 Ultra) ve eşitlikte
+      // (Gemini 3.8 Flash, Nex-N2.5 Pro, Gemma 4 31B) ve eşitlikte
       // katalog sırası kazanır.
       modelKey: 'gemini:gemini-3.8-flash',
       reasonCode: 'coding',
@@ -315,8 +315,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'Fotoğraf makinesi nasıl çalışır? Özetle anlat.',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Nemotron 3.5 Lightning (hızlı) gpt-oss ile eşit puanda ve katalogda önde.
-      modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free',
+      // Gemma 4 26B (hızlı) gpt-oss ile eşit puanda ve katalogda önde.
+      modelKey: 'openrouter:google/gemma-4-26b-a4b-it:free',
       reasonCode: 'fast',
     })
   })
@@ -349,6 +349,6 @@ describe('local fallback provider fairness and need signals', () => {
     expect(selectLocalFallback({ text: 'm'.repeat(299), candidates: MODEL_CATALOG }).modelKey)
       .toBe('gemini:gemini-3.1-flash-lite')
     expect(selectLocalFallback({ text: 'm'.repeat(1501), candidates: MODEL_CATALOG }))
-      .toMatchObject({ modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free', reasonCode: 'fast' })
+      .toMatchObject({ modelKey: 'openrouter:google/gemma-4-26b-a4b-it:free', reasonCode: 'fast' })
   })
 })

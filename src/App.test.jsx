@@ -3263,12 +3263,12 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'nex-agi/nex-n2.5-pro:free',
+      'google/gemma-4-26b-a4b-it:free',
       'qwen/qwen3.8-27b:free',
-      'nvidia/nemotron-3.5-lightning:free',
+      'nex-agi/nex-n2.5-pro:free',
       'gpt-oss:120b',
       'nemotron-3-super',
-      'nemotron-3-ultra',
+      'gemma4:31b',
     ]);
     expect(listbox.querySelector('[data-model-id="auto"]')).not.toBeInTheDocument();
     expect(screen.getByText('Gemini')).toBeInTheDocument();
@@ -3276,22 +3276,22 @@ describe('HeraAi App', () => {
     expect(screen.getByText('Ollama')).toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
       .filter(option => option.dataset.modelId === 'nex-agi/nex-n2.5-pro:free')
-      .map(option => option.textContent)).toEqual(['Nex-N2.5 Pro📷SlowQ5']);
+      .map(option => option.textContent)).toEqual(['Nex-N2.5 Pro📷Code & analysis']);
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-3).map(option => option.textContent)).toEqual([
-      'GPT-OSS 120BFastQ3',
-      'Nemotron 3 SuperMediumQ4',
-      'Nemotron 3 UltraSlowQ5',
+      'GPT-OSS 120BGeneral chat',
+      'Nemotron 3 SuperBalanced',
+      'Gemma 4 31B📷Strong & visual',
     ]);
-    const speedBadge = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
-    expect(speedBadge('gpt-oss:120b')).toContain('Fast');
-    expect(speedBadge('nemotron-3-ultra')).toContain('Slow');
-    expect(speedBadge('nvidia/nemotron-3.5-lightning:free')).toContain('Fast');
-    expect(speedBadge('nex-agi/nex-n2.5-pro:free')).toContain('Slow');
-    expect(speedBadge('gemini-3.1-flash-lite')).toContain('Fast');
-    expect(speedBadge('gemini-3.5-flash-lite')).toContain('Fast');
-    expect(speedBadge('gemini-3.6-flash')).toContain('Medium');
-    expect(speedBadge('gemini-3.7-flash')).toContain('Slow');
-    expect(speedBadge('gemini-3.8-flash')).toContain('Slow');
+    const rowText = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
+    expect(rowText('gpt-oss:120b')).toContain('General chat');
+    expect(rowText('gemma4:31b')).toContain('Strong & visual');
+    expect(rowText('google/gemma-4-26b-a4b-it:free')).toContain('Fast & visual');
+    expect(rowText('nex-agi/nex-n2.5-pro:free')).toContain('Code & analysis');
+    expect(rowText('gemini-3.1-flash-lite')).toContain('Quick drafts');
+    expect(rowText('gemini-3.5-flash-lite')).toContain('Daily chat');
+    expect(rowText('gemini-3.6-flash')).toContain('Balanced');
+    expect(rowText('gemini-3.7-flash')).toContain('Docs & images');
+    expect(rowText('gemini-3.8-flash')).toContain('Most capable');
   });
 
   it('marks image-capable models with a camera marker in the selector', async () => {
@@ -3306,7 +3306,7 @@ describe('HeraAi App', () => {
     expect(rowText('gemini-3.1-flash-lite')).toContain('📷');
     expect(rowText('nex-agi/nex-n2.5-pro:free')).toContain('📷');
     expect(rowText('qwen/qwen3.8-27b:free')).toContain('📷');
-    expect(rowText('nvidia/nemotron-3.5-lightning:free')).not.toContain('📷');
+    expect(rowText('google/gemma-4-26b-a4b-it:free')).toContain('📷');
   });
 
   it('collapses provider groups in the model selector independently', async () => {
@@ -3337,7 +3337,7 @@ describe('HeraAi App', () => {
     const listbox = screen.getByRole('listbox');
     expect(listbox.querySelector('[data-model-id="qwen/qwen3.8-27b:free"]')).toBeInTheDocument();
     expect(listbox.querySelector('[data-model-id="nex-agi/nex-n2.5-pro:free"]')).toBeInTheDocument();
-    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="google/gemma-4-26b-a4b-it:free"]')).toBeInTheDocument();
 
     fireEvent.click(listbox.querySelector('[data-model-id="qwen/qwen3.8-27b:free"]'));
     await waitFor(() => expect(
@@ -3429,7 +3429,7 @@ describe('HeraAi App', () => {
     });
   });
 
-  it('migrates a retired MiniMax selection to Nemotron', async () => {
+  it('migrates a retired MiniMax selection to the Ollama default', async () => {
     currentStorage.selectedProvider = 'ollama';
     currentStorage.selectedModel = 'minimax-m3';
     currentStorage.modelSelectionMode = 'manual';
@@ -3437,9 +3437,22 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(currentStorage).toMatchObject({
       selectedProvider: 'ollama',
-      selectedModel: 'nemotron-3-ultra',
+      selectedModel: 'gemma4:31b',
     }));
-    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Nemotron 3 Ultra');
+    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemma 4 31B'));
+  });
+
+  it('migrates a retired Nemotron 3 Ultra selection to Gemma 4 31B', async () => {
+    currentStorage.selectedProvider = 'ollama';
+    currentStorage.selectedModel = 'nemotron-3-ultra';
+    currentStorage.modelSelectionMode = 'manual';
+    render(<App />);
+
+    await waitFor(() => expect(currentStorage).toMatchObject({
+      selectedProvider: 'ollama',
+      selectedModel: 'gemma4:31b',
+    }));
+    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemma 4 31B'));
   });
 
   it('removes retired MiniMax provenance from stored sessions without deleting answers', async () => {
@@ -3549,12 +3562,12 @@ describe('HeraAi App', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'nex-agi/nex-n2.5-pro:free',
+      'google/gemma-4-26b-a4b-it:free',
       'qwen/qwen3.8-27b:free',
-      'nvidia/nemotron-3.5-lightning:free',
+      'nex-agi/nex-n2.5-pro:free',
       'gpt-oss:120b',
       'nemotron-3-super',
-      'nemotron-3-ultra',
+      'gemma4:31b',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
 
@@ -3853,7 +3866,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old PDF answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3.5 Lightning' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemma 4 26B' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /PDF attachments are supported only|PDF ekleri yalnızca/i,
@@ -3891,7 +3904,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old image answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3 Ultra' }));
+    fireEvent.click(screen.getByRole('button', { name: 'GPT-OSS 120B' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,
@@ -4695,8 +4708,27 @@ describe('HeraAi App', () => {
     expect(currentStorage.sessions[0].id).not.toBe('only-chat');
     expect(currentStorage.activeSessionId).toBe(currentStorage.sessions[0].id);
     expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
-    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    // Yeni boş sohbet geçmiş listesinde görünmez: liste boş durumunu gösterir.
+    expect(screen.getByText('No chat history found.')).toBeInTheDocument();
     expect(screen.queryByText('Only unstarred chat')).not.toBeInTheDocument();
+  });
+
+  it('drops the previous empty chat when a new one starts', async () => {
+    await i18n.changeLanguage('en');
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const clickNewChat = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start New Chat' }));
+    };
+
+    clickNewChat();
+    await waitFor(() => expect(currentStorage.sessions).toHaveLength(1));
+    clickNewChat();
+    await waitFor(() => expect(currentStorage.sessions).toHaveLength(1));
+    expect(currentStorage.sessions.every(session => (
+      !(session.messages || []).some(message => message.role === 'user')
+    ))).toBe(true);
   });
 
   it('preserves newer stored metadata and unrelated session order when a streamed message write is queued', async () => {
@@ -5695,9 +5727,10 @@ describe('HeraAi App', () => {
     expect(screen.getByTitle('New Chat')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
-    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    // İçe aktarma yalnız boş bir varsayılan sohbet bıraktı; geçmiş listesi boş.
+    expect(screen.getByText('No chat history found.')).toBeInTheDocument();
     expect(screen.queryByText('Old chat before empty import')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Bulk delete' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Bulk delete' })).toBeDisabled();
   });
 
   it('records dictation, appends the transcript, and never sends it automatically', async () => {

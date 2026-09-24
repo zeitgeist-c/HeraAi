@@ -1072,12 +1072,12 @@ describe('model selection', () => {
       'gemini-3.6-flash',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'nex-agi/nex-n2.5-pro:free',
+      'google/gemma-4-26b-a4b-it:free',
       'qwen/qwen3.8-27b:free',
-      'nvidia/nemotron-3.5-lightning:free',
+      'nex-agi/nex-n2.5-pro:free',
       'gpt-oss:120b',
       'nemotron-3-super',
-      'nemotron-3-ultra',
+      'gemma4:31b',
     ])
   })
 
@@ -1100,7 +1100,7 @@ describe('model selection', () => {
   })
 
   it.each([
-    'nemotron-3-ultra',
+    'gemma4:31b',
     'gpt-oss:120b',
   ])('passes the selected Ollama model %s to the direct provider request', async modelId => {
     global.fetch = vi.fn().mockResolvedValue(ollamaStream('ok', modelId))

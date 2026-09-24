@@ -336,8 +336,20 @@
         },
         "model_labels": {
             "gpt_oss_120b": "GPT-OSS 120B",
-            "nemotron_3_super": "Nemotron 3 Super",
-            "nemotron_3_ultra": "Nemotron 3 Ultra"
+            "nemotron_3_super": "Nemotron 3 Super"
+        },
+        "model_purposes": {
+            "quick_drafts": "Quick drafts",
+            "daily_chat": "Daily chat",
+            "balanced": "Balanced",
+            "docs_images": "Docs & images",
+            "most_capable": "Most capable",
+            "fast_vision": "Fast & visual",
+            "code_images": "Code & images",
+            "code_analysis": "Code & analysis",
+            "general_chat": "General chat",
+            "smartest": "Smartest",
+            "strong_visual": "Strong & visual"
         },
         "speeds": {
             "fast": "Fast",

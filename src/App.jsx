@@ -3042,8 +3042,12 @@ function App() {
 
     const id = Date.now().toString()
     const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
+    // Yeni sohbet kaydı, ilk kullanıcı mesajı gönderilene kadar geçmişte görünmez:
+    // mesajsız (yalnız karşılama içeren) eski oturumlar burada düşürülür.
     const nextSessions = [
-      ...sessionsRef.current,
+      ...sessionsRef.current.filter(session => (
+        (session?.messages || []).some(message => message?.role === 'user')
+      )),
       createSession({ id, title: t('chat.new_chat'), messages: welcomeMsg }),
     ]
     activeSessionIdRef.current = id
