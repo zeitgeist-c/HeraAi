@@ -1,6 +1,24 @@
 // Yama notları veri dosyası. Yeni sürümde en üste { version, date, changes } ekle.
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
+{
+  version: '1.10.17',
+  date: '2026-09-24',
+  changes: {
+    tr: [
+      'Modelleri karşılaştırma özelliği tamamen kaldırıldı (düğme, panel ve kazanan seçme akışı)',
+      'Model listesinde amaç etiketleri kaldırıldı; satırlarda yalnızca model adı ve görüntü simgesi kaldı, uzun adlar artık kesilmiyor',
+      'Varsayılan sistem komutu yenilendi; kendi talimatını yazmamış kurulumlara otomatik uygulanır',
+      'Kullanılmayan DuckDuckGo site izni manifest’ten çıkarıldı',
+    ],
+    en: [
+      'Removed the model comparison feature entirely (button, panel and winner selection flow)',
+      'Removed purpose labels from the model list; rows now show only the model name and the image icon, and long names are no longer truncated',
+      'Refreshed the default system prompt; it applies automatically to installs without a custom instruction',
+      'Dropped the unused DuckDuckGo host permission from the manifest',
+    ],
+  },
+},
   {
     version: '1.10.16',
     date: '2026-09-24',
