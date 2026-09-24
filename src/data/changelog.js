@@ -2,6 +2,32 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
   {
+    version: '1.10.13',
+    date: '2026-09-24',
+    changes: {
+      tr: [
+        'Uzun sorular artık kısaltılıyor: 12 satırdan uzun mesajlar "Tümünü göster" düğmesiyle açılıyor',
+        'Yazı alanı düzeltildi: tekerlekle kaydırma doğru çalışıyor, alan yazdıkça kendiliğinden büyüyor, üstteki tutamaçla ekranın %70\'ine kadar genişletilebiliyor',
+        'Otomatik model seçimi kaldırıldı: her istek artık seçtiğin modelle gider, varsayılan mod Manuel',
+        'Model seçicisinde görsel kabul eden modeller 📷 ile işaretlendi',
+        'OpenRouter listesi yenilendi: Qwen3.8 27B, Nex-N2.5 Pro ve Nemotron 3.5 Lightning (ücretsiz)',
+        'Nemotron 3 Super artık Ollama\'da: GPT-OSS 120B ile Nemotron 3 Ultra arasında',
+        'Ollama başlığındaki 🚫📷 işareti kaldırıldı',
+        'Çalışmayan modeller listeden çıkarıldı; bir model hata verirse konuşma görünmez hata yedeğiyle kurtarılmaya devam ediyor',
+      ],
+      en: [
+        'Long questions now collapse: messages over 12 lines open with a "Show all" button',
+        'Composer fixed: wheel scrolling works correctly, the field grows as you type, and the handle above expands it up to 70% of the screen',
+        'Automatic model selection removed: every request now uses the model you picked, and the default mode is Manual',
+        'Image-capable models are marked with 📷 in the model picker',
+        'OpenRouter list refreshed: Qwen3.8 27B, Nex-N2.5 Pro and Nemotron 3.5 Lightning (free)',
+        'Nemotron 3 Super is now on Ollama: between GPT-OSS 120B and Nemotron 3 Ultra',
+        'The 🚫📷 marker was removed from the Ollama heading',
+        'Non-working models were removed from the list; if a model fails, the conversation is still rescued by the invisible error fallback',
+      ],
+    },
+  },
+  {
     version: '1.10.12',
     date: '2026-09-24',
     changes: {
