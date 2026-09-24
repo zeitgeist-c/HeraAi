@@ -27,7 +27,7 @@ import {
 } from '../lib/messageDisplay.js';
 import {
   AUTH_ERROR_CODES,
-  getCurrentAuthUser,
+  waitForCurrentAuthUser,
   signInWithGoogle,
   signOutFromGoogle,
 } from '../lib/authService.js';
@@ -52,6 +52,7 @@ import {
   setCloudSyncPaused,
   wakeCloudSync,
 } from '../lib/cloudSyncCoordinator.js';
+import { startServiceKeepAlive } from '../lib/serviceKeepAlive.js';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const OFFSCREEN_REASON = 'WORKERS';
@@ -1846,7 +1847,9 @@ const SYNC_REQUEST_TYPES = new Set([
 async function handleAuthRequest(message) {
   try {
     if (message.type === 'AUTH_GET_STATE') {
-      return { ok: true, user: getCurrentAuthUser() };
+      // Servis yeni uyanmis olabilir: oturum IndexedDB'den geri yuklenmeden
+      // okunursa giris yapilmis olsa bile null doner, panel bunu yanlis yorumlar.
+      return { ok: true, user: await waitForCurrentAuthUser() };
     }
     if (message.type === 'AUTH_SIGN_IN') {
       const user = await signInWithGoogle();
@@ -2022,10 +2025,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message?.type || message.forwardedBy === 'service_worker') return false;
 
   if (AUTH_REQUEST_TYPES.has(message.type)) {
+    // Google girisi kullaniciyi bekletir: servis bu sure boyunca uyanik tutulur,
+    // aksi halde Chrome servisi kapatir ve panelin kanali kopar.
+    const stopKeepAlive = startServiceKeepAlive();
     handleAuthRequest(message)
       .then(
-        response => sendResponse(response),
+        response => {
+          stopKeepAlive();
+          sendResponse(response);
+        },
         error => {
+          stopKeepAlive();
           console.error('Auth request error', error);
           sendResponse({ ok: false, errorCode: 'auth_failed', user: null });
         },
@@ -2034,9 +2044,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (SYNC_REQUEST_TYPES.has(message.type)) {
+    const stopKeepAlive = startServiceKeepAlive();
     handleSyncRequest(message).then(
-      response => sendResponse(response),
-      () => sendResponse({ ok: false, errorCode: 'sync_failed' }),
+      response => {
+        stopKeepAlive();
+        sendResponse(response);
+      },
+      () => {
+        stopKeepAlive();
+        sendResponse({ ok: false, errorCode: 'sync_failed' });
+      },
     );
     return true;
   }

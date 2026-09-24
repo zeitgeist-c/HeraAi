@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MODEL_CATALOG } from '../lib/models.js';
+import { KEEP_ALIVE_INTERVAL_MS } from '../lib/serviceKeepAlive.js';
 
 const keyManagerMocks = vi.hoisted(() => ({
   getKeys: vi.fn(),
@@ -134,6 +135,10 @@ const createChromeMock = ({
 
   const runtime = {
     getURL: vi.fn(path => `chrome-extension://test/${path}`),
+    getPlatformInfo: vi.fn((callback) => {
+      callback?.({ os: 'win' });
+      return Promise.resolve({ os: 'win' });
+    }),
     onInstalled: { addListener: vi.fn() },
     onMessage: { addListener: runtimeMessageListener },
     sendMessage: runtimeSendMessage,
@@ -1854,12 +1859,15 @@ describe('background auth bridge', () => {
   });
 
   it('AUTH_GET_STATE mevcut oturum bilgisini döner', async () => {
-    authServiceMocks.getCurrentAuthUser.mockReturnValue({ uid: 'uid-7', email: 'a@b.com' });
+    // Yeni uyanan servis oturumu IndexedDB'den geri yüklemeyi beklemeli:
+    // aksi halde giriş yapılmış olsa bile panel null görür.
+    authServiceMocks.waitForCurrentAuthUser.mockResolvedValue({ uid: 'uid-7', email: 'a@b.com' });
     const mock = createChromeMock();
     const listener = await loadWorker(mock);
 
     const response = await dispatch(listener, { type: 'AUTH_GET_STATE' });
 
+    expect(authServiceMocks.waitForCurrentAuthUser).toHaveBeenCalledTimes(1);
     expect(response).toEqual({ ok: true, user: { uid: 'uid-7', email: 'a@b.com' } });
   });
 
@@ -1896,5 +1904,33 @@ describe('background auth bridge', () => {
     const response = await dispatch(listener, { type: 'AUTH_SIGN_IN' });
 
     expect(response).toEqual({ ok: false, errorCode: 'auth_cancelled', user: null });
+  });
+
+  it('askıda kalan AUTH_SIGN_IN boyunca servisi uyanık tutar', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSignIn = () => {};
+      authServiceMocks.signInWithGoogle.mockImplementation(
+        () => new Promise(resolve => { resolveSignIn = resolve; }),
+      );
+      const mock = createChromeMock();
+      const listener = await loadWorker(mock);
+
+      const pending = dispatch(listener, { type: 'AUTH_SIGN_IN' });
+
+      // Giriş penceresi açıkken servis kapanmasın: ucuz API çağrısı periyodik atılır.
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS * 2);
+      expect(mock.chrome.runtime.getPlatformInfo.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      resolveSignIn({ uid: 'uid-1', email: 'user@example.com' });
+      await expect(pending).resolves.toEqual({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } });
+
+      // İş bitince zamanlayıcı durur; servis boşuna uyanık tutulmaz.
+      const pingsAfterAnswer = mock.chrome.runtime.getPlatformInfo.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS * 3);
+      expect(mock.chrome.runtime.getPlatformInfo).toHaveBeenCalledTimes(pingsAfterAnswer);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

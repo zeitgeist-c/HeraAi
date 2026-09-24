@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '../i18n'
 import SyncPanel from './SyncPanel'
+import { notifyError, notifySuccess } from '../lib/notify'
+
+vi.mock('../lib/notify')
 
 const baseStatus = {
   signedIn: true,
@@ -279,6 +282,198 @@ describe('SyncPanel cihaz bölümü katlanır (Varyant A)', () => {
     expect(within(heading).getByText(/Last sync/)).toBeInTheDocument()
     expect(within(heading).getByText(compact(newest))).toBeInTheDocument()
     expect(within(heading).queryByText(compact(older))).toBeNull()
+  })
+})
+
+describe('SyncPanel Google girişi dayanıklılığı', () => {
+  const signedOutStatus = {
+    signedIn: false,
+    accountExists: null,
+    linked: false,
+    paused: false,
+    deviceDisabled: false,
+    pending: 0,
+    lastSyncAt: null,
+    lastError: null,
+    lastErrorCode: null,
+    blockedUntil: null,
+    user: null,
+    deviceId: 'dev-1',
+  }
+
+  // Chrome'un servis calisani kapandiginda urettigi ham metin.
+  const channelLoss = 'The message port closed before a response was received.'
+
+  function mockRuntime(handler, { signedOutFirst = false } = {}) {
+    let statusReads = 0
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') {
+        statusReads += 1
+        // Cikis ekrani gereken testlerde ilk okuma cikis, sonrasi bagli hesap.
+        const status = signedOutFirst && statusReads === 1 ? signedOutStatus : baseStatus
+        callback({ ok: true, status })
+        return Promise.resolve()
+      }
+      if (handler) {
+        const handled = handler(message, callback)
+        if (handled) return Promise.resolve()
+      }
+      callback({ ok: true })
+      return Promise.resolve()
+    })
+  }
+
+  function failWithChannelLoss(callback) {
+    chrome.runtime.lastError = { message: channelLoss }
+    callback(undefined)
+    chrome.runtime.lastError = null
+  }
+
+  it('giriş sürerken bekleme bilgisini gösterir', async () => {
+    mockRuntime((message) => message.type === 'AUTH_SIGN_IN', { signedOutFirst: true })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    expect(await screen.findByText('Signing in…')).toBeInTheDocument()
+    expect(screen.getByText(/Complete the Google sign-in/)).toBeInTheDocument()
+  })
+
+  it('kanal koparsa oturumu doğrulayıp girişi başarılı sayar', async () => {
+    mockRuntime((message, callback) => {
+      if (message.type === 'AUTH_SIGN_IN') {
+        failWithChannelLoss(callback)
+        return true
+      }
+      if (message.type === 'AUTH_GET_STATE') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+        return true
+      }
+      return false
+    }, { signedOutFirst: true })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    expect(await screen.findByText('Sync active')).toBeInTheDocument()
+    expect(notifySuccess).toHaveBeenCalledWith('Signed in to your Google account.')
+    expect(notifyError).not.toHaveBeenCalled()
+    expect(sentMessages('AUTH_GET_STATE').length).toBeGreaterThan(0)
+  })
+
+  it('giriş tamamlanmadıysa ham metin yerine açıklama gösterir', async () => {
+    mockRuntime((message, callback) => {
+      if (message.type === 'AUTH_SIGN_IN') {
+        failWithChannelLoss(callback)
+        return true
+      }
+      if (message.type === 'AUTH_GET_STATE') {
+        callback({ ok: true, user: null })
+        return true
+      }
+      return false
+    }, { signedOutFirst: true })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    await waitFor(() => {
+      expect(notifyError).toHaveBeenCalledWith('Sign-in did not finish; the connection was lost. Try again.')
+    }, { timeout: 10_000 })
+    expect(notifyError).not.toHaveBeenCalledWith(channelLoss)
+    expect(sentMessages('AUTH_GET_STATE').length).toBeGreaterThan(1)
+  }, 20_000)
+
+  it('eşitleme kanal kopmasına rağmen tamamlandıysa başarılı sayar', async () => {
+    const previous = Date.parse('2026-09-22T11:26:16Z')
+    let statusReads = 0
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') {
+        statusReads += 1
+        // İlk okuma eski damga, sonrası ilerlemiş damga: eşitleme serviste bitmiş.
+        callback({
+          ok: true,
+          status: { ...baseStatus, lastSyncAt: statusReads === 1 ? previous : previous + 60_000 },
+        })
+        return Promise.resolve()
+      }
+      if (message.type === 'SYNC_NOW') {
+        failWithChannelLoss(callback)
+        return true
+      }
+      callback({ ok: true })
+      return Promise.resolve()
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    await waitFor(() => expect(notifySuccess).toHaveBeenCalledWith('Sync completed.'))
+    expect(notifyError).not.toHaveBeenCalled()
+  })
+
+  it('eşitleme tamamlanmadıysa ham Chrome metnini göstermez', async () => {
+    mockRuntime((message, callback) => {
+      if (message.type === 'SYNC_NOW') {
+        failWithChannelLoss(callback)
+        return true
+      }
+      return false
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    await waitFor(() => {
+      expect(notifyError).toHaveBeenCalledWith(
+        'The browser background service was closed and the connection was lost. Try again.',
+      )
+    }, { timeout: 10_000 })
+    expect(notifyError).not.toHaveBeenCalledWith(expect.stringContaining('message port closed'))
+  }, 20_000)
+
+  it('şifreli alan oluştuysa kurtarma kodunun gösterilemediğini söyler', async () => {
+    let initializeCalls = 0
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') {
+        callback({
+          ok: true,
+          status: { ...baseStatus, accountExists: initializeCalls > 0, linked: false },
+        })
+        return Promise.resolve()
+      }
+      if (message.type === 'SYNC_INITIALIZE') {
+        initializeCalls += 1
+        failWithChannelLoss(callback)
+        return true
+      }
+      callback({ ok: true })
+      return Promise.resolve()
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create encrypted space' }))
+
+    await waitFor(() => {
+      expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('recovery code could not be shown'))
+    })
+    expect(notifySuccess).not.toHaveBeenCalled()
+  })
+
+  it('bozuk yedek dosyasında ayrıştırıcı metnini göstermez', async () => {
+    const { container } = render(<SyncPanel />)
+    await screen.findByRole('button', { name: 'Sync now' })
+
+    const input = container.querySelector('input[type="file"]')
+    const file = new File(['bu bir yedek degil'], 'bozuk.heraai-backup', { type: 'application/json' })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(notifyError).toHaveBeenCalledWith(
+        'The backup file could not be read: it is corrupt or not a HeraAi encrypted backup.',
+      )
+    })
+    expect(sentMessages('SYNC_IMPORT_BACKUP')).toHaveLength(0)
   })
 })
 
