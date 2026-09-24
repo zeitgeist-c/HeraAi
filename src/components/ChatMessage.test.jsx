@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import toast from 'react-hot-toast'
 
 import '../i18n'
@@ -519,5 +519,97 @@ describe('ChatMessage malformed content', () => {
 
     expect(screen.getByTestId('assistant-content')).toBeInTheDocument()
     expect(screen.getByTestId('assistant-content').textContent).toBe('')
+  })
+})
+
+describe('ChatMessage long user message collapse', () => {
+  const longText = Array.from({ length: 24 }, (_, index) => `Satır ${index + 1}: uzun sorunun parçası`).join('\n')
+  const writeText = vi.fn()
+
+  // jsdom yerleşim ölçmez (scrollHeight her zaman 0): taşma ölçümünü taklit ediyoruz.
+  const setMeasuredLayout = (scrollHeight, clientHeight) => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: () => clientHeight,
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+  })
+
+  afterEach(() => {
+    delete HTMLElement.prototype.scrollHeight
+    delete HTMLElement.prototype.clientHeight
+  })
+
+  it('collapses a long user message and expands it on demand', () => {
+    setMeasuredLayout(620, 273)
+    render(<ChatMessage message={{ id: 30, role: 'user', content: longText }} />)
+
+    const toggle = screen.getByTestId('user-message-toggle')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle.textContent).toMatch(/Tümünü göster|Show more/i)
+    expect(screen.getByTestId('user-message-body').className).toContain('max-h-[273px]')
+    expect(screen.getByTestId('user-message-fade')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByTestId('user-message-body').className).not.toContain('max-h-[273px]')
+    expect(screen.queryByTestId('user-message-fade')).not.toBeInTheDocument()
+    const collapseAgain = screen.getByTestId('user-message-toggle')
+    expect(collapseAgain).toHaveAttribute('aria-expanded', 'true')
+    expect(collapseAgain.textContent).toMatch(/Daha az göster|Show less/i)
+
+    fireEvent.click(collapseAgain)
+
+    expect(screen.getByTestId('user-message-body').className).toContain('max-h-[273px]')
+    expect(screen.getByTestId('user-message-toggle')).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('leaves a user message that fits without any toggle', () => {
+    setMeasuredLayout(150, 150)
+    render(<ChatMessage message={{ id: 31, role: 'user', content: 'Kısa soru' }} />)
+
+    expect(screen.queryByTestId('user-message-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('user-message-fade')).not.toBeInTheDocument()
+    expect(screen.getByTestId('user-message-body').textContent).toBe('Kısa soru')
+  })
+
+  it('never collapses assistant answers even when they overflow', () => {
+    setMeasuredLayout(900, 273)
+    render(<ChatMessage message={{ id: 32, role: 'model', content: longText }} />)
+
+    expect(screen.queryByTestId('user-message-toggle')).not.toBeInTheDocument()
+    expect(screen.getByTestId('assistant-content').textContent).toContain('Satır 24')
+  })
+
+  it('shows a search-opened message unclamped so the match is never hidden', () => {
+    setMeasuredLayout(620, 273)
+    render(<ChatMessage message={{ id: 33, role: 'user', content: longText }} searchCurrent />)
+
+    const body = screen.getByTestId('user-message-body')
+    expect(body.className).not.toContain('max-h-[273px]')
+    expect(screen.queryByTestId('user-message-fade')).not.toBeInTheDocument()
+    expect(body.textContent).toContain('Satır 24')
+    expect(screen.getByTestId('user-message')).toHaveAttribute('data-search-current', 'true')
+  })
+
+  it('copies the full text of a collapsed message', async () => {
+    writeText.mockResolvedValue()
+    setMeasuredLayout(620, 273)
+    render(<ChatMessage message={{ id: 34, role: 'user', content: longText }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy|Kopyala/i }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(longText))
   })
 })

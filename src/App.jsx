@@ -82,8 +82,8 @@ import {
   applyWinnerSelection,
   isComparisonJob,
 } from './lib/comparison'
-import { selectLocalFallback } from './lib/autoRouter'
 import { createAutoSyncScheduler, touchesSyncedKeys } from './lib/autoSyncScheduler'
+import { WHEEL_TARGET_INNER, resolveWheelTarget } from './lib/composerWheel'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -103,6 +103,23 @@ const BOOTSTRAP_STATE_TIMEOUT_MS = 5_000
 const BOOTSTRAP_STATE_RETRY_DELAYS_MS = [250, 750, 1500]
 const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
 const SESSION_TITLE_MAX_LENGTH = 80
+// Yazı alanı: yazdıkça büyür (min 66px) ve kullanıcının seçtiği tavana kadar uzar.
+const COMPOSER_MIN_HEIGHT_PX = 66
+const COMPOSER_DEFAULT_MAX_HEIGHT_PX = 192
+const COMPOSER_HEIGHT_STEP_PX = 16
+const COMPOSER_HEIGHT_STORAGE_KEY = 'composerMaxHeight'
+const COMPOSER_MAX_VIEWPORT_RATIO = 0.7
+
+function composerAllowedMaxHeight() {
+  const viewport = typeof window === 'undefined' ? 0 : Number(window.innerHeight) || 0
+  return Math.max(COMPOSER_DEFAULT_MAX_HEIGHT_PX, Math.round(viewport * COMPOSER_MAX_VIEWPORT_RATIO))
+}
+
+function clampComposerHeight(value, allowedMax = composerAllowedMaxHeight()) {
+  const numeric = Number(value)
+  const safe = Number.isFinite(numeric) ? numeric : COMPOSER_MIN_HEIGHT_PX
+  return Math.min(Math.max(Math.round(safe), COMPOSER_MIN_HEIGHT_PX), allowedMax)
+}
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const DICTATION_MAX_DURATION_MS = 200000
@@ -493,7 +510,6 @@ function App() {
   const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDER)
-  const [modelSelectionMode, setModelSelectionMode] = useState('auto')
   const [showComparison, setShowComparison] = useState(false)
   const [comparisonModelKeys, setComparisonModelKeys] = useState(() => (
     MODEL_CATALOG.slice(0, 2).map(model => model.key)
@@ -502,6 +518,8 @@ function App() {
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const composerInputRef = useRef(null)
+  const composerResizeRef = useRef(null)
+  const [composerMaxHeight, setComposerMaxHeight] = useState(COMPOSER_DEFAULT_MAX_HEIGHT_PX)
   const fileInputRef = useRef(null)
   const streamBufferRef = useRef('')
   const displayedAssistantContentRef = useRef('')
@@ -2426,8 +2444,9 @@ function App() {
       const resolvedSelectedModel = resolvedSelection.modelId
       setSelectedModel(resolvedSelectedModel)
       setSelectedProvider(resolvedSelection.provider)
-      const resolvedSelectionMode = result.modelSelectionMode === 'manual' ? 'manual' : 'auto'
-      setModelSelectionMode(resolvedSelectionMode)
+      // Otomatik model seçimi 24.09.2026'da kaldırıldı. Depoda 'auto' kalmışsa
+      // aşağıdaki karşılaştırma onu 'manual'e göç ettirir.
+      const resolvedSelectionMode = 'manual'
       const storedComparisonKeys = Array.isArray(result.comparisonModelKeys)
         ? result.comparisonModelKeys.filter(key => MODEL_CATALOG.some(model => model.key === key)).slice(0, 2)
         : []
@@ -3847,37 +3866,6 @@ function App() {
     let requestProvider = isComparison
       ? comparisonModels[0].provider
       : getProviderForModel(requestModel, selectedProvider)
-    const autoDraftMimes = draftAttachments.map(attachment => attachment?.mimeType).filter(Boolean)
-    const autoReuseMimes = canReusePreviousImage
-      ? activeContextAttachments.map(attachment => attachment?.mimeType).filter(Boolean)
-      : []
-    const autoMimes = [...autoDraftMimes, ...autoReuseMimes]
-    const autoNeedsImage = autoMimes.some(mimeType => typeof mimeType === 'string' && mimeType.startsWith('image/'))
-    const autoNeedsPdf = autoMimes.includes('application/pdf')
-    const autoCandidates = (autoNeedsImage || autoNeedsPdf)
-      ? MODEL_CATALOG.filter(model => (
-        (!autoNeedsImage || model.capabilities?.supportsImage === true)
-        && (!autoNeedsPdf || model.capabilities?.supportsPdf === true)
-      ))
-      : MODEL_CATALOG
-    const autoDecision = !isComparison
-      && modelSelectionMode === 'auto'
-      && !hasModelOverride
-      ? selectLocalFallback({
-          text: userText,
-          mode,
-          mimeTypes: autoMimes,
-          candidates: autoCandidates,
-        })
-      : null
-    if (autoDecision?.modelKey) {
-      const automaticModel = MODEL_CATALOG.find(model => model.key === autoDecision.modelKey)
-      if (automaticModel) {
-        requestModel = automaticModel.modelId
-        requestProvider = automaticModel.provider
-      }
-    }
-
     let explicitUrls = []
     try {
       explicitUrls = mode === 'web'
@@ -4026,9 +4014,7 @@ function App() {
       startedAt,
       model: requestModel,
       provider: requestProvider,
-      selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
-      selectionReasonCode: autoDecision?.reasonCode,
-      routerModel: autoDecision?.routerModel,
+      selectionMode: 'manual',
     })
     const assistantMessages = isComparison
       ? COMPARISON_SLOTS.map((slot, index) => createAssistantMessage({
@@ -4075,9 +4061,7 @@ function App() {
       mode,
       model: requestModel,
       provider: requestProvider,
-      selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
-      selectionReasonCode: autoDecision?.reasonCode,
-      routerModel: autoDecision?.routerModel,
+      selectionMode: 'manual',
       language: appConfig?.language || i18n.language || 'tr',
       status: 'queued',
       revision: 0,
@@ -4225,11 +4209,7 @@ function App() {
         mode,
         model: requestModel,
         provider: requestProvider,
-        selectionMode: (isComparison || hasModelOverride) ? 'manual' : modelSelectionMode,
-        ...(autoDecision ? {
-          selectionReasonCode: autoDecision.reasonCode,
-          routerModel: autoDecision.routerModel || null,
-        } : {}),
+        selectionMode: 'manual',
         language: generation.language,
         sessionTitle,
         systemInstruction: appConfig?.systemInstruction || '',
@@ -4289,7 +4269,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, modelSelectionMode, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
+  }, [input, attachments, appConfig, enableResearch, selectedModel, selectedProvider, unresolvedComparison, handleGenerationState, mergeSessionMessages, persistSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, stopSpeech, t])
 
   handleSendRef.current = handleSend
 
@@ -4727,9 +4707,89 @@ function App() {
     pauseAutoScroll()
   }, [pauseAutoScroll])
 
+  // Yazı alanı yüksekliği: yazdıkça büyür, kullanıcı tavanını tutamaktan ayarlar.
+  useEffect(() => {
+    let cancelled = false
+    const loadComposerHeight = async () => {
+      if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return
+      try {
+        const stored = await chrome.storage.local.get([COMPOSER_HEIGHT_STORAGE_KEY])
+        const value = Number(stored?.[COMPOSER_HEIGHT_STORAGE_KEY])
+        if (cancelled || !Number.isFinite(value) || value <= 0) return
+        setComposerMaxHeight(clampComposerHeight(value))
+      } catch (error) {
+        console.error('Composer height could not be read', error)
+      }
+    }
+    loadComposerHeight()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const node = composerInputRef.current
+    if (!node) return
+    node.style.height = 'auto'
+    node.style.height = `${clampComposerHeight(node.scrollHeight || 0, composerMaxHeight)}px`
+  }, [input, composerMaxHeight])
+
+  const persistComposerHeight = useCallback((value) => {
+    void setChromeStorage({ [COMPOSER_HEIGHT_STORAGE_KEY]: value }).catch((error) => {
+      console.error('Composer height could not be saved', error)
+    })
+  }, [])
+
+  const handleComposerResizeStart = useCallback((event) => {
+    if (typeof event.button === 'number' && event.button !== 0) return
+    const startY = Number(event.clientY)
+    if (!Number.isFinite(startY)) return
+    composerResizeRef.current = {
+      startY,
+      startHeight: composerMaxHeight,
+      allowedMax: composerAllowedMaxHeight(),
+      pointerId: event.pointerId,
+    }
+    event.preventDefault?.()
+    event.currentTarget?.setPointerCapture?.(event.pointerId)
+  }, [composerMaxHeight])
+
+  const handleComposerResizeMove = useCallback((event) => {
+    const session = composerResizeRef.current
+    if (!session) return
+    const currentY = Number(event.clientY)
+    if (!Number.isFinite(currentY)) return
+    // Yukarı çekmek büyütür: imleç yukarı gittikçe yükseklik artar.
+    setComposerMaxHeight(clampComposerHeight(session.startHeight + (session.startY - currentY), session.allowedMax))
+  }, [])
+
+  const handleComposerResizeEnd = useCallback((event) => {
+    const session = composerResizeRef.current
+    if (!session) return
+    composerResizeRef.current = null
+    event.currentTarget?.releasePointerCapture?.(session.pointerId)
+    persistComposerHeight(composerMaxHeight)
+  }, [composerMaxHeight, persistComposerHeight])
+
+  const resetComposerHeight = useCallback(() => {
+    setComposerMaxHeight(COMPOSER_DEFAULT_MAX_HEIGHT_PX)
+    persistComposerHeight(COMPOSER_DEFAULT_MAX_HEIGHT_PX)
+  }, [persistComposerHeight])
+
+  const handleComposerResizeKeyDown = useCallback((event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    const step = event.key === 'ArrowUp' ? COMPOSER_HEIGHT_STEP_PX : -COMPOSER_HEIGHT_STEP_PX
+    const next = clampComposerHeight(composerMaxHeight + step)
+    setComposerMaxHeight(next)
+    persistComposerHeight(next)
+  }, [composerMaxHeight, persistComposerHeight])
+
   const handleComposerWheel = useCallback((event) => {
     const container = scrollRef.current
     if (!container || !event.deltaY) return
+    // Yazı alanı (veya başka bir iç kaydırıcı) kendi içinde kayabiliyorsa tekerleği
+    // önce o tüketir; başına/sonuna gelince devamı sohbete geçer.
+    const innerScroller = event.target?.closest?.('[data-composer-scroll]')
+    if (resolveWheelTarget(event.deltaY, innerScroller) === WHEEL_TARGET_INNER) return
     const canScroll = container.scrollHeight > container.clientHeight
     if (!canScroll) return
     event.preventDefault()
@@ -4832,15 +4892,9 @@ function App() {
     const nextProvider = getProviderForModel(nextModel)
     setSelectedModel(nextModel)
     setSelectedProvider(nextProvider)
-    setModelSelectionMode('manual')
     if (chrome && chrome.storage) {
       chrome.storage.local.set({ selectedModel: nextModel, selectedProvider: nextProvider, modelSelectionMode: 'manual' })
     }
-  }
-
-  const handleAutoModelSelect = () => {
-    setModelSelectionMode('auto')
-    if (chrome && chrome.storage) chrome.storage.local.set({ modelSelectionMode: 'auto' })
   }
 
   const comparisonCandidates = localizedModelCatalog.map(model => {
@@ -5073,6 +5127,26 @@ function App() {
           className="hera-surface mx-auto w-full max-w-3xl overflow-hidden rounded-2xl transition-shadow focus-within:border-primary/35 focus-within:shadow-lg focus-within:shadow-primary/5"
           onPointerDown={handleComposerPointerDown}
         >
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={t('chat.tooltips.resize_composer')}
+            aria-valuenow={composerMaxHeight}
+            aria-valuemin={COMPOSER_MIN_HEIGHT_PX}
+            aria-valuemax={composerAllowedMaxHeight()}
+            tabIndex={0}
+            data-testid="composer-resize-handle"
+            title={t('chat.tooltips.resize_composer_hint')}
+            onPointerDown={handleComposerResizeStart}
+            onPointerMove={handleComposerResizeMove}
+            onPointerUp={handleComposerResizeEnd}
+            onPointerCancel={handleComposerResizeEnd}
+            onDoubleClick={resetComposerHeight}
+            onKeyDown={handleComposerResizeKeyDown}
+            className="group flex h-2.5 cursor-ns-resize items-center justify-center border-b border-border/40 bg-secondary/30 transition-colors hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+          >
+            <span aria-hidden="true" className="h-0.5 w-9 rounded-full bg-muted-foreground/35 transition-colors group-hover:bg-primary/55" />
+          </div>
           {draftWebUrls.length > 0 && enableResearch && (
             <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
               {draftWebUrls.map(url => (
@@ -5128,7 +5202,8 @@ function App() {
             onPaste={handlePaste}
             placeholder={t('chat.placeholder')}
             disabled={false}
-            className="min-h-[66px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-2 pt-3 text-[14px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
+            data-composer-scroll="true"
+            className="hera-composer-input min-h-[66px] w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-2 pt-3 text-[14px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
             rows="2"
           />
 
@@ -5321,11 +5396,9 @@ function App() {
         <div data-testid="composer-meta" className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
           <ModelSelector
             selectedModel={selectedModel}
-            selectionMode={modelSelectionMode}
             models={localizedModelCatalog}
             modelLabels={localizedModelLabels}
             onModelChange={handleModelChange}
-            onAutoSelect={handleAutoModelSelect}
           />
           <p data-testid="composer-disclaimer" className="min-w-0 flex-1 whitespace-pre-line text-right text-[11px] leading-tight text-muted-foreground/55" title={t('chat.ai_disclaimer')}>
             {t('chat.ai_disclaimer')}

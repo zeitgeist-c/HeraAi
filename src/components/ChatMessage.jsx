@@ -11,6 +11,9 @@ import ResponseDuration from './ResponseDuration'
 
 const COPY_TIMEOUT_MS = 2000
 const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
+// Kullanıcı mesajı bu yükseklikten sonra kısaltılır: 12 satır × leading-relaxed
+// (1.625 × 14px) ≈ 273px. Kısa mesajda ölçüm taşma bulmaz, düğme hiç çıkmaz.
+const USER_MESSAGE_MAX_HEIGHT_PX = 273
 
 async function copyText(text, { onSuccess, successMessage, errorMessage }) {
   try {
@@ -100,6 +103,13 @@ const ChatMessage = ({
   const [copied, setCopied] = useState(false)
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
   const [retryMenuPlacement, setRetryMenuPlacement] = useState('up')
+  // Kullanıcı mesajı kısaltma: yalnız görünüm — gönderilen/kaydedilen metin aynı kalır.
+  // Elle seçim yoksa arama sonucu gelen mesaj açık kabul edilir (eşleşme gizli kalmasın).
+  // Mesaj kimliği ebeveynin key'inde olduğundan başka mesaja geçince durum kendiliğinden sıfırlanır.
+  const [userManualChoice, setUserManualChoice] = useState(null)
+  const [userCollapsible, setUserCollapsible] = useState(false)
+  const userBodyRef = useRef(null)
+  const userOpen = userManualChoice ?? searchCurrent
   const retryMenuId = useId()
   const retryMenuRef = useRef(null)
   const retryTriggerRef = useRef(null)
@@ -195,6 +205,24 @@ const ChatMessage = ({
       document.removeEventListener('keydown', handleEscape)
     }
   }, [retryMenuOpen])
+
+  useEffect(() => {
+    if (isBot || !visibleContent) return undefined
+    const node = userBodyRef.current
+    if (!node) return undefined
+
+    const measure = () => {
+      if (userOpen) return
+      setUserCollapsible(node.scrollHeight > node.clientHeight + 1)
+    }
+    measure()
+
+    const ResizeObserverClass = globalThis.ResizeObserver
+    if (typeof ResizeObserverClass !== 'function') return undefined
+    const observer = new ResizeObserverClass(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [isBot, visibleContent, userOpen])
 
   const handleRetryTrigger = () => {
     if (retryDisabled || isPending) return
@@ -330,9 +358,36 @@ const ChatMessage = ({
       >
         <div className={`max-w-[88%] rounded-2xl rounded-br-md border border-primary/10 bg-primary/[0.09] px-3.5 py-2.5 shadow-sm${searchCurrent ? ' ring-2 ring-primary/70' : searchMatch ? ' ring-1 ring-primary/30' : ''}`}>
           {visibleContent && (
-            <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
-              {visibleContent}
+            <div
+              ref={userBodyRef}
+              data-testid="user-message-body"
+              className={`relative${userOpen ? '' : ' max-h-[273px] overflow-hidden'}`}
+            >
+              <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground">
+                {visibleContent}
+              </div>
+              {userCollapsible && !userOpen && (
+                <div
+                  aria-hidden="true"
+                  data-testid="user-message-fade"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-[74px]"
+                  style={{ background: 'linear-gradient(to bottom, hsl(var(--primary) / 0), hsl(var(--primary) / 0.09))' }}
+                />
+              )}
             </div>
+          )}
+
+          {userCollapsible && (
+            <button
+              type="button"
+              onClick={() => setUserManualChoice(!userOpen)}
+              aria-expanded={userOpen}
+              data-testid="user-message-toggle"
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary/25 bg-primary/[0.07] px-2.5 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:bg-primary/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+            >
+              <span>{userOpen ? t('chat.show_less_message') : t('chat.show_full_message')}</span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform${userOpen ? ' rotate-180' : ''}`} />
+            </button>
           )}
 
           {(displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (

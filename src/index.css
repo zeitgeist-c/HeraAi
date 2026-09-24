@@ -124,6 +124,29 @@
     @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors;
   }
 
+  /* Yazı alanı kaydırma çubuğu: varsayılan 6px/%28 saydam çubuk fareyle
+     tutulamıyordu; beste alanında daha kalın ve belirgin gösterilir. */
+  .hera-composer-input {
+    scrollbar-gutter: stable;
+  }
+
+  .hera-composer-input::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .hera-composer-input::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .hera-composer-input::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.45);
+    border-radius: 999px;
+  }
+
+  .hera-composer-input::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.68);
+  }
+
   .hera-icon-button:hover {
     @apply bg-secondary text-foreground;
   }
