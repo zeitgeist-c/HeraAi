@@ -282,41 +282,6 @@ describe('ChatMessage copy actions', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('const answer = 42'))
   })
 
-  it('shows read aloud only for eligible assistant messages and forwards the message', () => {
-    const message = { id: 12, role: 'model', content: 'Read this answer', status: 'done' }
-    const onToggleSpeech = vi.fn()
-    const { rerender } = render(
-      <ChatMessage
-        message={message}
-        speechEnabled
-        speechStatus="idle"
-        onToggleSpeech={onToggleSpeech}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Read aloud|Sesli oku/i }))
-    expect(onToggleSpeech).toHaveBeenCalledWith(message)
-
-    rerender(
-      <ChatMessage
-        message={{ id: 13, role: 'user', content: 'User text' }}
-        speechEnabled
-        onToggleSpeech={onToggleSpeech}
-      />
-    )
-    expect(screen.queryByRole('button', { name: /Read aloud|Sesli oku/i })).not.toBeInTheDocument()
-  })
-
-  it('updates the memoized speech action to loading and playing states', () => {
-    const message = { id: 14, role: 'model', content: 'Audio state', status: 'done' }
-    const { rerender } = render(
-      <ChatMessage message={message} speechEnabled speechStatus="loading" />
-    )
-    expect(screen.getByRole('button', { name: /Preparing audio|Ses hazırlanıyor/i })).toHaveAttribute('aria-pressed', 'true')
-
-    rerender(<ChatMessage message={message} speechEnabled speechStatus="playing" />)
-    expect(screen.getByRole('button', { name: /Stop reading|Okumayı durdur/i })).toHaveAttribute('aria-pressed', 'true')
-  })
-
   it('reports clipboard failures without showing a false success state', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const toastError = vi.spyOn(toast, 'error')
@@ -367,9 +332,6 @@ describe('ChatMessage copy actions', () => {
     render(
       <ChatMessage
         message={message}
-        speechEnabled
-        speechStatus="idle"
-        onToggleSpeech={vi.fn()}
         onRetry={vi.fn()}
         retryModels={retryModels}
         modelLabels={modelLabels}
@@ -378,14 +340,12 @@ describe('ChatMessage copy actions', () => {
     )
 
     const copyButton = screen.getByRole('button', { name: /Copy|Kopyala/i })
-    const speechButton = screen.getByRole('button', { name: /Read aloud|Sesli oku/i })
     const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
-    for (const button of [copyButton, speechButton, retryButton]) {
+    for (const button of [copyButton, retryButton]) {
       expect(button.className).toMatch(/hera-icon-button/)
       expect(button.textContent).toBe('')
     }
     fireEvent.click(copyButton)
-    fireEvent.click(speechButton)
     fireEvent.click(retryButton)
     expect(screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i })).toBeInTheDocument()
   })
@@ -395,9 +355,6 @@ describe('ChatMessage copy actions', () => {
     render(
       <ChatMessage
         message={message}
-        speechEnabled
-        speechStatus="idle"
-        onToggleSpeech={vi.fn()}
         onRetry={vi.fn()}
         retryModels={retryModels}
         modelLabels={modelLabels}
@@ -408,10 +365,8 @@ describe('ChatMessage copy actions', () => {
     const pill = screen.getByTestId('response-action-pill')
     expect(pill.className).toMatch(/rounded-full/)
     const copyButton = screen.getByRole('button', { name: /Copy|Kopyala/i })
-    const speechButton = screen.getByRole('button', { name: /Read aloud|Sesli oku/i })
     const retryButton = screen.getByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })
     expect(pill.contains(copyButton)).toBe(true)
-    expect(pill.contains(speechButton)).toBe(true)
     expect(pill.contains(retryButton)).toBe(true)
     expect(pill.contains(screen.getByTestId('message-model'))).toBe(true)
     expect(screen.queryByTestId('response-action-rail')).not.toBeInTheDocument()
@@ -455,16 +410,13 @@ describe('ChatMessage copy actions', () => {
     expect(screen.queryByTestId('response-duration')).not.toBeInTheDocument()
   })
 
-  it('conceals only retry while keeping duration, model badge, copy and speech', () => {
+  it('conceals only retry while keeping duration, model badge and copy', () => {
     render(<ChatMessage
       message={{
         id: 36, role: 'model', content: 'Hidden meta', status: 'done',
         model: 'gemini-3.6-flash', startedAt: 1000, completedAt: 6400,
       }}
       modelLabels={modelLabels}
-      speechEnabled
-      speechStatus="idle"
-      onToggleSpeech={vi.fn()}
       onRetry={vi.fn()}
       retryModels={retryModels}
       currentModel="gemini-3.1-flash-lite"
@@ -472,7 +424,6 @@ describe('ChatMessage copy actions', () => {
     />)
 
     expect(screen.getByRole('button', { name: /Copy|Kopyala/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Read aloud|Sesli oku/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Try again with a model|Model ile yeniden dene/i })).not.toBeInTheDocument()
     expect(screen.getByTestId('response-duration')).toBeInTheDocument()
     expect(screen.getByTestId('message-model')).toBeInTheDocument()

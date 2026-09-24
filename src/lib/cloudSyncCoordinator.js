@@ -668,6 +668,9 @@ async function performCloudSyncRun() {
     if (deviceState.disabled) return { skipped: 'device_disabled' }
     if (!deviceState.linked) throw new Error('sync_recovery_required')
     const result = await runtime.engine.drain()
+    // Atlanan tur (lease/kilit/oturum) basarili sayilmaz: aksi halde panel
+    // "yeni eslendi" gosterir ve bekleyen anahtar silme isaretleri kaybolur.
+    if (result?.skipped) return result
     const now = Date.now()
     await runtime.transport.setDevice(user.uid, runtime.deviceId, {
       lastSeenAt: now,
@@ -878,7 +881,21 @@ async function enqueueStorageChange(changes) {
       const before = new Map((change.oldValue || []).map(item => [String(item.id), item]))
       const after = new Map((change.newValue || []).map(item => [String(item.id), item]))
       for (const [id, session] of after) {
-        if (session?.syncPolicy === 'local_only') continue
+        if (session?.syncPolicy === 'local_only') {
+          // "Yalnız bu cihazda"ya çevrilen sohbetin bulut kopyası silinmeli;
+          // aksi halde kurtarma koduyla bağlanan yeni cihaz onu geri getirir.
+          const onceki = before.get(id)
+          if (onceki && onceki.syncPolicy !== 'local_only') {
+            await runtime.engine.enqueue({
+              storageKey: 'sessions',
+              logicalId: id,
+              entityType: 'session',
+              op: QUEUE_OP.DELETE,
+              entityVersion: newVersion(runtime.deviceId),
+            })
+          }
+          continue
+        }
         if (JSON.stringify(before.get(id)) === JSON.stringify(session)) continue
         await runtime.engine.enqueue({
           storageKey: 'sessions',

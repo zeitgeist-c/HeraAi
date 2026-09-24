@@ -1,5 +1,10 @@
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000]
 
+// Sonsuz yeniden deneme, teslim edilemeyen terminal iletiyi kalıcı kilit olarak
+// bırakıp yeni işleri bloke eder (startJob `already_running`); sınırlı denemeden
+// sonra vazgeçilir.
+const FORWARD_MAX_ATTEMPTS = 8
+
 const createDefaultWorker = () => new Worker(
   new URL('./generation-worker.js', import.meta.url),
   { type: 'module' },
@@ -48,6 +53,7 @@ export function createOffscreenBridge({
     {
       validateResponse = () => true,
       onDelivered = null,
+      onGiveUp = null,
     } = {},
   ) => {
     if (disposed || typeof runtime?.sendMessage !== 'function') return false
@@ -60,9 +66,13 @@ export function createOffscreenBridge({
       return true
     } catch {
       if (disposed) return false
+      if (attempt + 1 >= FORWARD_MAX_ATTEMPTS) {
+        onGiveUp?.()
+        return false
+      }
       const delay = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]
       setTimeoutFn(() => {
-        void forwardWithRetry(payload, attempt + 1, { validateResponse, onDelivered })
+        void forwardWithRetry(payload, attempt + 1, { validateResponse, onDelivered, onGiveUp })
       }, delay)
       return false
     }
@@ -84,6 +94,7 @@ export function createOffscreenBridge({
     void forwardWithRetry(payload, 0, {
       validateResponse: response => response?.ok === true,
       onDelivered: () => terminalForwardingJobs.delete(jobId),
+      onGiveUp: () => terminalForwardingJobs.delete(jobId),
     })
   }
 
@@ -100,7 +111,7 @@ export function createOffscreenBridge({
         sources: Array.isArray(data.sources) ? data.sources : [],
         resolvedModel: data.resolvedModel || null,
         status: 'running',
-      })
+      }, 0, { validateResponse: response => response?.ok === true })
       return
     }
 
@@ -131,7 +142,7 @@ export function createOffscreenBridge({
         type: 'HEARTBEAT',
         jobId,
         uptimeMs: data.uptimeMs,
-      })
+      }, 0, { validateResponse: response => response?.ok === true })
       return
     }
 

@@ -230,8 +230,6 @@
         "search_next": "Next result",
         "show_full_message": "Show more",
         "show_less_message": "Show less",
-        "resize_composer": "Composer height",
-        "resize_composer_hint": "Drag up to grow, drag down to shrink; double-click to reset",
         "no_history": "No chat history found.",
         "new_chat": "New Chat",
         "storage_write_failed": "Chat could not be saved: browser storage may be full. Delete old chats to free space.",
@@ -302,9 +300,8 @@
             "model_selector": "AI Model",
             "requesting_microphone": "Waiting for microphone permission...",
             "cancel_transcription": "Cancel transcription",
-            "read_aloud": "Read aloud",
-            "preparing_speech": "Preparing audio...",
-            "stop_speech": "Stop reading",
+            "resize_composer": "Composer height",
+            "resize_composer_hint": "Drag up to grow, drag down to shrink; double-click to reset",
             "scroll_to_start": "Go to the start of the chat",
             "scroll_to_end": "Go to the end of the chat"
         },
@@ -314,8 +311,7 @@
             "default": "Default"
         },
         "auto": {
-            "label": "Auto",
-            "description": "Automatically selects the best model for the request"
+            "label": "Auto"
         },
         "prompts": {
             "summarize": "Summarize",
@@ -333,9 +329,9 @@
         "voice_empty": "No intelligible speech was detected.",
         "voice_permission_denied": "Microphone permission was not granted.",
         "voice_failed": "The recording could not be transcribed.",
-        "speech_failed": "This response could not be read aloud.",
-        "speech_too_long": "This response is too long to read aloud safely.",
-        "code_block_skipped": "Code block skipped.",
+        "voice_unavailable": "Gemini is not responding right now, please try again shortly.",
+        "voice_max_duration": "Recording reached the {{seconds}} second limit and is being transcribed.",
+        "voice_partial": "The recording could not be fully transcribed; the part we captured was added to the composer.",
         "model_used": "Model used",
         "model_providers": {
             "gemini": "Gemini",

@@ -230,8 +230,6 @@
     "search_next": "Sonraki sonuç",
     "show_full_message": "Tümünü göster",
     "show_less_message": "Daha az göster",
-    "resize_composer": "Yazı alanı yüksekliği",
-    "resize_composer_hint": "Yukarı çekerek büyüt, aşağı çekerek küçült; çift tıkla eski hâline döner",
     "no_history": "Henüz sohbet geçmişi yok.",
     "new_chat": "Yeni Sohbet",
     "storage_write_failed": "Sohbet kaydedilemedi: tarayıcı depolaması dolu olabilir. Yer açmak için eski sohbetleri silin.",
@@ -302,9 +300,8 @@
       "model_selector": "AI Modeli",
       "requesting_microphone": "Mikrofon izni bekleniyor...",
       "cancel_transcription": "Dönüştürmeyi iptal et",
-      "read_aloud": "Sesli oku",
-      "preparing_speech": "Ses hazırlanıyor...",
-      "stop_speech": "Okumayı durdur",
+      "resize_composer": "Yazı alanı yüksekliği",
+      "resize_composer_hint": "Yukarı çekerek büyüt, aşağı çekerek küçült; çift tıkla eski hâline döner",
       "scroll_to_start": "Sohbetin başına git",
       "scroll_to_end": "Sohbetin sonuna git"
     },
@@ -314,8 +311,7 @@
       "default": "Varsayılan"
     },
     "auto": {
-      "label": "Otomatik",
-      "description": "İsteğe en uygun modeli otomatik seçer"
+      "label": "Otomatik"
     },
     "prompts": {
       "summarize": "Özetle",
@@ -333,9 +329,9 @@
     "voice_empty": "Anlaşılır bir konuşma algılanmadı.",
     "voice_permission_denied": "Mikrofon izni verilmedi.",
     "voice_failed": "Kayıt metne dönüştürülemedi.",
-    "speech_failed": "Bu yanıt sesli okunamadı.",
-    "speech_too_long": "Bu yanıt güvenli biçimde sesli okumak için çok uzun.",
-    "code_block_skipped": "Kod bloğu atlandı.",
+    "voice_unavailable": "Gemini şu an yanıt vermiyor, birazdan tekrar deneyin.",
+    "voice_max_duration": "Kayıt {{seconds}} saniyeye ulaştı, durduruldu ve metne çevriliyor.",
+    "voice_partial": "Kaydın tamamı çevrilemedi; elde edilen kısım yazı alanına eklendi.",
     "model_used": "Kullanılan model",
     "model_providers": {
       "gemini": "Gemini",

@@ -58,7 +58,6 @@ vi.mock('./lib/audioUtils', async (importOriginal) => {
 });
 
 vi.mock('./lib/voiceApi', () => ({
-  generateSpeech: vi.fn(),
   transcribeAudio: vi.fn(),
 }));
 
@@ -556,7 +555,6 @@ describe('HeraAi App', () => {
     });
     audioUtils.recordedBlobToWav.mockResolvedValue(new Uint8Array([82, 73, 70, 70]));
     voiceApi.transcribeAudio.mockResolvedValue('Voice transcript');
-    voiceApi.generateSpeech.mockResolvedValue({ pcm: new Uint8Array([0, 0]), sampleRate: 24000 });
   });
 
   afterEach(() => {
@@ -773,6 +771,15 @@ describe('HeraAi App', () => {
 
     fireEvent(handle, new Event('pointerup', { bubbles: true }));
     await waitFor(() => expect(currentStorage.composerMaxHeight).toBe(252));
+  });
+
+  it('labels the composer resize handle with translated text, not a raw locale key', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const handle = screen.getByTestId('composer-resize-handle');
+    expect(handle).toHaveAttribute('aria-label', 'Composer height');
+    expect(handle).toHaveAttribute('title', 'Drag up to grow, drag down to shrink; double-click to reset');
   });
 
   it('adjusts and resets the composer height from the keyboard', async () => {
@@ -4301,11 +4308,14 @@ describe('HeraAi App', () => {
     expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
 
-    await waitFor(() => expect(currentStorage.sessions.map(session => session.id).sort()).toEqual([
-      'keep-starred',
-      'pin-this',
-    ]));
-    expect(currentStorage.activeSessionId).toBe('pin-this');
+    await waitFor(() => expect(currentStorage.sessions.filter(session => (
+      session.id === 'keep-starred' || session.id === 'pin-this'
+    )).length).toBe(2));
+    const freshChat = currentStorage.sessions.find(session => (
+      session.id !== 'keep-starred' && session.id !== 'pin-this'
+    ));
+    expect(freshChat).toMatchObject({ title: 'New Chat', isStarred: false });
+    expect(currentStorage.activeSessionId).toBe(freshChat.id);
     expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
     expect(screen.queryByText('Delete this chat')).not.toBeInTheDocument();
     expect(screen.getByText('Pin this chat')).toBeInTheDocument();
@@ -4399,13 +4409,12 @@ describe('HeraAi App', () => {
       type: 'CANCEL',
       reason: 'clear_history',
     })));
-    await waitFor(() => expect(currentStorage.sessions).toEqual([
-      expect.objectContaining({
-        id: 'protected-starred',
-        isStarred: true,
-      }),
-    ]));
-    expect(currentStorage.activeSessionId).toBe('protected-starred');
+    await waitFor(() => expect(currentStorage.sessions.some(session => (
+      session.id === 'protected-starred' && session.isStarred === true
+    ))).toBe(true));
+    const freshChat = currentStorage.sessions.find(session => session.id !== 'protected-starred');
+    expect(freshChat).toMatchObject({ title: 'New Chat', isStarred: false });
+    expect(currentStorage.activeSessionId).toBe(freshChat.id);
     expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Delete unstarred chats?' })).not.toBeInTheDocument();
     expect(screen.queryByText('Running unstarred chat')).not.toBeInTheDocument();
@@ -5536,37 +5545,176 @@ describe('HeraAi App', () => {
     expect(global.chrome.runtime.onMessage.removeListener).toHaveBeenCalled();
   });
 
-  it('reads a completed assistant message with one Web Audio source', async () => {
+  it('records dictation directly when the permission window is unavailable', async () => {
     await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
-    currentStorage.sessions = [{
-      id: 'speech-session',
-      title: 'Speech',
-      messages: [{ id: 'speech-message', role: 'model', content: 'Read this answer', status: 'done' }],
-    }];
-    currentStorage.activeSessionId = 'speech-session';
-    const source = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(function start() { queueMicrotask(() => this.onended?.()); }),
-      stop: vi.fn(),
-      onended: null,
-    };
-    global.AudioContext = class FakeAudioContext {
-      constructor() { this.state = 'running'; this.destination = {}; }
-      resume = vi.fn().mockResolvedValue(undefined);
-      close = vi.fn().mockResolvedValue(undefined);
-      createBuffer = (_channels, length, sampleRate) => ({
-        sampleRate,
-        getChannelData: () => new Float32Array(length),
+    const originalCreate = global.chrome.windows.create;
+    global.chrome.windows.create = undefined;
+    try {
+      const tracks = [{ stop: vi.fn() }];
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: vi.fn().mockResolvedValue({ state: 'prompt' }) },
       });
-      createBufferSource = () => source;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+      });
+      global.MediaRecorder = class DirectMediaRecorder {
+        static isTypeSupported = vi.fn().mockReturnValue(true);
+        constructor() {
+          this.state = 'inactive';
+          this.mimeType = 'audio/webm;codecs=opus';
+        }
+        start() { this.state = 'recording'; }
+        stop() { this.state = 'inactive'; }
+      };
+
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+
+      await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+      expect(global.chrome.windows.create).toBeUndefined();
+    } finally {
+      global.chrome.windows.create = originalCreate;
+    }
+  });
+
+  it('releases the microphone only after the recorder flushes its final chunk', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const order = [];
+    const tracks = [{ stop: vi.fn(() => order.push('track-stopped')) }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    global.MediaRecorder = class OrderedMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        order.push('recorder-stop');
+        queueMicrotask(() => {
+          order.push('last-chunk');
+          this.ondataavailable?.({ data: new Blob(['voice'], { type: this.mimeType }) });
+          this.onstop?.();
+        });
+      }
     };
 
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Read aloud|Sesli oku/i }));
-    await waitFor(() => expect(voiceApi.generateSpeech).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(source.start).toHaveBeenCalledTimes(1));
-    expect(voiceApi.generateSpeech.mock.calls[0][0].text).toBe('Read this answer');
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    await waitFor(() => expect(voiceApi.transcribeAudio).toHaveBeenCalledTimes(1));
+
+    expect(order).toEqual(['recorder-stop', 'last-chunk', 'track-stopped']);
+  });
+
+  it('stops and transcribes dictation when the recording reaches the time cap', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    global.MediaRecorder = class CappedMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['voice'], { type: this.mimeType }) });
+        this.onstop?.();
+      }
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (screen.queryByRole('button', { name: /Stop Recording|Kaydı Durdur/i })) break;
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+      }
+      expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200000);
+      });
+
+      expect(voiceApi.transcribeAudio).toHaveBeenCalledTimes(1);
+      expect(tracks[0].stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('splits a long recording into chunks and joins the transcripts', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const frames = 16000 * 70;
+    const silence = new Float32Array(frames);
+    audioUtils.recordedBlobToWav.mockResolvedValueOnce(audioUtils.encodeAudioBufferAsWav({
+      length: frames,
+      numberOfChannels: 1,
+      sampleRate: 16000,
+      getChannelData: () => silence,
+    }));
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    global.MediaRecorder = class LongMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['voice'], { type: this.mimeType }) });
+        this.onstop?.();
+      }
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+
+    await waitFor(() => expect(voiceApi.transcribeAudio).toHaveBeenCalledTimes(3));
+    const chunkSizes = voiceApi.transcribeAudio.mock.calls.map(call => call[0].wavBase64.length);
+    expect(chunkSizes[0]).toBe(chunkSizes[1]);
+    expect(chunkSizes[2]).toBeLessThan(chunkSizes[0]);
+    expect(document.querySelector('textarea')).toHaveValue('Voice transcript Voice transcript Voice transcript');
   });
 
   it('keeps voice tools available without settings switches', async () => {
@@ -5577,46 +5725,7 @@ describe('HeraAi App', () => {
     openSettingsPanel();
     fireEvent.click(screen.getByRole('button', { name: /General Settings/i }));
     expect(screen.queryByRole('switch', { name: 'Gemini Dictation' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('switch', { name: 'Gemini Read Aloud (Preview)' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Voice features use your Gemini API key/i)).not.toBeInTheDocument();
-  });
-
-  it('pins the remaining read-aloud chunks to the fallback TTS model', async () => {
-    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
-    const longAnswer = `${'A clear spoken sentence. '.repeat(120)}`;
-    currentStorage.sessions = [{
-      id: 'speech-pin-session',
-      title: 'Speech pin',
-      messages: [{ id: 'speech-pin-message', role: 'model', content: longAnswer, status: 'done' }],
-    }];
-    currentStorage.activeSessionId = 'speech-pin-session';
-    const source = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(function start() { queueMicrotask(() => this.onended?.()); }),
-      stop: vi.fn(),
-      onended: null,
-    };
-    global.AudioContext = class FakeAudioContext {
-      constructor() { this.state = 'running'; this.destination = {}; }
-      resume = vi.fn().mockResolvedValue(undefined);
-      close = vi.fn().mockResolvedValue(undefined);
-      createBuffer = (_channels, length, sampleRate) => ({
-        sampleRate,
-        getChannelData: () => new Float32Array(length),
-      });
-      createBufferSource = () => source;
-    };
-    voiceApi.generateSpeech
-      .mockResolvedValueOnce({ pcm: new Uint8Array([0, 0]), sampleRate: 24000, model: 'gemini-2.5-flash-preview-tts' })
-      .mockResolvedValue({ pcm: new Uint8Array([0, 0]), sampleRate: 24000, model: 'gemini-2.5-flash-preview-tts' });
-
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Read aloud|Sesli oku/i }));
-
-    await waitFor(() => expect(voiceApi.generateSpeech).toHaveBeenCalledTimes(2));
-    expect(voiceApi.generateSpeech.mock.calls[0][0]).not.toHaveProperty('model');
-    expect(voiceApi.generateSpeech.mock.calls[1][0].model).toBe('gemini-2.5-flash-preview-tts');
   });
 
   it('sends a model-override retry as manual even when storage held an automatic selection', async () => {

@@ -7,11 +7,11 @@ import {
 } from './contextSelection'
 
 describe('context selection', () => {
-  it.each(['önceki görseldeki yazı', 'eski fotoğrafa bak', 'use the previous image'])('detects explicit previous image references: %s', text => {
+  it.each(['önceki görseldeki yazı', 'eski fotoğrafa bak', 'use the previous image', 'İlk görseldeki tabloyu özetle'])('detects explicit previous image references: %s', text => {
     expect(requestsPreviousImage(text)).toBe(true)
   })
 
-  it.each(['önceki linkteki bilgi', 'ilk URL hakkında', 'check the earlier page'])('detects explicit previous web references: %s', text => {
+  it.each(['önceki linkteki bilgi', 'ilk URL hakkında', 'check the earlier page', 'İlk linki özetle'])('detects explicit previous web references: %s', text => {
     expect(requestsPreviousWebSource(text)).toBe(true)
   })
 

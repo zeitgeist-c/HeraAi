@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Bot, Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Loader2, Pencil, RefreshCw, Square, Volume2 } from 'lucide-react'
+import { Bot, Check, ChevronDown, Copy, FileText, Globe, Image as ImageIcon, Pencil, RefreshCw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -84,10 +84,6 @@ const ChatMessage = ({
   currentModel,
   retryDisabled = false,
   showSources = false,
-  speechEnabled = false,
-  speechDisabled = false,
-  speechStatus = 'idle',
-  onToggleSpeech,
   searchMatch = false,
   searchCurrent = false,
   concealMeta = false,
@@ -121,10 +117,6 @@ const ChatMessage = ({
     ? message.displayWebUrls
     : (Array.isArray(message.webUrls) ? message.webUrls : [])
   const isPending = message.status === 'thinking' || message.status === 'streaming'
-  const speechEligible = speechEnabled
-    && Boolean(visibleContent)
-    && !isPending
-    && !['error', 'cancelled', 'cancelled_empty', 'interrupted'].includes(message.status)
   const availableRetryModels = Array.isArray(retryModels)
     ? retryModels.map(model => typeof model === 'string'
         ? { key: model, modelId: model, label: modelLabels[model] || model }
@@ -538,31 +530,6 @@ const ChatMessage = ({
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
             </button>
-            {speechEligible && (
-              <button
-                type="button"
-                onClick={() => onToggleSpeech?.(message)}
-                disabled={speechDisabled}
-                title={speechStatus === 'playing'
-                  ? t('chat.tooltips.stop_speech')
-                  : speechStatus === 'loading'
-                    ? t('chat.tooltips.preparing_speech')
-                    : t('chat.tooltips.read_aloud')}
-                aria-label={speechStatus === 'playing'
-                  ? t('chat.tooltips.stop_speech')
-                  : speechStatus === 'loading'
-                    ? t('chat.tooltips.preparing_speech')
-                    : t('chat.tooltips.read_aloud')}
-                aria-pressed={speechStatus !== 'idle'}
-                className="hera-icon-button h-7 w-7"
-              >
-                {speechStatus === 'loading'
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : speechStatus === 'playing'
-                    ? <Square className="h-3.5 w-3.5 fill-current" />
-                    : <Volume2 className="h-3.5 w-3.5" />}
-              </button>
-            )}
             {!concealMeta && renderRetryButton()}
             {(usedModelLabel || message.startedAt != null) && (
               <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border/70" />
@@ -621,14 +588,10 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.currentModel === nextProps.currentModel &&
     prevProps.retryDisabled === nextProps.retryDisabled &&
     prevProps.showSources === nextProps.showSources &&
-    prevProps.speechEnabled === nextProps.speechEnabled &&
-    prevProps.speechDisabled === nextProps.speechDisabled &&
-    prevProps.speechStatus === nextProps.speechStatus &&
     prevProps.retryModels === nextProps.retryModels &&
     prevProps.modelLabels === nextProps.modelLabels &&
     prevProps.onEdit === nextProps.onEdit &&
     prevProps.onRetry === nextProps.onRetry &&
-    prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
     prevProps.concealMeta === nextProps.concealMeta &&
     prevProps.searchMatch === nextProps.searchMatch &&
     prevProps.searchCurrent === nextProps.searchCurrent

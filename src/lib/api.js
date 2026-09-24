@@ -184,6 +184,15 @@ function classifyGeminiError(err) {
   if (message.includes('rate_limit') || message.includes('rate limit') || message.includes('too many requests')) return 'cooldown'
   if (message.includes('resource_exhausted') || message.includes('quota') || message.includes('exhausted')) return 'quota_exceeded'
   if (status === 429) return 'cooldown'
+  // Ag tasima hatalari (CORS 'blocked by ...', failed to fetch) guvenlik
+  // filtresi degildir; anahtar denemesi ve lite fallback devam etmeli.
+  if (
+    err instanceof TypeError
+    || message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('econnreset')
+    || message.includes('enotfound')
+  ) return 'network'
   if (message.includes('safety') || message.includes('blocked')) return 'safety'
   if (message.includes('api_key_invalid') || status === 401) return 'invalid_key'
   if (message.includes('failed_precondition') || message.includes('billing')) return 'billing_required'
@@ -196,13 +205,6 @@ function classifyGeminiError(err) {
   if (status === 403 || message.includes('permission_denied')) return 'permission_denied'
   if (status >= 500) return 'service_unavailable'
   if (status === 400 || message.includes('invalid_argument')) return 'invalid_request'
-  if (
-    err instanceof TypeError
-    || message.includes('failed to fetch')
-    || message.includes('network')
-    || message.includes('econnreset')
-    || message.includes('enotfound')
-  ) return 'network'
   return 'generation_failed'
 }
 
@@ -635,15 +637,19 @@ async function* streamRemoteWithGeminiFallback(providerId, messages, options, pr
     return
   }
   let terminalError = null
+  let streamedContent = false
   for await (const event of streamRemoteProvider(providerId, messages, options, providerKeys, signal, fallbackImage, modelId)) {
     if (event?.event === 'error') {
       terminalError = event.data
       break
     }
+    if (event?.event === 'chunk' && event.data?.text) streamedContent = true
     yield event
   }
   if (!terminalError) return
-  if (!REMOTE_GEMINI_FALLBACKABLE.has(terminalError?.code)) {
+  // Yarim cevap gosterildiyse Gemini'ye dusmeyiz: aksi halde kullanici hem
+  // yarim cevabi hem de bastan uretilen tam cevabi yan yana gorur.
+  if (streamedContent || !REMOTE_GEMINI_FALLBACKABLE.has(terminalError?.code)) {
     yield { event: 'error', data: terminalError }
     return
   }
@@ -735,14 +741,14 @@ async function searchTavily(question, tavilyKeys, signal) {
       if (timedOut || err.name === 'AbortError') {
         const timeoutError = createTimeoutError()
         return {
-          keyStatus: { provider: 'tavily', keyId: entry.id, status: 'cooldown' },
+          keyStatus: { provider: 'tavily', keyId: entry.id, status: 'network' },
           retryable: true,
           error: timeoutError,
         }
       }
       lastError = err
       return {
-        keyStatus: { provider: 'tavily', keyId: entry.id, status: 'cooldown' },
+        keyStatus: { provider: 'tavily', keyId: entry.id, status: 'network' },
         retryable: true,
         error: err,
       }
@@ -797,12 +803,17 @@ async function generateResearchQuery(conversationMessages, question) {
   return { query: fallbackQuery, context, keyStatuses: [] }
 }
 
+function localDayStamp(date = new Date()) {
+  const pad = value => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 function buildResearchPrompt(question, researchQuery, conversationContext, results) {
   const context = results.map((result, index) => (
     `[${index + 1}] ${result.title}\nURL: ${result.url}\nContent: ${result.content || ''}`
   )).join('\n\n')
 
-  return `Bugunun tarihi: ${new Date().toISOString().slice(0, 10)}
+  return `Bugunun tarihi: ${localDayStamp()}
 
 Orijinal kullanici sorusu: ${question}
 
@@ -974,7 +985,7 @@ async function extractTavilyUrls(urls, tavilyKeys, signal) {
     } catch (error) {
       if (signal?.aborted) throw createAbortError()
       lastError = timedOut || error?.name === 'AbortError' ? createTimeoutError() : error
-      keyStatuses.push({ provider: 'tavily', keyId: entry.id, status: 'cooldown' })
+      keyStatuses.push({ provider: 'tavily', keyId: entry.id, status: 'network' })
     } finally {
       clearTimeout(timeoutId)
       signal?.removeEventListener('abort', abortHandler)

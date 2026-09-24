@@ -8,7 +8,7 @@
  * - Havuzlar mutlak izole: her çağrı yalnız kendi sağlayıcısının listesiyle
  *   çalışır; başka sağlayıcının anahtarı listeye karışamaz.
  * - İstek ortasında anahtar değişmez: akış başladıktan sonra kullanılan anahtar
- *   sabit kalır (TTS parçaları, Tavily zinciri).
+ *   sabit kalır (Tavily zinciri).
  * - `primary` modunda ana anahtar önce gelir; `balanced_rotation` modunda en
  *   uzun süredir kullanılmayan anahtar öne geçer.
  */

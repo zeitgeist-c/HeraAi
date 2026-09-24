@@ -21,7 +21,7 @@ Private AI assistant living in Chrome's Side Panel. Chat with Gemini, OpenRouter
 - **Web Research** — automatic per-message research: Tavily search/extract with Gemini URL Context first, silently skipped when Tavily is unavailable.
 - **Screen crop** — `captureVisibleTab` + canvas overlay; crops stored in `heraai-attachments` IndexedDB (not on `chrome://` pages).
 - **File attachments** — images (Gemini/OpenRouter), PDF + audio Gemini-only, Office text extraction.
-- **Voice** — Gemini-only STT/TTS.
+- **Voice input** — Gemini-only speech-to-text dictation.
 - **Sessions** — history overlay, chat search, import/export.
 - **Encrypted cloud sync** — settings, chats, stats, encrypted API keys, and attachment metadata across browsers; attachment files stay on the originating device, with per-chat device-only mode.
 - **Recovery and backup** — recovery-code device linking, device revocation, and encrypted full backup/restore.

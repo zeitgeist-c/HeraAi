@@ -16,12 +16,9 @@ const {
   DICTATION_FALLBACK_MODEL,
   DICTATION_MODEL,
   DICTATION_PRIMARY_MODEL,
-  TTS_FALLBACK_MODEL,
-  TTS_MODEL,
-  TTS_PRIMARY_MODEL,
-  TTS_VOICE,
-  generateSpeech,
-  isTtsFallbackableCode,
+  DICTATION_TERTIARY_CODES,
+  DICTATION_TERTIARY_MODEL,
+  isDictationFallbackableCode,
   transcribeAudio,
 } = await import('./voiceApi')
 
@@ -47,7 +44,13 @@ describe('voice API', () => {
     expect(statuses).toEqual([{ keyId: 'g1', status: 'success' }])
   })
 
-  it('falls back to 3.5 Flash Lite dictation on quota exhaustion', async () => {
+  it('uses Gemini 3.5 Flash Lite for dictation with 3.1 Flash Lite as the fallback', () => {
+    expect(DICTATION_PRIMARY_MODEL).toBe('gemini-3.5-flash-lite')
+    expect(DICTATION_FALLBACK_MODEL).toBe('gemini-3.1-flash-lite')
+    expect(DICTATION_MODEL).toBe(DICTATION_PRIMARY_MODEL)
+  })
+
+  it('falls back to the secondary dictation model on quota exhaustion', async () => {
     mocks.generateContent
       .mockRejectedValueOnce(Object.assign(new Error('429 quota exhausted'), { status: 429 }))
       .mockResolvedValueOnce({ text: 'Quota transcript' })
@@ -85,33 +88,6 @@ describe('voice API', () => {
     expect(mocks.generateContent).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the preview TTS model, v1beta and fixed voice', async () => {
-    mocks.generateContent.mockResolvedValue({
-      candidates: [{ content: { parts: [{ inlineData: { data: btoa('\u0001\u0002') } }] } }],
-    })
-    const result = await generateSpeech({ text: 'Read me', keys: [{ id: 'g1', key: 'secret' }] })
-    expect(result.pcm).toEqual(new Uint8Array([1, 2]))
-    expect(result.model).toBe(TTS_PRIMARY_MODEL)
-    expect(TTS_MODEL).toBe(TTS_PRIMARY_MODEL)
-    expect(TTS_PRIMARY_MODEL).toBe('gemini-3.1-flash-tts-preview')
-    expect(TTS_FALLBACK_MODEL).toBe('gemini-2.5-flash-preview-tts')
-    expect(mocks.clients[0].httpOptions.apiVersion).toBe('v1beta')
-    const request = mocks.generateContent.mock.calls[0][0]
-    expect(request.model).toBe(TTS_MODEL)
-    expect(request.config.responseModalities).toEqual(['AUDIO'])
-    expect(request.config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(TTS_VOICE)
-  })
-
-  it('retries one server failure for TTS', async () => {
-    mocks.generateContent
-      .mockRejectedValueOnce(Object.assign(new Error('500 unavailable'), { status: 500 }))
-      .mockResolvedValueOnce({
-        candidates: [{ content: { parts: [{ inlineData: { data: btoa('\u0000\u0000') } }] } }],
-      })
-    await generateSpeech({ text: 'Retry me', keys: [{ id: 'g1', key: 'secret' }] })
-    expect(mocks.generateContent).toHaveBeenCalledTimes(2)
-  })
-
   it('falls back to the next key after rate limiting', async () => {
     const statuses = []
     mocks.generateContent
@@ -129,64 +105,51 @@ describe('voice API', () => {
     ])
   })
 
-  it('falls back to 2.5 Flash TTS on quota exhaustion', async () => {
+  it('retries the secondary model when the primary rejects the request', async () => {
     mocks.generateContent
-      .mockRejectedValueOnce(Object.assign(new Error('429 quota exhausted'), { status: 429 }))
-      .mockResolvedValueOnce({
-        candidates: [{ content: { parts: [{ inlineData: { data: btoa('\u0003\u0004') } }] } }],
-      })
-    const result = await generateSpeech({ text: 'Quota fallback', keys: [{ id: 'g1', key: 'secret' }] })
-    expect(result.pcm).toEqual(new Uint8Array([3, 4]))
-    expect(result.model).toBe(TTS_FALLBACK_MODEL)
+      .mockRejectedValueOnce(Object.assign(new Error('bad request: model is not supported for audio input'), { status: 400 }))
+      .mockResolvedValueOnce({ text: 'Fallback transcript' })
+    const result = await transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] })
+    expect(result).toBe('Fallback transcript')
     expect(mocks.generateContent).toHaveBeenCalledTimes(2)
-    expect(mocks.generateContent.mock.calls[0][0].model).toBe(TTS_PRIMARY_MODEL)
-    expect(mocks.generateContent.mock.calls[1][0].model).toBe(TTS_FALLBACK_MODEL)
-    expect(mocks.generateContent.mock.calls[1][0].config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName)
-      .toBe(TTS_VOICE)
+    expect(mocks.generateContent.mock.calls[0][0].model).toBe(DICTATION_PRIMARY_MODEL)
+    expect(mocks.generateContent.mock.calls[1][0].model).toBe(DICTATION_FALLBACK_MODEL)
   })
 
-  it('falls back to 2.5 Flash TTS on an empty audio response', async () => {
+  it('tries Gemini 3.6 Flash when both lite dictation models hit a server error', async () => {
     mocks.generateContent
-      .mockResolvedValueOnce({ candidates: [{ content: { parts: [{ text: 'no audio' }] } }] })
-      .mockResolvedValueOnce({
-        candidates: [{ content: { parts: [{ inlineData: { data: btoa('\u0005\u0006') } }] } }],
-      })
-    const result = await generateSpeech({ text: 'Empty fallback', keys: [{ id: 'g1', key: 'secret' }] })
-    expect(result.pcm).toEqual(new Uint8Array([5, 6]))
-    expect(result.model).toBe(TTS_FALLBACK_MODEL)
+      .mockRejectedValueOnce(Object.assign(new Error('503 model overloaded'), { status: 503 }))
+      .mockRejectedValueOnce(Object.assign(new Error('503 model overloaded'), { status: 503 }))
+      .mockResolvedValueOnce({ text: 'Tertiary transcript' })
+    const result = await transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] })
+    expect(result).toBe('Tertiary transcript')
+    expect(mocks.generateContent).toHaveBeenCalledTimes(3)
+    expect(mocks.generateContent.mock.calls.map(call => call[0].model)).toEqual([
+      DICTATION_PRIMARY_MODEL,
+      DICTATION_FALLBACK_MODEL,
+      DICTATION_TERTIARY_MODEL,
+    ])
   })
 
-  it('pins follow-up chunks to an explicit model without retrying the primary', async () => {
-    mocks.generateContent.mockResolvedValue({
-      candidates: [{ content: { parts: [{ inlineData: { data: btoa('\u0007\u0008') } }] } }],
-    })
-    const result = await generateSpeech({
-      text: 'Pinned chunk',
-      keys: [{ id: 'g1', key: 'secret' }],
-      model: TTS_FALLBACK_MODEL,
-    })
-    expect(result.model).toBe(TTS_FALLBACK_MODEL)
-    expect(mocks.generateContent).toHaveBeenCalledTimes(1)
-    expect(mocks.generateContent.mock.calls[0][0].model).toBe(TTS_FALLBACK_MODEL)
-  })
-
-  it.each([
-    ['api_key_invalid', Object.assign(new Error('API key invalid'), { status: 401 }), 1],
-    ['invalid_request', Object.assign(new Error('bad request'), { status: 400 }), 1],
-    ['network_error', new TypeError('fetch failed'), 1],
-  ])('does not fall back on %s', async (_code, error, expectedCalls) => {
-    mocks.generateContent.mockRejectedValue(error)
-    await expect(generateSpeech({ text: 'No fallback', keys: [{ id: 'g1', key: 'secret' }] }))
-      .rejects.toMatchObject({ name: 'VoiceApiError' })
-    expect(mocks.generateContent).toHaveBeenCalledTimes(expectedCalls)
+  it('does not reach for the tertiary model after a quota failure', async () => {
+    mocks.generateContent.mockRejectedValue(Object.assign(new Error('429 quota exhausted'), { status: 429 }))
+    await expect(transcribeAudio({ wavBase64: 'UklGRg==', keys: [{ id: 'g1', key: 'secret' }] }))
+      .rejects.toMatchObject({ name: 'VoiceApiError', code: 'rate_limited' })
+    expect(mocks.generateContent).toHaveBeenCalledTimes(2)
+    expect(mocks.generateContent.mock.calls.map(call => call[0].model)).toEqual([
+      DICTATION_PRIMARY_MODEL,
+      DICTATION_FALLBACK_MODEL,
+    ])
+    expect(DICTATION_TERTIARY_CODES.has('quota_exceeded')).toBe(false)
+    expect(DICTATION_TERTIARY_CODES.has('service_unavailable')).toBe(true)
   })
 
   it('classifies only meaningful failures as fallbackable', () => {
-    for (const code of ['rate_limited', 'quota_exceeded', 'model_unavailable', 'service_unavailable', 'timeout', 'permission_denied', 'empty_audio_response']) {
-      expect(isTtsFallbackableCode(code)).toBe(true)
+    for (const code of ['rate_limited', 'quota_exceeded', 'model_unavailable', 'service_unavailable', 'timeout', 'permission_denied', 'invalid_request', 'generation_failed']) {
+      expect(isDictationFallbackableCode(code)).toBe(true)
     }
-    for (const code of ['aborted', 'api_key_invalid', 'api_key_missing', 'invalid_request', 'network_error', 'generation_failed']) {
-      expect(isTtsFallbackableCode(code)).toBe(false)
+    for (const code of ['aborted', 'api_key_invalid', 'api_key_missing', 'network_error']) {
+      expect(isDictationFallbackableCode(code)).toBe(false)
     }
   })
 })

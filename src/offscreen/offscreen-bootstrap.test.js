@@ -401,4 +401,30 @@ describe('offscreen bootstrap bridge', () => {
 
     bridge.dispose()
   })
+
+  it('gives up after the attempt cap instead of retrying a message forever', async () => {
+    vi.useFakeTimers()
+    const runtime = createRuntime()
+    runtime.sendMessage.mockRejectedValue(new Error('service worker unreachable'))
+    const worker = new FakeWorker()
+    const bridge = createOffscreenBridge({ runtime, createWorker: () => worker })
+    bridge.mount()
+    runtime.getListener()(serviceWorkerCommand({
+      type: 'HERA_GENERATION_START',
+      jobId: 'job-cap',
+      geminiKeys: [],
+    }))
+
+    worker.emit({ kind: 'heartbeat', uptimeMs: 15_000 })
+    await Promise.resolve()
+    await Promise.resolve()
+    // 1 ilk deneme + 7 yeniden deneme = 8; sonrasında vazgeçilir.
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(runtime.sendMessage).toHaveBeenCalledTimes(8)
+
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(runtime.sendMessage).toHaveBeenCalledTimes(8)
+
+    bridge.dispose()
+  })
 })

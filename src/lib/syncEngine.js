@@ -52,6 +52,9 @@ export const SYNC_BATCH_SIZE = 500
 
 /** Tek çekimde alınacak en fazla belge. */
 export const SYNC_PULL_LIMIT = 200
+
+/** Aynı uzak belge kaç kez üst üste başarısız olursa karantinaya alınır. */
+export const UZAK_BELGE_DENEME_SINIRI = 3
 export const SESSION_DOC_SAFE_BYTES = 700 * 1024
 export const SESSION_CHUNK_BYTES = 480 * 1024
 
@@ -190,6 +193,8 @@ export function createSyncEngine({
 
   let durum = SYNC_STATE.IDLE
   let calisiyor = false
+  // Aynı uzak belgenin üst üste başarısız denemelerini sayar (karantina eşiği).
+  const uzakHataSayaci = new Map()
   let sonCevrim = null
 
   function bildir(yeni, detay = {}) {
@@ -361,6 +366,7 @@ export function createSyncEngine({
     let imlec = baslangic
     let uygulanan = 0
     let cekilen = 0
+    let atlanan = 0
 
     for (let tur = 0; tur < 50; tur += 1) {
       const yanit = await transport.pullEntities({ uid, cursor: imlec, limit: pullLimit })
@@ -369,8 +375,24 @@ export function createSyncEngine({
       cekilen += belgeler.length
 
       for (const uzak of belgeler) {
-        const sonuc = await uzakUygula(uid, subkeys, uzak)
-        if (sonuc) uygulanan += 1
+        // Çözülemeyen belge ilk denemelerde açık hata verir (imleç ilerlemez);
+        // aynı belge üst üste başarısız olursa karantinaya alınır ki tek bozuk
+        // kayıt tüm bulut→yerel akışını kalıcı olarak kilitlemesin.
+        try {
+          const sonuc = await uzakUygula(uid, subkeys, uzak)
+          uzakHataSayaci.delete(uzak?.opaqueEntityId)
+          if (sonuc) uygulanan += 1
+        } catch (error) {
+          const anahtar = uzak?.opaqueEntityId || 'bilinmeyen'
+          const deneme = (uzakHataSayaci.get(anahtar) || 0) + 1
+          if (deneme < UZAK_BELGE_DENEME_SINIRI) {
+            uzakHataSayaci.set(anahtar, deneme)
+            throw error
+          }
+          uzakHataSayaci.delete(anahtar)
+          atlanan += 1
+          console.warn('sync: uzak belge karantinaya alindi', anahtar, error?.message || error)
+        }
         const yeni = cursorFromDocument(uzak)
         if (ilerlemeVarMi(imlec, yeni)) imlec = yeni
       }
@@ -380,7 +402,7 @@ export function createSyncEngine({
 
     // Adım 9: imleç yalnızca ilerlediyse kaydedilir.
     if (ilerlemeVarMi(baslangic, imlec)) await writeCursor(imlec)
-    return { pulled: cekilen, applied: uygulanan }
+    return { pulled: cekilen, applied: uygulanan, quarantined: atlanan }
   }
 
   /** Adım 7-8: AAD doğrulaması, sürüm karşılaştırması, yerel uygulama. */
@@ -491,6 +513,7 @@ export function createSyncEngine({
           batches: gonderim.batches,
           pulled: cekim.pulled,
           applied: cekim.applied,
+          quarantined: cekim.quarantined,
           at: now(),
         }
         sonCevrim = ozet

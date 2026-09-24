@@ -104,6 +104,24 @@ describe('streamResearch', () => {
     expect(finalPrompt).toContain('Dunya Gunes yorungesi')
   })
 
+  it('stamps the research prompt with the local calendar day, not the UTC day', async () => {
+    vi.useFakeTimers()
+    try {
+      // Yerel saat 24 Eylul 01:30 (UTC+3) => UTC hala 23 Eylul.
+      vi.setSystemTime(new Date(2026, 8, 24, 1, 30))
+      await collectEvents(streamResearch(
+        [{ role: 'user', content: 'dunya suan gunesin neresinde' }],
+        [{ id: 'g1', key: 'gemini-key' }],
+        [{ id: 't1', key: 'tavily-key' }],
+      ))
+
+      const finalPrompt = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
+      expect(finalPrompt).toContain('Bugunun tarihi: 2026-09-24')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('applies systemInstruction only to the final research answer', async () => {
     await collectEvents(streamResearch(
       [{ role: 'user', content: 'guncel bilgi' }],
@@ -180,6 +198,21 @@ describe('streamResearch', () => {
     ]))
     const contents = mocks.generateContentStreamMock.mock.calls[0][0].contents.at(-1).parts[0].text
     expect(contents).toBe('bugunun haberlerini ara')
+  })
+
+  it('marks a local Tavily network failure as network, not cooldown', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const events = await collectEvents(streamResearch(
+      [{ role: 'user', content: 'bugunun haberlerini ara' }],
+      [{ id: 'g1', key: 'gemini-key' }],
+      [{ id: 't1', key: 'tavily-key' }],
+    ))
+
+    expect(events).toEqual(expect.arrayContaining([
+      { event: 'key_status', data: { provider: 'tavily', keyId: 't1', status: 'network' } },
+    ]))
+    expect(events.some(event => event.event === 'key_status' && event.data?.status === 'cooldown')).toBe(false)
   })
 
   it('tries the next Tavily key when the primary key is rate-limited', async () => {
@@ -985,6 +1018,62 @@ describe('cross-provider Gemini fallback', () => {
 
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'api_key_invalid' } })
     expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the partial answer instead of restarting it on Gemini after content streamed', async () => {
+    const encoder = new TextEncoder()
+    let okunan = 0
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            okunan += 1
+            if (okunan === 1) {
+              return {
+                value: encoder.encode(`${JSON.stringify({ model: 'gpt-oss:120b', message: { content: 'YARIM CEVAP' } })}\n`),
+                done: false,
+              }
+            }
+            throw new TypeError('network error mid-stream')
+          },
+        }),
+      },
+    })
+    mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Gemini tam cevap'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'selam' }],
+      { fallbackGeminiKeys: geminiFallbackKeys },
+      ollamaKeys,
+      undefined,
+      'gpt-oss:120b',
+      'ollama',
+    ))
+
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'YARIM CEVAP' } })
+    expect(events.some(event => event.event === 'model_resolved' && event.data?.provider === 'gemini')).toBe(false)
+    expect(mocks.generateContentStreamMock).not.toHaveBeenCalled()
+    expect(events.at(-1)?.event).toBe('error')
+  })
+
+  it('treats a CORS-blocked transport failure as a network error and tries the next key', async () => {
+    mocks.generateContentStreamMock.mockRejectedValue(new TypeError('Failed to fetch: blocked by CORS policy'))
+
+    const events = await collectEvents(streamChat(
+      [{ role: 'user', content: 'selam' }],
+      {},
+      [{ id: 'k1', key: 'key-one' }, { id: 'k2', key: 'key-two' }],
+      undefined,
+      'gemini-3.1-flash',
+      'gemini',
+    ))
+
+    const kullanilanAnahtarlar = mocks.clientOptionsMock.mock.calls.map(([options]) => options?.apiKey)
+    expect(kullanilanAnahtarlar).toContain('key-one')
+    expect(kullanilanAnahtarlar).toContain('key-two')
+    expect(events.some(event => event.event === 'error')).toBe(true)
   })
 })
 

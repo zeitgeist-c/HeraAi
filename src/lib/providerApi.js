@@ -155,8 +155,14 @@ function attachmentText(attachment) {
   return `--- BEGIN FILE: ${name} ---\n${attachment.modelText.trim()}\n--- END FILE: ${name} ---`
 }
 
+// Tarih gecmisi ref'leri (data'siz) istegi bloklamamali; yalniz gercekten
+// gonderilen yuk (data/modelText) saglayici kisitini tetikler.
+function attachmentCarriesPayload(attachment) {
+  return Boolean(attachment?.data || attachment?.modelText)
+}
+
 function assertNoPdf(attachments) {
-  if ((attachments || []).some(attachment => attachment?.mimeType === 'application/pdf')) {
+  if ((attachments || []).some(attachment => attachment?.mimeType === 'application/pdf' && attachmentCarriesPayload(attachment))) {
     throw createProviderError('pdf_requires_gemini', 'PDF attachments require Gemini')
   }
 }
@@ -203,7 +209,7 @@ function toOllamaMessages(messages, systemInstruction, fallbackImage = null) {
       attachments.push({ name: 'image.png', mimeType: 'image/png', data: fallbackImage })
     }
     assertNoPdf(attachments)
-    if (attachments.some(attachment => attachment?.mimeType?.startsWith('image/'))) {
+    if (attachments.some(attachment => attachment?.mimeType?.startsWith('image/') && attachment.data)) {
       throw createProviderError('image_not_supported', 'The selected Ollama model accepts text only')
     }
     const textParts = [message.content]

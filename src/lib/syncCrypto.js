@@ -264,7 +264,13 @@ export async function openMasterSecretFromRecovery(envelope, code) {
   if (!envelope?.ciphertext || !envelope?.nonce || !envelope?.salt) {
     throw cryptoError('recovery_envelope_invalid')
   }
-  const wrappingKey = await deriveRecoveryWrappingKey(code, base64ToBytes(envelope.salt), {
+  let salt
+  try {
+    salt = base64ToBytes(envelope.salt)
+  } catch {
+    throw cryptoError('recovery_envelope_invalid')
+  }
+  const wrappingKey = await deriveRecoveryWrappingKey(code, salt, {
     iterations: envelope.iterations || PBKDF2_ITERATIONS,
   })
   try {
