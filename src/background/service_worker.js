@@ -1,17 +1,9 @@
-import { getKeys, resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
+import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
 import {
   MODEL_CATALOG,
   PROVIDERS,
   getProviderForModel,
 } from '../lib/models.js';
-import {
-  COMPARISON_SLOTS,
-  allVariantsTerminal,
-  applyBothSelection,
-  applyWinnerSelection,
-  createComparisonJob,
-  isComparisonJob,
-} from '../lib/comparison.js';
 import {
   classifyWithGemmaRouter,
   selectLocalFallback,
@@ -400,16 +392,6 @@ function createQueuedGeneration(message, storedGeneration = null) {
     selectionReasonCode: message.selectionReasonCode ?? stored.selectionReasonCode ?? null,
     routerModel: message.routerModel ?? stored.routerModel ?? null,
     language: message.language ?? stored.language ?? 'tr',
-    ...(message.kind === 'comparison' || stored.kind === 'comparison'
-      ? {
-          kind: 'comparison',
-          comparisonId: message.comparisonId ?? stored.comparisonId ?? message.jobId,
-          variants: message.variants != null
-            ? createComparisonJob({ jobId: message.jobId, variants: message.variants }).variants
-            : (stored.variants ?? createComparisonJob({ jobId: message.jobId }).variants),
-          selection: message.selection ?? stored.selection ?? { winnerSlot: null, decidedAt: null },
-        }
-      : {}),
     status: 'queued',
     revision: normalizedRevision(stored.revision),
     content: typeof stored.content === 'string' ? stored.content : '',
@@ -519,30 +501,6 @@ function createThinkingPlaceholder(message, queuedGeneration) {
   };
 }
 
-function createComparisonThinkingPlaceholder(message, queuedGeneration, slot) {
-  const base = createThinkingPlaceholder(message, queuedGeneration);
-  const variant = queuedGeneration.variants?.[slot] || {};
-  return {
-    ...base,
-    id: `${message.assistantMessageId}:${slot}`,
-    comparisonId: queuedGeneration.comparisonId ?? queuedGeneration.jobId,
-    variantId: slot,
-    comparisonSelected: false,
-    contextExcluded: false,
-    ...(typeof variant.model === 'string' && variant.model
-      ? { model: variant.model }
-      : {}),
-    ...(typeof variant.provider === 'string' && variant.provider
-      ? { provider: variant.provider }
-      : {}),
-  };
-}
-
-function createThinkingPlaceholders(message, queuedGeneration) {
-  if (!isComparisonJob(queuedGeneration)) return [createThinkingPlaceholder(message, queuedGeneration)];
-  return COMPARISON_SLOTS.map(slot => createComparisonThinkingPlaceholder(message, queuedGeneration, slot));
-}
-
 function generationLivenessTimestamp(activeGeneration) {
   const candidates = [
     activeGeneration?.lastHeartbeatAt,
@@ -573,317 +531,8 @@ async function markGenerationInterrupted(activeGeneration, reason) {
   return interruptedGeneration;
 }
 
-function applyVariantReport(currentVariant, details = {}) {
-  const currentRevision = normalizedRevision(currentVariant?.revision);
-  const revision = normalizedRevision(
-    details.finalRev ?? details.finalRevision ?? details.revision,
-    currentRevision,
-  );
-  const acceptsReportedContent = revision >= currentRevision;
-  return {
-    ...currentVariant,
-    revision: Math.max(currentRevision, revision),
-    content: acceptsReportedContent && typeof details.content === 'string'
-      ? details.content
-      : (currentVariant?.content || ''),
-    sources: acceptsReportedContent && Array.isArray(details.sources)
-      ? details.sources
-      : (Array.isArray(currentVariant?.sources) ? currentVariant.sources : []),
-    resolvedModel: details.resolvedModel || currentVariant?.resolvedModel || null,
-  };
-}
-
-async function writeComparisonVariantError(activeGeneration, variantId, errorCode, details = {}, now = Date.now()) {
-  const nextVariant = {
-    ...applyVariantReport(activeGeneration.variants[variantId], details),
-    status: 'error',
-    errorCode: errorCode || 'generation_failed',
-    completedAt: now,
-  };
-  const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
-  const terminal = allVariantsTerminal({ ...activeGeneration, variants: nextVariants });
-  const nextGeneration = {
-    ...withoutSensitiveGenerationData(activeGeneration),
-    variants: nextVariants,
-    status: terminal ? 'error' : activeGeneration.status,
-    ...(terminal ? { streamCompletedAt: now, completedAt: now } : {}),
-    lastSnapshotAt: now,
-    updatedAt: now,
-  };
-
-  await setActiveGeneration(nextGeneration);
-  const snapshot = generationSnapshot(nextGeneration);
-  if (terminal) {
-    await broadcastRuntimeMessage({
-      type: 'DONE',
-      forwardedBy: 'service_worker',
-      jobId: nextGeneration.jobId,
-      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-      status: 'error',
-      finalRev: nextGeneration.revision,
-      finalRevision: nextGeneration.revision,
-      errorCode: nextGeneration.errorCode || errorCode || 'generation_failed',
-      activeGeneration: snapshot,
-      snapshot,
-    });
-    await closeOffscreenDocument();
-  } else {
-    await broadcastRuntimeMessage({
-      type: 'ACTIVE_GEN_CHANGED',
-      forwardedBy: 'service_worker',
-      jobId: nextGeneration.jobId,
-      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-      variantId,
-      revision: nextVariant.revision,
-      content: nextVariant.content,
-      sources: nextVariant.sources,
-      status: nextGeneration.status,
-      snapshot,
-    });
-  }
-  return nextGeneration;
-}
-
-async function writeComparisonVariantDone(activeGeneration, variantId, details = {}, now = Date.now()) {
-  const nextVariant = {
-    ...applyVariantReport(activeGeneration.variants[variantId], details),
-    status: details.cancelled ? 'cancelled' : 'completed',
-    ...(details.cancelled ? {} : { errorCode: null }),
-    completedAt: now,
-  };
-  const nextVariants = { ...activeGeneration.variants, [variantId]: nextVariant };
-  return persistComparisonVariants(activeGeneration, nextVariants, {
-    cancelled: Boolean(details.cancelled),
-    now,
-  });
-}
-
-async function applyComparisonDoneSummary(activeGeneration, summary = {}, details = {}, now = Date.now()) {
-  const nextVariants = { ...activeGeneration.variants };
-  for (const slot of COMPARISON_SLOTS) {
-    const reported = summary[slot];
-    if (!reported || !nextVariants[slot]) continue;
-    nextVariants[slot] = {
-      ...applyVariantReport(nextVariants[slot], reported),
-      status: reported.status === 'error'
-        ? 'error'
-        : (reported.status === 'cancelled' ? 'cancelled' : 'completed'),
-      errorCode: reported.status === 'error'
-        ? (reported.errorCode || 'generation_failed')
-        : null,
-      completedAt: now,
-    };
-  }
-  return persistComparisonVariants(activeGeneration, nextVariants, {
-    cancelled: Boolean(details.cancelled),
-    now,
-  });
-}
-
-async function persistComparisonVariants(activeGeneration, nextVariants, { cancelled = false, now = Date.now() } = {}) {
-  const terminal = allVariantsTerminal({ ...activeGeneration, variants: nextVariants });
-  const revision = Math.max(
-    normalizedRevision(activeGeneration.revision),
-    ...COMPARISON_SLOTS.map(slot => normalizedRevision(nextVariants[slot]?.revision)),
-  );
-  const nextGeneration = {
-    ...withoutSensitiveGenerationData(activeGeneration),
-    variants: nextVariants,
-    status: terminal ? (cancelled ? 'cancelled' : 'completed') : activeGeneration.status,
-    revision,
-    ...(terminal ? { streamCompletedAt: now, completedAt: now } : {}),
-    lastSnapshotAt: now,
-    updatedAt: now,
-    presentedRevision: Math.max(normalizedRevision(activeGeneration.presentedRevision), revision),
-  };
-
-  await setActiveGeneration(nextGeneration);
-  const snapshot = generationSnapshot(nextGeneration);
-  if (!terminal) {
-    await broadcastRuntimeMessage({
-      type: 'ACTIVE_GEN_CHANGED',
-      forwardedBy: 'service_worker',
-      jobId: nextGeneration.jobId,
-      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-      revision,
-      status: nextGeneration.status,
-      snapshot,
-    });
-    return { terminal: false, activeGeneration: snapshot, nextGeneration };
-  }
-
-  if (cancelled) {
-    await broadcastRuntimeMessage({
-      type: 'CANCEL_DONE',
-      forwardedBy: 'service_worker',
-      jobId: nextGeneration.jobId,
-      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-      status: 'cancelled',
-      finalRev: nextGeneration.revision,
-      finalRevision: nextGeneration.revision,
-      activeGeneration: snapshot,
-      snapshot,
-    });
-  } else {
-    await broadcastRuntimeMessage({
-      type: 'DONE',
-      forwardedBy: 'service_worker',
-      jobId: nextGeneration.jobId,
-      comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-      status: 'completed',
-      finalRev: nextGeneration.revision,
-      finalRevision: nextGeneration.revision,
-      errorCode: null,
-      activeGeneration: snapshot,
-      snapshot,
-    });
-  }
-  await closeOffscreenDocument();
-  return { terminal: true, activeGeneration: snapshot, nextGeneration };
-}
-
-async function handleSelectComparisonWinner(message) {
-  const comparisonId = message?.comparisonId ?? message?.jobId ?? null;
-  const winnerSlot = message?.winnerSlot;
-  if (!comparisonId || !COMPARISON_SLOTS.includes(winnerSlot)) {
-    return { ok: false, errorCode: 'invalid_request' };
-  }
-
-  const storedState = await storageGet(['sessions', 'activeGeneration']);
-  const sessions = Array.isArray(storedState?.sessions) ? storedState.sessions : [];
-  let matched = false;
-  const nextSessions = sessions.map(session => {
-    if (
-      (message.sessionId && session?.id !== message.sessionId)
-      || !Array.isArray(session?.messages)
-      || !session.messages.some(item => item?.comparisonId === comparisonId)
-    ) {
-      return session;
-    }
-    matched = true;
-    return {
-      ...session,
-      messages: applyWinnerSelection(session.messages, comparisonId, winnerSlot),
-      updatedAt: Date.now(),
-    };
-  });
-  if (!matched) return { ok: false, errorCode: 'not_found' };
-
-  const activeGeneration = storedState?.activeGeneration || null;
-  const activeMatches = activeGeneration && (
-    activeGeneration.comparisonId === comparisonId || activeGeneration.jobId === comparisonId
-  );
-  const value = {
-    sessions: nextSessions,
-    ...(activeMatches
-      ? {
-          activeGeneration: {
-            ...withoutSensitiveGenerationData(activeGeneration),
-            selection: { winnerSlot, decidedAt: Date.now() },
-            updatedAt: Date.now(),
-          },
-        }
-      : {}),
-  };
-  // Both session messages and the stored selection update in a single write.
-  await storageSet(value);
-
-  await broadcastRuntimeMessage({
-    type: 'COMPARISON_WINNER_SELECTED',
-    forwardedBy: 'service_worker',
-    jobId: activeMatches ? activeGeneration.jobId : null,
-    comparisonId,
-    winnerSlot,
-  });
-  return { ok: true, comparisonId, winnerSlot };
-}
-
-async function handleResolveComparisonBoth(message) {
-  const comparisonId = message?.comparisonId ?? message?.jobId ?? null;
-  if (!comparisonId) {
-    return { ok: false, errorCode: 'invalid_request' };
-  }
-
-  const storedState = await storageGet(['sessions', 'activeGeneration']);
-  const sessions = Array.isArray(storedState?.sessions) ? storedState.sessions : [];
-  let matched = false;
-  const nextSessions = sessions.map(session => {
-    if (
-      (message.sessionId && session?.id !== message.sessionId)
-      || !Array.isArray(session?.messages)
-      || !session.messages.some(item => item?.comparisonId === comparisonId)
-    ) {
-      return session;
-    }
-    matched = true;
-    return {
-      ...session,
-      messages: applyBothSelection(session.messages, comparisonId),
-      updatedAt: Date.now(),
-    };
-  });
-  if (!matched) return { ok: false, errorCode: 'not_found' };
-
-  const activeGeneration = storedState?.activeGeneration || null;
-  const activeMatches = activeGeneration && (
-    activeGeneration.comparisonId === comparisonId || activeGeneration.jobId === comparisonId
-  );
-  const value = {
-    sessions: nextSessions,
-    ...(activeMatches
-      ? {
-          activeGeneration: {
-            ...withoutSensitiveGenerationData(activeGeneration),
-            selection: { winnerSlot: 'both', decidedAt: Date.now() },
-            updatedAt: Date.now(),
-          },
-        }
-      : {}),
-  };
-  // Both session messages and the stored selection update in a single write.
-  await storageSet(value);
-
-  await broadcastRuntimeMessage({
-    type: 'COMPARISON_BOTH_SELECTED',
-    forwardedBy: 'service_worker',
-    jobId: activeMatches ? activeGeneration.jobId : null,
-    comparisonId,
-    winnerSlot: 'both',
-  });
-  return { ok: true, comparisonId, winnerSlot: 'both' };
-}
-
-async function handleGetModelAvailability() {
-  const providers = [...new Set(MODEL_CATALOG.map(model => model.provider))];
-  const entries = await Promise.all(providers.map(async provider => {
-    try {
-      return [provider, await getKeys(provider)];
-    } catch (_error) {
-      return [provider, []];
-    }
-  }));
-  const keysByProvider = Object.fromEntries(entries);
-  return {
-    ok: true,
-    models: MODEL_CATALOG.map(model => ({
-      modelKey: model.key,
-      provider: model.provider,
-      hasKey: (keysByProvider[model.provider] || []).length > 0,
-      supportsImage: Boolean(model.capabilities?.supportsImage),
-      supportsPdf: Boolean(model.capabilities?.supportsPdf),
-    })),
-  };
-}
-
 async function writeTerminalError(activeGeneration, errorCode, details = {}) {
   const now = Date.now();
-  if (
-    isComparisonJob(activeGeneration)
-    && typeof details?.variantId === 'string'
-    && activeGeneration.variants?.[details.variantId]
-  ) {
-    return writeComparisonVariantError(activeGeneration, details.variantId, errorCode, details, now);
-  }
   const currentRevision = normalizedRevision(activeGeneration.revision);
   const revision = normalizedRevision(
     details.finalRev ?? details.finalRevision,
@@ -1100,7 +749,7 @@ async function handleGenerationStart(message) {
   const existingSession = storedSessions.find(session => session?.id === message.sessionId);
   const optimisticMessages = [
     ...requestMessages,
-    ...createThinkingPlaceholders(startMessage, queuedGeneration),
+    createThinkingPlaceholder(startMessage, queuedGeneration),
   ];
   const nextSession = {
     ...(existingSession || {}),
@@ -1160,35 +809,6 @@ async function handleGenerationStart(message) {
       tavilyResolution = await resolveKeysForRequest('tavily');
     }
 
-    let comparisonVariants = null;
-    if (isComparisonJob(runningGeneration)) {
-      comparisonVariants = [];
-      for (const [index, slot] of COMPARISON_SLOTS.entries()) {
-        const variant = runningGeneration.variants[slot];
-        const variantProvider = variant.provider || getProviderForModel(variant.model);
-        const variantResolution = await resolveKeysForRequest(variantProvider);
-        let variantKeys = variantResolution.keys || [];
-        if (
-          index === 1
-          && variantProvider === runningGeneration.variants.a?.provider
-          && variantKeys.length > 1
-        ) {
-          variantKeys = [...variantKeys.slice(1), variantKeys[0]];
-        }
-        let fallbackGeminiKeys = [];
-        if (variantProvider !== PROVIDERS.GEMINI) {
-          fallbackGeminiKeys = (await resolveKeysForRequest(PROVIDERS.GEMINI)).keys || [];
-        }
-        comparisonVariants.push({
-          variantId: slot,
-          model: variant.model,
-          provider: variantProvider,
-          providerKeys: variantKeys,
-          fallbackGeminiKeys,
-        });
-      }
-    }
-
     await ensureOffscreenDocument();
     await probeOffscreenDocument();
     await sendOffscreenCommandWithRetry({
@@ -1210,13 +830,6 @@ async function handleGenerationStart(message) {
       mode: runningGeneration.mode,
       systemInstruction: startMessage.systemInstruction || '',
       language: runningGeneration.language,
-      ...(isComparisonJob(runningGeneration)
-        ? {
-            kind: 'comparison',
-            comparisonId: runningGeneration.comparisonId ?? runningGeneration.jobId,
-            variants: comparisonVariants,
-          }
-        : {}),
     }, response => (
       response?.ok === true
       && response.accepted === true
@@ -1256,14 +869,6 @@ async function handleSnapshot(message) {
     || !ACTIVE_GENERATION_STATUSES.has(activeGeneration.status)
   ) {
     return { ok: true, accepted: false, ignored: true };
-  }
-
-  if (
-    isComparisonJob(activeGeneration)
-    && typeof message.variantId === 'string'
-    && activeGeneration.variants?.[message.variantId]
-  ) {
-    return handleComparisonSnapshot(activeGeneration, message.variantId, message);
   }
 
   const revision = normalizedRevision(message.revision, -1);
@@ -1318,61 +923,6 @@ async function handleSnapshot(message) {
   return { ok: true, accepted: true, revision };
 }
 
-async function handleComparisonSnapshot(activeGeneration, variantId, message) {
-  const variant = activeGeneration.variants[variantId];
-  const revision = normalizedRevision(message.revision, -1);
-  const currentRevision = normalizedRevision(variant.revision);
-  if (revision <= currentRevision) {
-    return {
-      ok: true,
-      accepted: false,
-      revision: currentRevision,
-    };
-  }
-
-  const now = Date.now();
-  const nextVariant = {
-    ...applyVariantReport(variant, message),
-    status: 'running',
-  };
-  const nextGeneration = {
-    ...withoutSensitiveGenerationData(activeGeneration),
-    variants: { ...activeGeneration.variants, [variantId]: nextVariant },
-    status: 'running',
-    revision: Math.max(normalizedRevision(activeGeneration.revision), revision),
-    lastSnapshotAt: now,
-    presentedRevision: revision,
-    updatedAt: now,
-  };
-
-  // This write must resolve before either the panel update or PRESENTED ack.
-  await setActiveGeneration(nextGeneration);
-
-  const snapshot = generationSnapshot(nextGeneration);
-  await broadcastRuntimeMessage({
-    type: 'ACTIVE_GEN_CHANGED',
-    forwardedBy: 'service_worker',
-    jobId: nextGeneration.jobId,
-    comparisonId: nextGeneration.comparisonId ?? nextGeneration.jobId,
-    variantId,
-    revision,
-    content: nextVariant.content,
-    sources: nextVariant.sources,
-    status: nextGeneration.status,
-    snapshot,
-  });
-  await broadcastRuntimeMessage({
-    type: 'PRESENTED',
-    target: 'offscreen',
-    forwardedBy: 'service_worker',
-    jobId: nextGeneration.jobId,
-    variantId,
-    revision,
-  });
-
-  return { ok: true, accepted: true, revision };
-}
-
 async function handleHeartbeat(message) {
   const activeGeneration = await getActiveGeneration();
   if (
@@ -1413,25 +963,11 @@ async function handleModelResolved(message) {
     resolvedModel,
     updatedAt: Date.now(),
   };
-  if (
-    isComparisonJob(activeGeneration)
-    && typeof message.variantId === 'string'
-    && nextGeneration.variants?.[message.variantId]
-  ) {
-    nextGeneration.variants = {
-      ...nextGeneration.variants,
-      [message.variantId]: {
-        ...nextGeneration.variants[message.variantId],
-        resolvedModel,
-      },
-    };
-  }
   await setActiveGeneration(nextGeneration);
   await broadcastRuntimeMessage({
     type: 'MODEL_RESOLVED',
     forwardedBy: 'service_worker',
     jobId: nextGeneration.jobId,
-    ...(typeof message.variantId === 'string' && message.variantId ? { variantId: message.variantId } : {}),
     provider: message.provider || nextGeneration.provider || null,
     requestedModel: message.requestedModel || nextGeneration.model || null,
     resolvedModel,
@@ -1526,10 +1062,6 @@ async function handleWorkerDone(message) {
     };
   }
 
-  if (isComparisonJob(activeGeneration)) {
-    return handleComparisonDone(activeGeneration, message);
-  }
-
   const now = Date.now();
   const currentRevision = normalizedRevision(activeGeneration.revision);
   const reportedRevision = normalizedRevision(message.finalRev, currentRevision);
@@ -1597,40 +1129,6 @@ async function handleWorkerDone(message) {
     accepted: true,
     activeGeneration: generationSnapshot(nextGeneration),
   };
-}
-
-async function handleComparisonDone(activeGeneration, message) {
-  if (
-    message?.variants
-    && typeof message.variants === 'object'
-    && !Array.isArray(message.variants)
-  ) {
-    const { terminal, activeGeneration: snapshot } = await applyComparisonDoneSummary(
-      activeGeneration,
-      message.variants,
-      message,
-    );
-    return {
-      ok: true,
-      accepted: true,
-      ...(terminal ? {} : { partial: true }),
-      activeGeneration: snapshot,
-    };
-  }
-  if (typeof message?.variantId === 'string' && activeGeneration.variants?.[message.variantId]) {
-    const { terminal, activeGeneration: snapshot } = await writeComparisonVariantDone(
-      activeGeneration,
-      message.variantId,
-      message,
-    );
-    return {
-      ok: true,
-      accepted: true,
-      ...(terminal ? {} : { partial: true }),
-      activeGeneration: snapshot,
-    };
-  }
-  return { ok: true, accepted: false, ignored: true };
 }
 
 async function handleWorkerError(message) {
@@ -1928,12 +1426,6 @@ function handleProtocolMessage(message) {
       return handleWorkerError(message);
     case 'CANCEL':
       return handleCancel(message);
-    case 'SELECT_COMPARISON_WINNER':
-      return handleSelectComparisonWinner(message);
-    case 'RESOLVE_COMPARISON_BOTH':
-      return handleResolveComparisonBoth(message);
-    case 'GET_MODEL_AVAILABILITY':
-      return handleGetModelAvailability();
     case 'DONE_ACK':
     case 'CANCEL_DONE_ACK':
       return handleDoneAck(message);
@@ -2058,9 +1550,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'CANCEL',
     'DONE_ACK',
     'CANCEL_DONE_ACK',
-    'SELECT_COMPARISON_WINNER',
-    'RESOLVE_COMPARISON_BOTH',
-    'GET_MODEL_AVAILABILITY',
   ]);
   if (!supportedTypes.has(message.type)) return false;
 

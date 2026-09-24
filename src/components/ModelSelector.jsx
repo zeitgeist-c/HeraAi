@@ -83,7 +83,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
         <div
           role="listbox"
           aria-label={t('chat.tooltips.model_selector')}
-          className="absolute bottom-full left-0 z-50 mb-1.5 max-h-56 w-60 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10"
+          className="absolute bottom-full left-0 z-50 mb-1.5 max-h-56 w-48 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10"
         >
           {groupedModels.map(group => {
             const collapsed = isCollapsed(group.provider)
@@ -127,11 +127,6 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                               <span aria-hidden="true" className="shrink-0 text-[10px] leading-none">📷</span>
                             )}
                           </span>
-                          {model.purposeKey && (
-                            <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
-                              {t(model.purposeKey)}
-                            </span>
-                          )}
                           {isSelected && <Check className="h-4 w-4 shrink-0" />}
                         </button>
                       )

@@ -317,21 +317,6 @@
             "label": "Auto",
             "description": "Automatically selects the best model for the request"
         },
-        "comparison": {
-            "open": "Compare models",
-            "title": "Compare two models",
-            "model_a": "Model A",
-            "model_b": "Model B",
-            "start": "Start comparison",
-            "cancel": "Cancel",
-            "different_models": "Choose two different models to compare.",
-            "two_requests_notice": "A comparison sends two requests, one for each model.",
-            "unavailable": "No API key",
-            "incompatible": "Attachment type is not supported",
-            "continue_with_this": "Continue with this answer",
-            "continued_with_both": "Continued with both answers",
-            "locked": "Pick a winning answer to keep chatting."
-        },
         "prompts": {
             "summarize": "Summarize",
             "summarize_files": "Summarize the attached files accurately. Refer to each file by name.",
@@ -360,24 +345,6 @@
         "model_labels": {
             "gpt_oss_120b": "GPT-OSS 120B",
             "nemotron_3_super": "Nemotron 3 Super"
-        },
-        "model_purposes": {
-            "quick_drafts": "Quick drafts",
-            "daily_chat": "Daily chat",
-            "balanced": "Balanced",
-            "docs_images": "Docs & images",
-            "most_capable": "Most capable",
-            "fast_vision": "Fast & visual",
-            "code_images": "Code & images",
-            "code_analysis": "Code & analysis",
-            "general_chat": "General chat",
-            "smartest": "Smartest",
-            "strong_visual": "Strong & visual"
-        },
-        "speeds": {
-            "fast": "Fast",
-            "medium": "Medium",
-            "slow": "Slow"
         },
         "sources_label": "Sources",
         "status": {

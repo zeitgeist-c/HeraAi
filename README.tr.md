@@ -18,14 +18,13 @@ Chrome Yan Panel'de yaşayan özel yapay zekâ asistanı. Gemini, OpenRouter Fre
 
 ## Özellikler
 
-- **Web Araştırma modu** — küre butonu; önce Gemini URL Context, yedekte Tavily.
+- **Web Araştırma** — her mesajda otomatik araştırma: önce Gemini URL Context, yedekte Tavily; Tavily yoksa sessizce atlanır.
 - **Ekran kırpma** — `captureVisibleTab` + canvas katmanı; kırpıntılar `heraai-attachments` IndexedDB'de (`chrome://` sayfalarında çalışmaz).
 - **Dosya eki** — görsel (Gemini/OpenRouter), PDF + ses yalnız Gemini, Office metin çıkarma.
 - **Ses** — yalnız Gemini STT/TTS.
 - **Oturumlar** — geçmiş katmanı, sohbet arama, içe/dışa aktarma.
 - **Şifreli bulut eşitleme** — ayarları, sohbetleri, istatistikleri, şifreli API anahtarlarını ve ek metadatasını tarayıcılar arasında taşır; ek dosyaları kaynak cihazda kalır ve sohbet bazında yalnız cihaz seçeneği vardır.
 - **Kurtarma ve yedek** — kurtarma koduyla cihaz bağlama, cihaz erişimini kaldırma ve şifreli tam yedek alma/geri yükleme.
-- **Karşılaştırma + oto-yönlendirme** — model karşılaştırma paneli ve otomatik sağlayıcı seçimi.
 - **İki dil** — i18next ile TR/EN; açık/koyu/sistem teması; istatistik ve yanıt süresi.
 - **Arkaplan** — service worker + offscreen üretim worker'ı + sağ-tık menüleri.
 
@@ -56,7 +55,7 @@ manifest.json        MV3 (sidePanel, storage, identity, activeTab, scripting, co
 src/App.jsx          Yan Panel React uygulaması
 src/background/      service worker
 src/offscreen/       üretim worker'ı
-src/components/      Settings, ModelSelector, ChatMessage, History, Comparison, Stats, ...
+src/components/      Settings, ModelSelector, ChatMessage, History, Stats, ...
 src/lib/             providerApi, models, keyManager, fileParsers, voiceApi, autoRouter, ...
 src/locales/         en.json, tr.json
 ```

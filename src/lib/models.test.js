@@ -63,12 +63,13 @@ describe('provider-aware model catalog', () => {
     })
   })
 
-  it('gives every model a purpose label that exists in both locales', () => {
-    expect(MODEL_CATALOG.every(model => typeof model.purposeKey === 'string' && model.purposeKey.length > 0)).toBe(true)
+  it('gives every localized model label a text that exists in both locales', () => {
     const read = (source, path) => path.split('.').reduce((acc, part) => acc?.[part], source)
-    MODEL_CATALOG.forEach(model => {
-      expect(read(tr, model.purposeKey), `tr: ${model.purposeKey}`).toBeTruthy()
-      expect(read(en, model.purposeKey), `en: ${model.purposeKey}`).toBeTruthy()
+    const localized = MODEL_CATALOG.filter(model => model.labelKey)
+    expect(localized.map(model => model.modelId)).toEqual(['gpt-oss:120b', 'nemotron-3-super'])
+    localized.forEach(model => {
+      expect(read(tr, model.labelKey), `tr: ${model.labelKey}`).toBeTruthy()
+      expect(read(en, model.labelKey), `en: ${model.labelKey}`).toBeTruthy()
     })
   })
 

@@ -47,7 +47,6 @@ describe('syncModel belge yollari', () => {
 
   it('sozlesmedeki anahtarlar bulut varlik turune eslenir', () => {
     expect(entityTypeForStorageKey('theme')).toBe('setting')
-    expect(entityTypeForStorageKey('comparisonModelKeys')).toBe('setting')
     expect(entityTypeForStorageKey('sessions')).toBe('session')
     expect(entityTypeForStorageKey('geminiApiKeys')).toBe('api_key')
     expect(entityTypeForStorageKey('ollamaApiKeys')).toBe('api_key')

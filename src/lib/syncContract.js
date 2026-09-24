@@ -58,7 +58,6 @@ const CONTRACT = {
   selectedModel: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
   selectedProvider: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
   modelSelectionMode: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
-  comparisonModelKeys: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
 
   // Aşama 9-10'da eklenecek ayarlar; anahtar adları burada sabitlenir ki
   // eşitleme motoru yazıldığında sözleşme değişmesin.

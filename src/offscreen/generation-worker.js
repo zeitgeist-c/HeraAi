@@ -1,6 +1,5 @@
 import { prepareSharedResearch, streamChat, streamResearch, streamVision } from '../lib/api.js'
 import { blobToBase64, getAttachment } from '../lib/attachmentStore.js'
-import { COMPARISON_SLOTS } from '../lib/comparison.js'
 
 export const SNAPSHOT_THROTTLE_MS = 150
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -149,62 +148,6 @@ async function selectStream(payload, signal, engines) {
   )
 }
 
-export function isComparisonStartPayload(payload) {
-  if (!payload || typeof payload !== 'object') return false
-  if (payload.kind === 'comparison') return true
-  return Array.isArray(payload.variants) && payload.variants.length > 0
-}
-
-function comparisonVariantDefs(payload) {
-  const defs = Array.isArray(payload?.variants) ? payload.variants : []
-  return COMPARISON_SLOTS.map(slot => {
-    const def = defs.find(item => (
-      item && (item.variantId === slot || item.slot === slot || item.id === slot)
-    )) || {}
-    return {
-      ...def,
-      variantId: slot,
-      model: def.model ?? payload?.model ?? null,
-      provider: def.provider ?? payload?.provider ?? null,
-    }
-  })
-}
-
-function createComparisonVariantState(def) {
-  return {
-    variantId: def.variantId,
-    model: def.model,
-    provider: def.provider,
-    content: '',
-    sources: [],
-    resolvedModel: null,
-    revision: 0,
-    presentedRevision: 0,
-    snapshotDirty: false,
-    lastPostedAt: null,
-    flushTimer: null,
-    errorCode: null,
-    status: 'running',
-    terminal: false,
-    requestOptions: {
-      providerKeys: Array.isArray(def.providerKeys) ? def.providerKeys : null,
-      fallbackGeminiKeys: Array.isArray(def.fallbackGeminiKeys) ? def.fallbackGeminiKeys : null,
-    },
-  }
-}
-
-function variantSummary(variant) {
-  return {
-    variantId: variant.variantId,
-    status: variant.status,
-    content: variant.content,
-    sources: variant.sources,
-    resolvedModel: variant.resolvedModel,
-    revision: variant.revision,
-    errorCode: variant.errorCode,
-  }
-}
-
 export function createGenerationWorkerRuntime({
   emit = payload => globalThis.postMessage(payload),
   now = () => Date.now(),
@@ -319,278 +262,6 @@ export function createGenerationWorkerRuntime({
     })
   }
 
-  const clearComparisonVariantTimers = job => {
-    if (job?.kind !== 'comparison') return
-    for (const variant of Object.values(job.variants || {})) {
-      if (variant.flushTimer != null) {
-        clearTimeoutFn(variant.flushTimer)
-        variant.flushTimer = null
-      }
-    }
-  }
-
-  const clearComparisonJobTimers = job => {
-    clearComparisonVariantTimers(job)
-    if (job.heartbeatTimer != null) {
-      clearIntervalFn(job.heartbeatTimer)
-      job.heartbeatTimer = null
-    }
-  }
-
-  const flushVariantSnapshot = (job, variant) => {
-    if (job.terminal || variant.terminal || !variant.snapshotDirty) return false
-
-    if (variant.flushTimer != null) {
-      clearTimeoutFn(variant.flushTimer)
-      variant.flushTimer = null
-    }
-    variant.snapshotDirty = false
-    variant.revision += 1
-    variant.lastPostedAt = now()
-    emit({
-      kind: 'snapshot',
-      jobId: job.jobId,
-      variantId: variant.variantId,
-      rev: variant.revision,
-      content: variant.content,
-      sources: variant.sources,
-      resolvedModel: variant.resolvedModel,
-      status: 'running',
-    })
-    return true
-  }
-
-  const scheduleVariantSnapshot = (job, variant) => {
-    if (job.terminal || variant.terminal || !variant.snapshotDirty) return
-
-    if (variant.lastPostedAt == null || now() - variant.lastPostedAt >= SNAPSHOT_THROTTLE_MS) {
-      flushVariantSnapshot(job, variant)
-      return
-    }
-    if (variant.flushTimer != null) return
-
-    const remainingDelay = Math.max(0, SNAPSHOT_THROTTLE_MS - (now() - variant.lastPostedAt))
-    variant.flushTimer = setTimeoutFn(() => {
-      variant.flushTimer = null
-      flushVariantSnapshot(job, variant)
-    }, remainingDelay)
-  }
-
-  const maybeFinishComparison = job => {
-    if (job.terminal) return false
-    const variants = COMPARISON_SLOTS.map(slot => job.variants[slot])
-    if (variants.some(variant => !variant?.terminal)) return false
-
-    job.terminal = true
-    clearComparisonJobTimers(job)
-    const summary = {}
-    for (const slot of COMPARISON_SLOTS) summary[slot] = variantSummary(job.variants[slot])
-    emit({
-      kind: 'done',
-      jobId: job.jobId,
-      cancelled: Boolean(job.cancelRequested),
-      finalRev: Math.max(0, ...variants.map(variant => variant.revision)),
-      variants: summary,
-      errorCode: null,
-    })
-    return true
-  }
-
-  const finishVariantCancelled = (job, variant) => {
-    if (variant.terminal) return
-    variant.terminal = true
-    variant.status = 'cancelled'
-    if (variant.flushTimer != null) {
-      clearTimeoutFn(variant.flushTimer)
-      variant.flushTimer = null
-    }
-    maybeFinishComparison(job)
-  }
-
-  const finishVariantWithError = (job, variant, error) => {
-    if (variant.terminal) return
-
-    flushVariantSnapshot(job, variant)
-    variant.terminal = true
-    variant.status = 'error'
-    variant.revision += 1
-    const code = normalizeErrorCode(error)
-    variant.errorCode = code
-    emit({
-      kind: 'error',
-      jobId: job.jobId,
-      variantId: variant.variantId,
-      code,
-      errorCode: code,
-      finalRev: variant.revision,
-      content: variant.content,
-      sources: variant.sources,
-      resolvedModel: variant.resolvedModel,
-    })
-    maybeFinishComparison(job)
-  }
-
-  const finishVariantCompleted = (job, variant) => {
-    if (variant.terminal) return
-
-    flushVariantSnapshot(job, variant)
-    variant.terminal = true
-    variant.status = 'completed'
-    maybeFinishComparison(job)
-  }
-
-  const runVariantStream = async (job, variant) => {
-    try {
-      const variantPayload = {
-        ...job.payload,
-        model: variant.model ?? job.payload.model,
-        provider: variant.provider ?? job.payload.provider,
-        ...(variant.requestOptions.providerKeys
-          ? { providerKeys: variant.requestOptions.providerKeys }
-          : {}),
-        ...(variant.requestOptions.fallbackGeminiKeys
-          ? { fallbackGeminiKeys: variant.requestOptions.fallbackGeminiKeys }
-          : {}),
-      }
-      const stream = await selectStream(variantPayload, job.controller.signal, engines)
-      for await (const event of stream) {
-        if (job.controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-
-        if (event?.event === 'chunk') {
-          const text = typeof event.data?.text === 'string' ? event.data.text : ''
-          if (text) {
-            variant.content += text
-            variant.snapshotDirty = true
-            scheduleVariantSnapshot(job, variant)
-          }
-          continue
-        }
-
-        if (event?.event === 'sources') {
-          variant.sources = normalizeSources(event.data?.sources)
-          variant.snapshotDirty = true
-          scheduleVariantSnapshot(job, variant)
-          continue
-        }
-
-        if (event?.event === 'model_resolved') {
-          const resolvedModel = typeof event.data?.resolvedModel === 'string'
-            ? event.data.resolvedModel.trim()
-            : ''
-          if (resolvedModel && resolvedModel !== variant.resolvedModel) {
-            variant.resolvedModel = resolvedModel
-            variant.snapshotDirty = true
-            emit({
-              kind: 'model_resolved',
-              jobId: job.jobId,
-              variantId: variant.variantId,
-              provider: event.data?.provider || variant.provider || job.payload.provider || null,
-              requestedModel: event.data?.requestedModel || variant.model || job.payload.model || null,
-              resolvedModel,
-            })
-            scheduleVariantSnapshot(job, variant)
-          }
-          continue
-        }
-
-        if (event?.event === 'key_status') {
-          emit({
-            kind: 'key_status',
-            jobId: job.jobId,
-            variantId: variant.variantId,
-            provider: event.data?.provider,
-            keyId: event.data?.keyId,
-            status: event.data?.status,
-          })
-          continue
-        }
-
-        if (event?.event === 'error') {
-          finishVariantWithError(job, variant, event.data)
-          return
-        }
-      }
-
-      if (job.controller.signal.aborted || job.cancelRequested) {
-        finishVariantCancelled(job, variant)
-      } else {
-        finishVariantCompleted(job, variant)
-      }
-    } catch (error) {
-      if (job.controller.signal.aborted || job.cancelRequested || error?.name === 'AbortError') {
-        finishVariantCancelled(job, variant)
-      } else {
-        finishVariantWithError(job, variant, error)
-      }
-    }
-  }
-
-  const runComparison = async job => {
-    let hydratedRequestMessages
-    try {
-      hydratedRequestMessages = await hydrateRequestMessages(job.payload)
-    } catch (error) {
-      for (const slot of COMPARISON_SLOTS) {
-        finishVariantWithError(job, job.variants[slot], error)
-      }
-      if (activeJob === job) activeJob = null
-      return
-    }
-    job.payload = {
-      ...job.payload,
-      requestMessages: hydratedRequestMessages,
-      requestMessagesHydrated: true,
-      attachmentIds: [],
-    }
-    if (job.payload.mode === 'web' && typeof engines.prepareSharedResearch === 'function') {
-      try {
-        const sharedResearch = await engines.prepareSharedResearch(
-          hydratedRequestMessages,
-          job.payload.tavilyKeys || [],
-          job.controller.signal,
-          {
-            language: job.payload.language,
-            systemInstruction: job.payload.systemInstruction,
-            webContext: job.payload.webContext,
-          },
-        )
-        if (sharedResearch) job.payload = { ...job.payload, sharedResearch }
-      } catch (error) {
-        for (const slot of COMPARISON_SLOTS) {
-          finishVariantWithError(job, job.variants[slot], error)
-        }
-        if (activeJob === job) activeJob = null
-        return
-      }
-    }
-    for (const slot of COMPARISON_SLOTS) {
-      emit({
-        kind: 'heartbeat',
-        jobId: job.jobId,
-        variantId: slot,
-        uptimeMs: Math.max(0, now() - job.workerStartedAt),
-      })
-    }
-    job.heartbeatTimer = setIntervalFn(() => {
-      if (job.terminal) return
-      for (const slot of COMPARISON_SLOTS) {
-        emit({
-          kind: 'heartbeat',
-          jobId: job.jobId,
-          variantId: slot,
-          uptimeMs: Math.max(0, now() - job.workerStartedAt),
-        })
-      }
-    }, HEARTBEAT_INTERVAL_MS)
-
-    try {
-      await Promise.all(COMPARISON_SLOTS.map(slot => runVariantStream(job, job.variants[slot])))
-    } finally {
-      clearComparisonJobTimers(job)
-      if (activeJob === job) activeJob = null
-    }
-  }
-
   const runGeneration = async job => {
     emit({
       kind: 'heartbeat',
@@ -687,29 +358,7 @@ export function createGenerationWorkerRuntime({
     if (activeJob && !activeJob.terminal) {
       activeJob.cancelRequested = true
       activeJob.controller.abort()
-      if (activeJob.kind === 'comparison') clearComparisonJobTimers(activeJob)
-      else clearJobTimers(activeJob)
-    }
-
-    if (isComparisonStartPayload(payload)) {
-      const job = {
-        jobId: payload.jobId,
-        kind: 'comparison',
-        payload,
-        controller: new AbortController(),
-        variants: Object.fromEntries(
-          comparisonVariantDefs(payload).map(def => [def.variantId, createComparisonVariantState(def)]),
-        ),
-        flushTimer: null,
-        heartbeatTimer: null,
-        workerStartedAt: now(),
-        cancelRequested: false,
-        terminal: false,
-        task: null,
-      }
-      activeJob = job
-      job.task = runComparison(job)
-      return job.task
+      clearJobTimers(activeJob)
     }
 
     const job = {
@@ -740,8 +389,7 @@ export function createGenerationWorkerRuntime({
     if (payload?.jobId && payload.jobId !== activeJob.jobId) return false
 
     activeJob.cancelRequested = true
-    if (activeJob.kind === 'comparison') clearComparisonVariantTimers(activeJob)
-    else clearSnapshotTimer(activeJob)
+    clearSnapshotTimer(activeJob)
     activeJob.controller.abort()
     return true
   }
@@ -751,15 +399,6 @@ export function createGenerationWorkerRuntime({
     if (payload?.jobId && payload.jobId !== activeJob.jobId) return false
 
     const revision = Number(payload?.rev ?? payload?.revision)
-    if (activeJob.kind === 'comparison') {
-      if (payload?.variantId && activeJob.variants?.[payload.variantId]) {
-        if (Number.isInteger(revision) && revision > activeJob.variants[payload.variantId].presentedRevision) {
-          activeJob.variants[payload.variantId].presentedRevision = revision
-        }
-        return true
-      }
-      return true
-    }
     if (Number.isInteger(revision) && revision > activeJob.presentedRevision) {
       activeJob.presentedRevision = revision
     }
@@ -767,7 +406,7 @@ export function createGenerationWorkerRuntime({
   }
 
   const handleMessage = payload => {
-    if (payload?.kind === 'start' || payload?.kind === 'comparison') return start(payload)
+    if (payload?.kind === 'start') return start(payload)
     if (payload?.kind === 'cancel') return cancel(payload)
     if (payload?.kind === 'presented') return markPresented(payload)
     return false

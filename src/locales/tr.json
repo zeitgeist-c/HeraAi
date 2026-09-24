@@ -317,21 +317,6 @@
       "label": "Otomatik",
       "description": "İsteğe en uygun modeli otomatik seçer"
     },
-    "comparison": {
-      "open": "Modelleri karşılaştır",
-      "title": "İki modeli karşılaştır",
-      "model_a": "Model A",
-      "model_b": "Model B",
-      "start": "Karşılaştırmayı başlat",
-      "cancel": "İptal",
-      "different_models": "Karşılaştırmak için iki farklı model seçin.",
-      "two_requests_notice": "Karşılaştırma, her model için bir tane olmak üzere iki istek gönderir.",
-      "unavailable": "API anahtarı yok",
-      "incompatible": "Ek türü desteklenmiyor",
-      "continue_with_this": "Bu yanıtla devam et",
-      "continued_with_both": "İki yanıtla devam edildi",
-      "locked": "Sohbete devam etmek için kazanan yanıtı seçin."
-    },
     "prompts": {
       "summarize": "Özetle",
       "summarize_files": "Ekli dosyaları doğru biçimde özetle. Her dosyaya adıyla başvur.",
@@ -360,24 +345,6 @@
     "model_labels": {
       "gpt_oss_120b": "GPT-OSS 120B",
       "nemotron_3_super": "Nemotron 3 Super"
-    },
-    "model_purposes": {
-      "quick_drafts": "Hızlı taslak",
-      "daily_chat": "Günlük sohbet",
-      "balanced": "Dengeli",
-      "docs_images": "Belge & görsel",
-      "most_capable": "En güçlü",
-      "fast_vision": "Hızlı & görselli",
-      "code_images": "Kod & görsel",
-      "code_analysis": "Kod & analiz",
-      "general_chat": "Genel sohbet",
-      "smartest": "En zeki",
-      "strong_visual": "Güçlü & görselli"
-    },
-    "speeds": {
-      "fast": "Hızlı",
-      "medium": "Orta",
-      "slow": "Yavaş"
     },
     "sources_label": "Kaynaklar",
     "status": {

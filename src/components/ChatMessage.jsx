@@ -88,7 +88,6 @@ const ChatMessage = ({
   speechDisabled = false,
   speechStatus = 'idle',
   onToggleSpeech,
-  onSelectWinner,
   searchMatch = false,
   searchCurrent = false,
   concealMeta = false,
@@ -151,12 +150,6 @@ const ChatMessage = ({
   const autoChainLabel = autoRouteLabels.length > 0
     ? `${t('chat.auto.label')} → ${autoRouteLabels.join(' → ')}`
     : ''
-  const showWinnerControl = isBot
-    && message.comparisonId != null
-    && message.selectable !== false
-    && message.comparisonSelected !== true
-    && message.status === 'done'
-    && typeof onSelectWinner === 'function'
   const isContextExcluded = message.contextExcluded === true
   const errorMessage = message.errorCode
     ? t(`chat.generation_errors.${message.errorCode}`, { defaultValue: t('chat.status.error') })
@@ -571,17 +564,6 @@ const ChatMessage = ({
               </button>
             )}
             {!concealMeta && renderRetryButton()}
-            {showWinnerControl && (
-              <button
-                type="button"
-                onClick={() => onSelectWinner?.(message)}
-                aria-label={t('chat.comparison.continue_with_this')}
-                className="hera-action-button"
-              >
-                <Check className="h-3.5 w-3.5" />
-                <span>{t('chat.comparison.continue_with_this')}</span>
-              </button>
-            )}
             {(usedModelLabel || message.startedAt != null) && (
               <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border/70" />
             )}
@@ -627,10 +609,6 @@ function areMessagesEqual(prevProps, nextProps) {
     prevMessage.selectionMode === nextMessage.selectionMode &&
     prevMessage.selectionReasonCode === nextMessage.selectionReasonCode &&
     prevMessage.routerModel === nextMessage.routerModel &&
-    prevMessage.comparisonId === nextMessage.comparisonId &&
-    prevMessage.variantId === nextMessage.variantId &&
-    prevMessage.selectable === nextMessage.selectable &&
-    prevMessage.comparisonSelected === nextMessage.comparisonSelected &&
     prevMessage.contextExcluded === nextMessage.contextExcluded &&
     prevMessage.startedAt === nextMessage.startedAt &&
     prevMessage.completedAt === nextMessage.completedAt &&
@@ -651,7 +629,6 @@ function areMessagesEqual(prevProps, nextProps) {
     prevProps.onEdit === nextProps.onEdit &&
     prevProps.onRetry === nextProps.onRetry &&
     prevProps.onToggleSpeech === nextProps.onToggleSpeech &&
-    prevProps.onSelectWinner === nextProps.onSelectWinner &&
     prevProps.concealMeta === nextProps.concealMeta &&
     prevProps.searchMatch === nextProps.searchMatch &&
     prevProps.searchCurrent === nextProps.searchCurrent
