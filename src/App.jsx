@@ -106,6 +106,7 @@ function clampComposerHeight(value, allowedMax = composerAllowedMaxHeight()) {
 }
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
+const SCREENSHOT_DECODE_TIMEOUT_MS = 10000
 const DICTATION_MAX_DURATION_MS = 200000
 const MIC_PERMISSION_WAIT_MS = 120000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -1925,7 +1926,22 @@ function App() {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
     const img = new Image();
     img.src = dataUrl;
-    await new Promise(res => img.onload = res);
+    // Çözülemeyen görüntüde söz hiç sonuçlanmazsa kırpma akışı kilitli kalırdı
+    // (cropProcessingRef true, besteci "üretiyor" durumunda).
+    await new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(
+        () => reject(new Error('screenshot_decode_timeout')),
+        SCREENSHOT_DECODE_TIMEOUT_MS,
+      );
+      img.onload = () => {
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      img.onerror = () => {
+        clearTimeout(timeoutId);
+        reject(new Error('screenshot_decode_failed'));
+      };
+    });
 
     const scaleX = viewportWidth ? img.naturalWidth / viewportWidth : pixelRatio;
     const scaleY = viewportHeight ? img.naturalHeight / viewportHeight : pixelRatio;
@@ -1974,7 +1990,14 @@ function App() {
         clearCropSelectionState(msg.requestId || null)
         return false
       }
-      if (msg.type === 'HERAAI_CROP_DONE' && !cropProcessingRef.current) {
+      if (msg.type === 'HERAAI_CROP_DONE') {
+        if (cropProcessingRef.current) {
+          // İlk kırpıntının kaydı sürerken gelen ikinci istek kuyruğa alınmıyor:
+          // sessizce yutmak yerine seçim durumu temizlenir ve kullanıcı uyarılır.
+          clearCropSelectionState(msg.requestId || null)
+          notifyError(t('chat.crop_busy'))
+          return false
+        }
         if (!clearCropSelectionState(msg.requestId || null)) return false
         cropProcessingRef.current = true;
         void (async () => {
@@ -4451,7 +4474,9 @@ function App() {
     setSelectedModel(nextModel)
     setSelectedProvider(nextProvider)
     if (chrome && chrome.storage) {
-      chrome.storage.local.set({ selectedModel: nextModel, selectedProvider: nextProvider, modelSelectionMode: 'manual' })
+      // Ortak yazım kuyruğu kullanılır: hata sessizce yutulmaz ve bildirim
+      // yalnız bir kez gösterilir (önceki hâlde reddedilen yazım kayboluyordu).
+      void enqueueStorageWrite({ selectedModel: nextModel, selectedProvider: nextProvider, modelSelectionMode: 'manual' })
     }
   }
 

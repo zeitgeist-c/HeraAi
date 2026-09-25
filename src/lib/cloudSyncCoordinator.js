@@ -46,6 +46,12 @@ const SYNC_ENABLED_KEY = 'syncEnabled'
 const SYNC_PAUSED_KEY = 'syncPaused'
 const LAST_SYNC_KEY = 'syncLastSuccessAt'
 const LAST_ERROR_KEY = 'syncLastError'
+/**
+ * Teşhis kaydı: jenerik koda inen hatanın gerçek mesajı. Arayüzde gösterilmez,
+ * yalnız destek sırasında okunur — `sync_failed` tek başına kök nedeni
+ * göstermiyordu.
+ */
+const LAST_ERROR_DETAIL_KEY = 'syncLastErrorDetail'
 const BLOCKED_UNTIL_KEY = 'syncBlockedUntil'
 const LEGACY_CLEANUP_KEY = 'legacyCloudCleanupCompletedAt'
 const ATTACHMENT_POLICY_MIGRATION_KEY = 'attachmentCloudPolicyV2MigratedAt'
@@ -313,7 +319,7 @@ async function createRuntime() {
       if (deleted) {
         if (existing) await vault.removeKey(provider, logicalId)
       } else if (!existing && payload.key) {
-        await vault.addKey(provider, payload.key, {
+        const kayit = await vault.ensureKey(provider, payload.key, {
           id: logicalId,
           label: payload.metadata?.label,
           isPrimary: payload.metadata?.isPrimary,
@@ -321,7 +327,18 @@ async function createRuntime() {
           fingerprint: payload.metadata?.fingerprint,
           model: payload.metadata?.model,
         })
-        await vault.updateKeyMetadata(provider, logicalId, payload.metadata || {})
+        if (!kayit.created) {
+          // Aynı anahtar bu cihazda başka bir kimlikle kayıtlı (iki cihazda iki
+          // kez eklenmiş). Buluttaki kopyayı yerel kimliğe çek: tüm cihazlar
+          // tek kayda yakınsar ve bu belge bir daha çakışma üretmez.
+          await engine.enqueue({
+            storageKey,
+            logicalId: kayit.id,
+            entityType: 'api_key',
+            entityVersion: newVersion(deviceId),
+          })
+        }
+        await vault.updateKeyMetadata(provider, kayit.id, payload.metadata || {})
       } else if (existing) {
         await vault.updateKeyMetadata(provider, logicalId, payload.metadata || {})
       }
@@ -587,6 +604,7 @@ export async function getCloudSyncStatus() {
     SYNC_PAUSED_KEY,
     LAST_SYNC_KEY,
     LAST_ERROR_KEY,
+    LAST_ERROR_DETAIL_KEY,
     BLOCKED_UNTIL_KEY,
     LEGACY_CLEANUP_KEY,
     DEVICE_ID_KEY,
@@ -601,6 +619,7 @@ export async function getCloudSyncStatus() {
     lastSyncAt: stored[LAST_SYNC_KEY] || null,
     lastError: stored[LAST_ERROR_KEY] || null,
     lastErrorCode: stored[LAST_ERROR_KEY] || null,
+    lastErrorDetail: stored[LAST_ERROR_DETAIL_KEY] || null,
     blockedUntil: stored[BLOCKED_UNTIL_KEY] || null,
     legacyCleanupCompletedAt: stored[LEGACY_CLEANUP_KEY] || null,
     deviceId: runtime.deviceId,
@@ -640,6 +659,11 @@ export async function getCloudSyncStatus() {
       : localStatus.blockedUntil
     await storageSet({
       [LAST_ERROR_KEY]: errorCode,
+      [LAST_ERROR_DETAIL_KEY]: {
+        code: errorCode,
+        message: String(error?.message || error || '').slice(0, 300),
+        at: Date.now(),
+      },
       ...(blockedUntil ? { [BLOCKED_UNTIL_KEY]: blockedUntil } : {}),
     })
     return {
@@ -676,14 +700,24 @@ async function performCloudSyncRun() {
       lastSeenAt: now,
       lastSyncedAt: now,
     })
-    await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null, [BLOCKED_UNTIL_KEY]: null })
+    await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null, [BLOCKED_UNTIL_KEY]: null, [LAST_ERROR_DETAIL_KEY]: null })
     await storageSet({ [KEY_TOMBSTONES]: {} })
     await recordSyncUsage(result)
     return result
   } catch (error) {
     const errorCode = mapCloudSyncError(error)
-    const update = { [LAST_ERROR_KEY]: errorCode }
+    const update = {
+      [LAST_ERROR_KEY]: errorCode,
+      // `sync_failed` gibi jenerik kodların arkasındaki gerçek mesaj saklanır;
+      // aksi halde kök neden hiçbir yerde görünmüyordu.
+      [LAST_ERROR_DETAIL_KEY]: {
+        code: errorCode,
+        message: String(error?.message || error || '').slice(0, 300),
+        at: Date.now(),
+      },
+    }
     if (errorCode === 'quota_exceeded') update[BLOCKED_UNTIL_KEY] = nextPacificQuotaReset()
+    console.error('Cloud sync failed:', errorCode, error)
     await storageSet(update)
     throw new Error(errorCode)
   }
@@ -699,6 +733,7 @@ async function performCloudSyncRun() {
 export async function runCloudSync() {
   if (activeRun) return { skipped: 'already_running' }
   activeRun = true
+  let kilitAlindi = false
   try {
     const lease = await storageGet([SYNC_LEASE_KEY])
     const leaseAt = Number(lease[SYNC_LEASE_KEY]) || 0
@@ -706,10 +741,13 @@ export async function runCloudSync() {
       return { skipped: 'already_running' }
     }
     await storageSet({ [SYNC_LEASE_KEY]: Date.now() })
+    kilitAlindi = true
     return await performCloudSyncRun()
   } finally {
     activeRun = false
-    await storageSet({ [SYNC_LEASE_KEY]: 0 })
+    // Kilit yalnız bu koşu aldıysa bırakılır; aksi halde başka bir koşunun
+    // taze kilidi silinir ve yeniden başlatma koruması tek atımlık kalırdı.
+    if (kilitAlindi) await storageSet({ [SYNC_LEASE_KEY]: 0 })
   }
 }
 

@@ -528,6 +528,21 @@ async function markGenerationInterrupted(activeGeneration, reason) {
     updatedAt: now,
   };
   await setActiveGeneration(interruptedGeneration);
+  // Diğer terminal yollar gibi yayın yapılır: aksi halde başka penceredeki panel
+  // ölü iş için canlı akış göstermeye devam ederdi.
+  await broadcastRuntimeMessage({
+    type: 'DONE',
+    forwardedBy: 'service_worker',
+    jobId: interruptedGeneration.jobId,
+    status: 'interrupted',
+    finalRev: interruptedGeneration.revision,
+    finalRevision: interruptedGeneration.revision,
+    content: interruptedGeneration.content,
+    sources: interruptedGeneration.sources,
+    errorCode: 'generation_interrupted',
+    activeGeneration: generationSnapshot(interruptedGeneration),
+    snapshot: generationSnapshot(interruptedGeneration),
+  });
   return interruptedGeneration;
 }
 
@@ -768,8 +783,14 @@ async function handleGenerationStart(message) {
           ? (existingSession?.activeWebUrls || [])
           : (Array.isArray(startMessage.webContext?.urls) ? startMessage.webContext.urls : (existingSession?.activeWebUrls || []))),
   };
+  // Yazımdan hemen önce taze listeyi oku: bu noktaya kadar (auto yönlendirme ağ
+  // çağrısı dahil) panel veya eşitleme başka oturumları değiştirmiş olabilir;
+  // bayat anlık görüntüyle yazmak o değişiklikleri ezer, silinen sohbeti geri
+  // getirirdi.
+  const tazeState = await storageGet(['sessions'])
   const nextSessions = [
-    ...storedSessions.filter(session => session?.id !== message.sessionId),
+    ...(Array.isArray(tazeState?.sessions) ? tazeState.sessions : storedSessions)
+      .filter(session => session?.id !== message.sessionId),
     nextSession,
   ];
 

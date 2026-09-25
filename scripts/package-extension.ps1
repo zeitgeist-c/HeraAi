@@ -68,3 +68,10 @@ if ($getFileHash) {
   }
 }
 Write-Host "SHA-256 $hashValue"
+
+# sha256sum uyumlu yan dosya (LF satır sonu, iki boşluk ayırıcı) — denetim notu:
+# 1.10.18'e kadar elle üretiliyordu, artık paketleme adımı kendisi yazıyor.
+$sidecarPath = "$zipPath.sha256"
+$sidecarLine = "$hashValue  $([System.IO.Path]::GetFileName($zipPath))`n"
+[System.IO.File]::WriteAllText($sidecarPath, $sidecarLine, [System.Text.Encoding]::ASCII)
+Write-Host "Created $sidecarPath"

@@ -80,6 +80,14 @@ function SyncPanel() {
     }
   }, [])
 
+  // Düğmeden gelen yenileme de ilk yüklemedeki hata eşlemesini kullanır; aksi
+  // halde tıklama sessizce başarısız olurdu.
+  const refreshWithFeedback = useCallback(() => {
+    refresh().catch(error => {
+      setStatus({ signedIn: false, state: 'error', lastError: describeRuntimeError(error) })
+    })
+  }, [refresh])
+
   useEffect(() => {
     refresh().catch(error => {
       // Ham Chrome metni panele taşınmaz; kod haritası üzerinden gösterilir.
@@ -380,7 +388,7 @@ function SyncPanel() {
             {t('setup.sync.google_session_preserved')}
           </p>
         </div>
-        <button type="button" onClick={() => refresh()} disabled={busy !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border px-4 text-xs font-semibold hover:bg-secondary disabled:opacity-50">
+        <button type="button" onClick={refreshWithFeedback} disabled={busy !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border px-4 text-xs font-semibold hover:bg-secondary disabled:opacity-50">
           <RefreshCw className="h-4 w-4" />
           {t('setup.sync.retry_status')}
         </button>

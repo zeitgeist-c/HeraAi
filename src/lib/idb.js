@@ -88,6 +88,37 @@ export function idbPut(db, store, value) {
   return calistir(db, store, 'readwrite', hedef => hedef.put(value))
 }
 
+/**
+ * Tek işlemde "varsa oku, yoksa üret ve yaz". Okuma ile yazma aynı işlemde
+ * olduğundan iki bağlam (panel + service worker) aynı anda çağırsa bile tek
+ * kayıt oluşur; kaybeden taraf ürettiği adayı atar.
+ */
+export function idbGetOrPut(db, store, key, uret) {
+  return new Promise((resolve, reject) => {
+    let tx
+    try {
+      tx = db.transaction(store, 'readwrite')
+    } catch (error) {
+      reject(error)
+      return
+    }
+    const hedef = tx.objectStore(store)
+    let sonuc
+    const istek = hedef.get(key)
+    istek.onsuccess = () => {
+      if (istek.result !== undefined) {
+        sonuc = istek.result
+        return
+      }
+      sonuc = uret()
+      hedef.put(sonuc)
+    }
+    tx.oncomplete = () => resolve(sonuc)
+    tx.onerror = () => reject(tx.error || new Error('idb_tx_failed'))
+    tx.onabort = () => reject(tx.error || new Error('idb_tx_aborted'))
+  })
+}
+
 export function idbDelete(db, store, key) {
   return calistir(db, store, 'readwrite', hedef => hedef.delete(key))
 }

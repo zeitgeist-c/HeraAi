@@ -122,7 +122,8 @@
     },
     "api": {
       "save_btn": "Kaydet ve Devam Et",
-      "saved_success": "Ayarlar kaydedildi!"
+      "saved_success": "Ayarlar kaydedildi!",
+      "save_failed": "Ayarlar kaydedilemedi: tarayıcı depolaması dolu olabilir."
     },
     "keys": {
       "title": "API Anahtarları",
@@ -220,6 +221,7 @@
     "screenshot_blocked": "Bu sayfada ekran kırpma kullanılamaz. Lütfen normal bir web sayfasına gidin.",
     "screenshot_no_tab": "Aktif sekme bulunamadı.",
     "file_error": "Dosya yüklenirken bir hata oluştu.",
+    "crop_busy": "Önceki kırpıntı hâlâ hazırlanıyor; birkaç saniye sonra yeniden deneyin.",
     "history_title": "Sohbet Geçmişi",
     "history_search_placeholder": "Sohbet ara…",
     "chat_copied": "Sohbet kopyalandı",
