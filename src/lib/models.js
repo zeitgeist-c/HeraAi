@@ -105,7 +105,10 @@ export const MODEL_CATALOG = Object.freeze([
     speed: 'slow',
     routing: { quality: 5, coding: 5 },
     capabilities: {
-      supportsImage: true,
+      // Ollama yolu görsel eki kabul etmiyor (providerApi: image_not_supported);
+      // katalog da bunu yansıtır ki seçicide 📷 rozeti çıkmasın ve otomatik
+      // yönlendirici görselli isteklerde bu modeli seçmesin.
+      supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
     },

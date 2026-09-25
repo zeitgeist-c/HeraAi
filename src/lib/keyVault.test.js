@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { VAULT_STORES, idbGetAll } from './idb'
-import { openDatabase } from './idb'
+import { openDatabase, idbPut } from './idb'
 import { createKeyVault, loadOrCreateDeviceKey, maskKey } from './keyVault'
-import { generateDeviceKey } from './syncCrypto'
+import { decryptJson, encryptJson, generateDeviceKey } from './syncCrypto'
+import { KEY_HEALTH } from './keyHealth'
 
 let sayac = 0
 
@@ -292,5 +293,92 @@ describe('keyVault kayit yonetimi', () => {
     const hepsi = await vault.getAllKeysForRequest('gemini')
     expect(hepsi).toHaveLength(2) // beklemedekiler de listelenir
     expect(hepsi[0].key).toBe('AIza-aaaaaaaaaaaaaaaaaa-A')
+  })
+})
+
+describe('keyVault mukerrer anahtar (esitleme cakismasi)', () => {
+  it('ayni anahtar farkli kimlikle kayitliysa mevcut kaydi kullanir', async () => {
+    const { vault } = await kasaKur()
+    const anahtar = 'AIza-ayni-anahtar-iki-cihaz-1234'
+    const yerelId = await vault.addKey('gemini', anahtar)
+
+    const sonuc = await vault.ensureKey('gemini', anahtar, { id: 'gemini:baska-cihaz' })
+
+    expect(sonuc).toEqual({ id: yerelId, created: false })
+    const liste = await vault.listKeys('gemini')
+    expect(liste).toHaveLength(1)
+    expect(await vault.getRawKey('gemini', yerelId)).toBe(anahtar)
+  })
+
+  it('parmak izi eslesmesini de yakalar (metin farkli olsa bile)', async () => {
+    const { vault } = await kasaKur()
+    const yerelId = await vault.addKey('gemini', 'AIza-parmak-izli-anahtar-99', { fingerprint: 'fp-abc' })
+
+    const sonuc = await vault.ensureKey('gemini', 'AIza-baska-metin-ayni-izi', {
+      id: 'gemini:baska-cihaz',
+      fingerprint: 'fp-abc',
+    })
+
+    expect(sonuc).toEqual({ id: yerelId, created: false })
+  })
+
+  it('yeni anahtari normal ekler', async () => {
+    const { vault } = await kasaKur()
+
+    const sonuc = await vault.ensureKey('gemini', 'AIza-yepyeni-anahtar-1234', { id: 'gemini:yeni' })
+
+    expect(sonuc).toEqual({ id: 'gemini:yeni', created: true })
+    expect(await vault.listKeys('gemini')).toHaveLength(1)
+  })
+
+  it('bos anahtari reddeder ve mukerrer saymaz', async () => {
+    const { vault } = await kasaKur()
+
+    await expect(vault.ensureKey('gemini', '   ', { id: 'gemini:bos' })).rejects.toThrow('key_empty_error')
+  })
+})
+
+describe('keyVault hazir anahtar yokken neden ayrimi', () => {
+  it('duraklatilmis anahtar hiz siniri sayilmaz', async () => {
+    const { db, vault } = await kasaKur()
+    const id = await vault.addKey('gemini', 'AIza-duraklatilmis-anahtar-1')
+    const kayit = (await idbGetAll(db, VAULT_STORES.keys)).find(item => item.id === id)
+    await idbPut(db, VAULT_STORES.keys, { ...kayit, status: KEY_HEALTH.PAUSED })
+
+    const sonuc = await vault.resolveKeysForRequest('gemini')
+
+    expect(sonuc.keys).toEqual([])
+    // Kullanıcı anahtarı duraklattıysa "hız sınırında, sonra deneyin" denmez.
+    expect(sonuc.allInCooldown).toBe(false)
+    expect(sonuc.earliestCooldownEnd).toBeNull()
+  })
+
+  it('hepsi beklemedeyse hiz siniri bildirilir', async () => {
+    const { vault } = await kasaKur()
+    const id = await vault.addKey('gemini', 'AIza-beklemede-anahtar-1')
+    const bitis = Date.now() + 60000
+    await vault.updateKeyMetadata('gemini', id, { cooldownUntil: bitis })
+
+    const sonuc = await vault.resolveKeysForRequest('gemini')
+
+    expect(sonuc.keys).toEqual([])
+    expect(sonuc.allInCooldown).toBe(true)
+    expect(sonuc.earliestCooldownEnd).toBe(bitis)
+  })
+})
+
+describe('cihaz anahtari yarisi', () => {
+  it('eszamanli cagrilar ayni cihaz anahtarini paylasir', async () => {
+    const db = await openDatabase({
+      name: `test-vault-race-${sayac++}`,
+      version: 1,
+      stores: Object.values(VAULT_STORES),
+    })
+
+    const [ilk, ikinci] = await Promise.all([loadOrCreateDeviceKey(db), loadOrCreateDeviceKey(db)])
+
+    // İki bağlam aynı anahtarı kullanmazsa kayıtlar birbirini çözemezdi.
+    const zarf = await encryptJson(ilk, { key: 'paylasilan-cihaz-anahtari' })
+    expect((await decryptJson(ikinci, zarf)).key).toBe('paylasilan-cihaz-anahtari')
   })
 })

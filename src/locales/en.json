@@ -122,7 +122,8 @@
         },
         "api": {
             "save_btn": "Save and Continue",
-            "saved_success": "Settings saved successfully!"
+            "saved_success": "Settings saved successfully!",
+            "save_failed": "Settings could not be saved: browser storage may be full."
         },
         "keys": {
             "title": "API Keys",
@@ -220,6 +221,7 @@
         "screenshot_blocked": "Screenshot crop cannot be used on this page type. Please navigate to a normal web page.",
         "screenshot_no_tab": "Could not find active tab.",
         "file_error": "An error occurred while loading the file.",
+        "crop_busy": "The previous crop is still being prepared; try again in a few seconds.",
         "history_title": "Chat History",
         "history_search_placeholder": "Search chats…",
         "chat_copied": "Chat copied",

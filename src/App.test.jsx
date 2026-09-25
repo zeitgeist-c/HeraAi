@@ -3250,11 +3250,12 @@ describe('HeraAi App', () => {
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-3).map(option => option.textContent)).toEqual([
       'GPT-OSS 120B',
       'Nemotron 3 Super',
-      'Gemma 4 31B📷',
+      'Gemma 4 31B',
     ]);
     const rowText = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
     expect(rowText('gpt-oss:120b')).toBe('GPT-OSS 120B');
-    expect(rowText('gemma4:31b')).toBe('Gemma 4 31B📷');
+    // Ollama yolu görsel kabul etmiyor; katalog da 📷 rozetini göstermez.
+    expect(rowText('gemma4:31b')).toBe('Gemma 4 31B');
     expect(rowText('google/gemma-4-26b-a4b-it:free')).toBe('Gemma 4 26B📷');
     expect(rowText('nex-agi/nex-n2.5-pro:free')).toBe('Nex-N2.5 Pro📷');
     expect(rowText('gemini-3.1-flash-lite')).toBe('Gemini 3.1 Flash Lite📷');

@@ -48,7 +48,15 @@ import {
   setAutoSyncInterval,
   setCloudSyncDeviceEnabled,
 } from './cloudSyncCoordinator'
-import { openMasterSecretFromRecovery } from './syncCrypto'
+import {
+  buildAad,
+  deriveSubkeys,
+  encryptJson,
+  importMasterSecret,
+  openMasterSecretFromRecovery,
+} from './syncCrypto'
+import { buildEntityDocument, createEntityVersion, deriveOpaqueId } from './syncModel'
+import { createKeyVault, loadOrCreateDeviceKey, openVaultDatabase } from './keyVault'
 
 const storage = {}
 
@@ -407,5 +415,78 @@ describe('otomatik eşitleme ayarı ve kota sayacı', () => {
 
     expect(result).toEqual({ skipped: 'already_running' })
     storage.syncLease = 0
+  })
+
+  it('kilidi almayan koşu başkasının taze kilidini bırakmaz', async () => {
+    const taze = Date.now()
+    storage.syncLease = taze
+
+    const result = await runCloudSync()
+
+    expect(result).toEqual({ skipped: 'already_running' })
+    // Aksi halde koruma tek atımlık kalır: sonraki çağrı TTL beklemeden koşardı.
+    expect(storage.syncLease).toBe(taze)
+    storage.syncLease = 0
+  })
+})
+
+describe('eşitlemede aynı anahtarın iki cihazda ayrı kimliklerle eklenmesi', () => {
+  it('çakışan bulut kaydını hata saymaz ve yerel kimliğe yakınsar', async () => {
+    cloud.account = null
+    cloud.devices.clear()
+    storage.syncLease = 0
+    delete storage.syncLastError
+    delete storage.syncLastErrorDetail
+    const { recoveryCode } = await initializeCloudSync()
+
+    // Bu cihazda anahtar zaten var; başka bir cihaz aynı anahtarı ayrı bir
+    // kimlikle eklediği için buluttan gelen kopya kasayla çakışacak.
+    const ham = 'AIza-esitleme-cakismasi-12345'
+    const db = await openVaultDatabase()
+    const vault = createKeyVault({ db, deviceKey: await loadOrCreateDeviceKey(db) })
+    const yerelId = await vault.addKey('gemini', ham)
+
+    const masterBytes = await openMasterSecretFromRecovery(cloud.account.recoveryEnvelope, recoveryCode)
+    const subkeys = await deriveSubkeys(await importMasterSecret(masterBytes))
+    const uzakId = 'gemini:diger-cihaz'
+    const opaqueEntityId = await deriveOpaqueId(subkeys.hmacIdKey, 'api_key', uzakId)
+    const aad = buildAad({ ownerUid: user.uid, opaqueEntityId, entityType: 'api_key' })
+    const zarf = await encryptJson(subkeys.dataEncryptionKey, {
+      storageKey: 'geminiApiKeys',
+      logicalId: uzakId,
+      provider: 'gemini',
+      metadata: { label: 'Diğer cihaz', isPrimary: false, createdAt: 1, fingerprint: null },
+      key: ham,
+    }, aad)
+    const belge = buildEntityDocument({
+      ownerUid: user.uid,
+      entityType: 'api_key',
+      entityVersion: createEntityVersion({ wallTimeMs: Date.now(), deviceId: 'dev-diger' }),
+      sourceDeviceId: 'dev-diger',
+      nonce: zarf.nonce,
+      ciphertext: zarf.ciphertext,
+      deleted: false,
+    })
+    transport.pullEntities.mockResolvedValueOnce({
+      documents: [{ ...belge, opaqueEntityId, serverUpdatedAt: Date.now() }],
+    })
+
+    const sonuc = await runCloudSync()
+
+    expect(sonuc?.skipped).toBeUndefined()
+    expect(storage.syncLastError).toBeNull()
+    expect(storage.syncLastErrorDetail).toBeNull()
+
+    // Kasa tek kayda indi, anahtar korunuyor ve buluttaki kimlik yerelde oluşmadı.
+    const liste = await vault.listKeys('gemini')
+    expect(liste.some(kayit => kayit.id === yerelId)).toBe(true)
+    expect(liste.some(kayit => kayit.id === uzakId)).toBe(false)
+    expect(await vault.getRawKey('gemini', yerelId)).toBe(ham)
+
+    // Yerel kimlik buluta yeniden yazıldı: tüm cihazlar tek kayda yakınsar.
+    const gonderilenler = transport.pushEntities.mock.calls
+      .flatMap(([arg]) => arg.documents || [])
+      .map(item => item.document)
+    expect(gonderilenler.some(item => item.entityType === 'api_key' && item.deleted !== true)).toBe(true)
   })
 })

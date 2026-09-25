@@ -77,6 +77,7 @@ describe('provider-aware model catalog', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
       'gpt-oss:120b',
       'nemotron-3-super',
+      'gemma4:31b',
     ])
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsPdf).every(model => model.provider === 'gemini')).toBe(true)
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage && model.provider === 'openrouter').map(model => model.modelId)).toEqual([
@@ -161,7 +162,6 @@ describe('provider-aware model catalog', () => {
       'openrouter:google/gemma-4-26b-a4b-it:free',
       'openrouter:qwen/qwen3.8-27b:free',
       'openrouter:nex-agi/nex-n2.5-pro:free',
-      'ollama:gemma4:31b',
     ])
     expect(getAutoCandidateKeys({ mode: 'web' })).toEqual([
       'gemini:gemini-3.1-flash-lite',

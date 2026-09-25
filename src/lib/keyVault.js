@@ -17,6 +17,7 @@ import {
   idbDelete,
   idbGet,
   idbGetAll,
+  idbGetOrPut,
   idbPut,
   openDatabase,
 } from './idb'
@@ -103,6 +104,59 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
     return yuk.key
   }
 
+  /**
+   * Mükerrer kaydın kimliğini bulur; `addKey` ile aynı karşılaştırma kuralı:
+   * parmak izi verilmişse onunla, verilmemişse çözülerek karşılaştırılır.
+   */
+  async function mukerrerId(mevcut, { trimmed = '', fingerprint = null } = {}) {
+    for (const kayit of mevcut) {
+      if (fingerprint && kayit.fingerprint) {
+        if (kayit.fingerprint === fingerprint) return kayit.id
+        continue
+      }
+      if (trimmed && (await coz(kayit)) === trimmed) return kayit.id
+    }
+    return null
+  }
+
+  /**
+   * Yeni anahtar ekler. Mükerrer anahtar reddedilir: parmak izi verilmişse
+   * onunla, verilmemişse çözülerek karşılaştırılır.
+   *
+   * `isPrimary` ve `createdAt` yalnızca göç sırasında verilir; böylece
+   * 1.9.4'teki ana anahtar seçimi ve sıralama aynen korunur.
+   */
+  async function anahtarEkle(provider, rawKey, { label = null, fingerprint = null, model = null, isPrimary = null, createdAt = null, id = null } = {}) {
+    saglayiciDogrula(provider)
+    const trimmed = String(rawKey ?? '').trim()
+    if (!trimmed) throw new Error('key_empty_error')
+
+    const mevcut = await kayitlariGetir(provider)
+    if (await mukerrerId(mevcut, { trimmed, fingerprint })) throw new Error('key_duplicate_error')
+
+    const kayit = {
+      id: id ?? yeniId(provider),
+      provider,
+      label: String(label ?? '').trim().slice(0, 60) || null,
+      masked: maskKey(trimmed),
+      fingerprint,
+      model,
+      ciphertext: await encryptJson(deviceKey, { key: trimmed }),
+      isPrimary: isPrimary === null ? mevcut.length === 0 : Boolean(isPrimary),
+      createdAt: createdAt ?? Date.now(),
+      lastUsedAt: null,
+      lastSuccessAt: null,
+      lastErrorAt: null,
+      lastErrorType: null,
+      cooldownUntil: null,
+      failCount: 0,
+      status: 'ready',
+    }
+
+    await idbPut(db, store, kayit)
+    return kayit.id
+  }
+
   return {
     /** Maskeli metadata; ham anahtar asla dönmez. */
     async listKeys(provider) {
@@ -118,48 +172,30 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       return kayit ? coz(kayit) : null
     },
 
+    /** Yeni anahtar ekler; mükerrer kontrolü ve kayıt şekli `anahtarEkle` içinde. */
+    async addKey(provider, rawKey, secenekler = {}) {
+      return anahtarEkle(provider, rawKey, secenekler)
+    },
+
     /**
-     * Yeni anahtar ekler. Mükerrer anahtar reddedilir: parmak izi verilmişse
-     * onunla, verilmemişse çözülerek karşılaştırılır.
-     *
-     * `isPrimary` ve `createdAt` yalnızca göç sırasında verilir; böylece
-     * 1.9.4'teki ana anahtar seçimi ve sıralama aynen korunur.
+     * Anahtarı ekler; aynı anahtar zaten farklı bir kimlikle kayıtlıysa hata
+     * yerine mevcut kaydın kimliğini döndürür (`created: false`). Eşitleme bu
+     * yüzden çakışmaz: aynı anahtarın iki cihazda ayrı kimliklerle eklenmiş
+     * olması tek kayda yakınsar. Elde kayıt yoksa orijinal hata geçer.
      */
-    async addKey(provider, rawKey, { label = null, fingerprint = null, model = null, isPrimary = null, createdAt = null, id = null } = {}) {
-      saglayiciDogrula(provider)
-      const trimmed = String(rawKey ?? '').trim()
-      if (!trimmed) throw new Error('key_empty_error')
-
-      const mevcut = await kayitlariGetir(provider)
-      for (const kayit of mevcut) {
-        if (fingerprint && kayit.fingerprint) {
-          if (kayit.fingerprint === fingerprint) throw new Error('key_duplicate_error')
-          continue
-        }
-        if ((await coz(kayit)) === trimmed) throw new Error('key_duplicate_error')
+    async ensureKey(provider, rawKey, secenekler = {}) {
+      try {
+        const id = await anahtarEkle(provider, rawKey, secenekler)
+        return { id, created: true }
+      } catch (error) {
+        if (error?.message !== 'key_duplicate_error') throw error
+        const id = await mukerrerId(await kayitlariGetir(provider), {
+          trimmed: String(rawKey ?? '').trim(),
+          fingerprint: secenekler.fingerprint ?? null,
+        })
+        if (!id) throw error
+        return { id, created: false }
       }
-
-      const kayit = {
-        id: id ?? yeniId(provider),
-        provider,
-        label: String(label ?? '').trim().slice(0, 60) || null,
-        masked: maskKey(trimmed),
-        fingerprint,
-        model,
-        ciphertext: await encryptJson(deviceKey, { key: trimmed }),
-        isPrimary: isPrimary === null ? mevcut.length === 0 : Boolean(isPrimary),
-        createdAt: createdAt ?? Date.now(),
-        lastUsedAt: null,
-        lastSuccessAt: null,
-        lastErrorAt: null,
-        lastErrorType: null,
-        cooldownUntil: null,
-        failCount: 0,
-        status: 'ready',
-      }
-
-      await idbPut(db, store, kayit)
-      return kayit.id
     },
 
     async removeKey(provider, id) {
@@ -238,7 +274,9 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       if (hazir.length === 0) {
         return {
           keys: [],
-          allInCooldown: kayitlar.length > 0,
+          // Yalnız gerçekten hepsi beklemedeyse "hız sınırı" denir; anahtarlar
+          // duraklatılmış/geçersizken kullanıcıyı boşuna beklemeye yönlendirmez.
+          allInCooldown: kayitlar.length > 0 && beklemede.length === kayitlar.length,
           earliestCooldownEnd: beklemede.length > 0
             ? Math.min(...beklemede.map(k => k.cooldownUntil))
             : null,
@@ -275,9 +313,16 @@ export async function loadOrCreateDeviceKey(db, metaStore = VAULT_STORES.meta) {
   const mevcut = await idbGet(db, metaStore, DEVICE_KEY_ID)
   if (mevcut?.key) return mevcut.key
 
-  const deviceKey = await generateDeviceKey()
-  await idbPut(db, metaStore, { id: DEVICE_KEY_ID, key: deviceKey, createdAt: Date.now() })
-  return deviceKey
+  // Aday anahtar işlemden önce üretilir; oku-veya-yaz tek işlemde yapıldığı
+  // için iki bağlam (panel + service worker) yarışırsa yalnız biri yazılır ve
+  // ikisi de aynı anahtarı kullanır — aksi halde kayıtlar birbirini açamazdı.
+  const aday = await generateDeviceKey()
+  const kayit = await idbGetOrPut(db, metaStore, DEVICE_KEY_ID, () => ({
+    id: DEVICE_KEY_ID,
+    key: aday,
+    createdAt: Date.now(),
+  }))
+  return kayit?.key || aday
 }
 
 export async function hasDeviceKey(db, metaStore = VAULT_STORES.meta) {

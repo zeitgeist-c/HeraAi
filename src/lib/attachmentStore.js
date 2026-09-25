@@ -192,6 +192,8 @@ export async function migrateLegacySessionAttachments(sessions) {
   return { sessions: migrated, changed }
 }
 
+// Denetim notu: bugün hiçbir çağıran yok (ölü export adayı) ama lib yüzeyleri
+// kasıtlı olarak geniş tutuluyor — silinmedi, raporda.
 export function stripAttachmentPayloads(sessions) {
   return (sessions || []).map(session => ({
     ...session,

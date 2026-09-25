@@ -301,6 +301,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     }
 
     chrome.storage.local.set(newConfig, () => {
+      // Yazım hatası (ör. kota) sessizce yutulmaz: aksi halde "kaydedildi"
+      // denip ayar eski değerde kalırdı.
+      if (chrome.runtime?.lastError) {
+        console.error('Settings save failed', chrome.runtime.lastError)
+        notifyError(t('setup.api.save_failed'))
+        return
+      }
       onSave(newConfig)
       notifySuccess(t('setup.api.saved_success'))
     })
