@@ -2,6 +2,32 @@
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.19',
+  date: '2026-09-25',
+  changes: {
+    tr: [
+      'Eşitlemede "Senkronizasyon tamamlanamadı" hatasının gerçek nedeni giderildi: aynı API anahtarı iki cihazda farklı kimlikle kayıtlıysa eşitleme artık hata vermiyor, kayıtlar tek kimlikte birleşiyor',
+      'Eşitleme kilidi tazeyken atlanan koşu artık kilidi bırakmıyor; gereksiz yeniden denemeler ve tekrarlayan hata bildirimleri azaldı',
+      'Ollama "Gemma 4 31B" satırından görsel simgesi kaldırıldı — bu sağlayıcı görsel kabul etmiyor, otomatik seçim görselli sorularda artık bu modeli seçmiyor',
+      'Yeni sohbet başlatırken eşzamanlı yazımların birbirini ezmesi engellendi (silinen sohbetin geri gelmesi) ve biten iş için diğer pencerede canlı akış göstergesi kalmıyor',
+      'Ekran kırpma: ilk kırpıntı hazırlanırken yapılan ikinci deneme sessizce yutulmuyor (uyarı gösteriliyor) ve bozuk görüntü kırpma akışını kilitlemiyor',
+      'Ayarlar kaydedilemezse artık "kaydedildi" denmiyor; model seçimi ve senkronizasyon panelindeki "Durumu yenile" hataları da sessizce kaybolmuyor',
+      'Denetim düzeltmeleri: sohbet oturumu yazımı, cihaz anahtarı üretimi, web arama kaynaklarına güvenlik uyarısı ve eşitleme hata ayrıntısının saklanması',
+      'Yayın paketi artık SHA-256 doğrulama dosyasıyla birlikte üretiliyor',
+    ],
+    en: [
+      'Fixed the real cause of the "Sync could not be completed" error: when the same API key is stored under two different identities on two devices, sync now converges instead of failing',
+      'A sync run that skips on a fresh lease no longer releases that lease, cutting pointless retries and repeated error notices',
+      'Removed the image icon from the Ollama "Gemma 4 31B" row — that provider takes text only, so automatic selection no longer picks it for image questions',
+      'Concurrent writes while starting a new chat can no longer overwrite each other (a deleted chat reappearing), and a finished job no longer leaves a live stream indicator in another window',
+      'Screen capture: a second attempt while the first crop is still being prepared now warns instead of being swallowed, and a broken image no longer stalls the crop flow',
+      'When settings cannot be saved you get an error instead of a false "saved"; model-selection and sync panel "Refresh status" failures are no longer silent',
+      'Audit fixes: session write handling, device key creation, a safety notice on web search sources, and sync error detail persistence',
+      'The release package now ships with its SHA-256 checksum file',
+    ],
+  },
+},
+{
   version: '1.10.18',
   date: '2026-09-25',
   changes: {
