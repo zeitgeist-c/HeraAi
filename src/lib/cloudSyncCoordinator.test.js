@@ -104,6 +104,8 @@ describe('cloud sync error policy', () => {
   it.each([
     ['resource-exhausted', 'quota_exceeded'],
     ['permission-denied', 'rules_denied'],
+    ['failed-precondition', 'sync_precondition_failed'],
+    ['sync_recovery_required', 'sync_recovery_required'],
     ['unauthenticated', 'sync_signed_out'],
     ['unavailable', 'offline'],
     ['sync_chunk_incomplete', 'sync_chunk_incomplete'],

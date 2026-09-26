@@ -209,6 +209,15 @@ function SyncPanel() {
     try {
       const response = await sendRuntimeMessage({ type: 'SYNC_NOW' })
       if (!response?.ok) throw new Error(response?.errorCode || 'sync_failed')
+      if (response.result?.skipped) {
+        const reason = response.result.skipped
+        const code = ['already_running', 'in_progress', 'lease_held'].includes(reason)
+          ? 'sync_busy'
+          : reason === 'paused' ? 'sync_paused'
+            : reason === 'device_disabled' ? 'sync_device_disabled'
+              : reason === 'signed_out' ? 'sync_signed_out' : reason
+        throw new Error(code)
+      }
       notifySuccess(t('setup.sync.completed'))
       await refresh()
       return response
@@ -470,6 +479,9 @@ function SyncPanel() {
             {t(`setup.sync.errors.${status.lastErrorCode || status.lastError}`, {
               defaultValue: t('setup.sync.last_error', { code: status.lastError }),
             })}
+            {status.lastErrorDetail?.serviceCode && (
+              <span className="mt-1 block font-mono">{status.lastErrorDetail.serviceCode}</span>
+            )}
           </p>
         )}
         {syncBlocked && (

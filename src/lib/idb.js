@@ -166,6 +166,27 @@ export function idbDeleteMany(db, store, keys) {
   })
 }
 
+/** Acknowledge only the snapshot sent; concurrent replacements must survive. */
+export function idbDeleteMatching(db, store, records) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite')
+    const target = tx.objectStore(store)
+    let deleted = 0
+    for (const record of records) {
+      const request = target.get(record.id)
+      request.onsuccess = () => {
+        if (JSON.stringify(request.result) === JSON.stringify(record)) {
+          target.delete(record.id)
+          deleted += 1
+        }
+      }
+    }
+    tx.oncomplete = () => resolve(deleted)
+    tx.onerror = () => reject(tx.error || new Error('idb_tx_failed'))
+    tx.onabort = () => reject(tx.error || new Error('idb_tx_aborted'))
+  })
+}
+
 /**
  * Tarayıcıdan kalıcı depolama izni ister. Düşük disk durumunda IndexedDB'nin
  * sessizce silinmesini engeller; desteklenmiyorsa sessizce devam edilir.
