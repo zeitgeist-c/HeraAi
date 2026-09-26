@@ -117,7 +117,11 @@
                 "identity_unavailable": "This browser does not support Google sign-in.",
                 "firebase_not_configured": "Cloud configuration is missing in this build.",
                 "google_oauth_not_configured": "Google sign-in is not configured in this build.",
-                "sync_failed": "Synchronization could not be completed. Retry later."
+                "sync_failed": "Synchronization could not be completed. Retry later.",
+                "sync_busy": "Another sync is still running. This request did not run; retry after it finishes.",
+                "sync_paused": "Sync is paused. Resume it first.",
+                "sync_index_required": "A Firebase query index is missing. Create the required Firestore index.",
+                "sync_precondition_failed": "Firebase configuration rejected the sync request. Inspect the error details."
             }
         },
         "api": {

@@ -20,6 +20,10 @@ export const KNOWN_SYNC_ERROR_CODES = new Set([
   // Servis/kanal
   SYNC_CHANNEL_LOST,
   'sync_failed',
+  'sync_busy',
+  'sync_paused',
+  'sync_index_required',
+  'sync_precondition_failed',
   'sync_unknown_request',
   // Bulut/aktarim
   'quota_exceeded',

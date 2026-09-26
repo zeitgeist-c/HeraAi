@@ -27,7 +27,7 @@ import {
   LEASE_TTL_MS,
   VAULT_STORES,
   acquireLease,
-  idbDeleteMany,
+  idbDeleteMatching,
   idbGet,
   idbGetAll,
   idbPut,
@@ -53,8 +53,6 @@ export const SYNC_BATCH_SIZE = 500
 /** Tek çekimde alınacak en fazla belge. */
 export const SYNC_PULL_LIMIT = 200
 
-/** Aynı uzak belge kaç kez üst üste başarısız olursa karantinaya alınır. */
-export const UZAK_BELGE_DENEME_SINIRI = 3
 export const SESSION_DOC_SAFE_BYTES = 700 * 1024
 export const SESSION_CHUNK_BYTES = 480 * 1024
 
@@ -127,22 +125,25 @@ function normalizeCursor(raw) {
   return {
     serverUpdatedAt,
     opaqueEntityId: typeof raw.opaqueEntityId === 'string' ? raw.opaqueEntityId : '',
+    ...(Number.isInteger(raw.serverTimestampSeconds) && Number.isInteger(raw.serverTimestampNanoseconds) ? {
+      serverTimestampSeconds: raw.serverTimestampSeconds,
+      serverTimestampNanoseconds: raw.serverTimestampNanoseconds,
+    } : {}),
   }
 }
 
 function cursorFromDocument(document) {
-  if (!document) return null
-  const serverUpdatedAt = Number(document.serverUpdatedAt)
-  if (!Number.isFinite(serverUpdatedAt)) return null
-  return {
-    serverUpdatedAt,
-    opaqueEntityId: typeof document.opaqueEntityId === 'string' ? document.opaqueEntityId : '',
-  }
+  return normalizeCursor(document)
 }
 
 function ilerlemeVarMi(mevcut, yeni) {
   if (!yeni) return false
   if (!mevcut) return true
+  if (Number.isInteger(mevcut.serverTimestampSeconds) && Number.isInteger(yeni.serverTimestampSeconds)) {
+    if (yeni.serverTimestampSeconds !== mevcut.serverTimestampSeconds) return yeni.serverTimestampSeconds > mevcut.serverTimestampSeconds
+    if (yeni.serverTimestampNanoseconds !== mevcut.serverTimestampNanoseconds) return yeni.serverTimestampNanoseconds > mevcut.serverTimestampNanoseconds
+    return yeni.opaqueEntityId > mevcut.opaqueEntityId
+  }
   if (yeni.serverUpdatedAt !== mevcut.serverUpdatedAt) {
     return yeni.serverUpdatedAt > mevcut.serverUpdatedAt
   }
@@ -193,8 +194,6 @@ export function createSyncEngine({
 
   let durum = SYNC_STATE.IDLE
   let calisiyor = false
-  // Aynı uzak belgenin üst üste başarısız denemelerini sayar (karantina eşiği).
-  const uzakHataSayaci = new Map()
   let sonCevrim = null
 
   function bildir(yeni, detay = {}) {
@@ -224,6 +223,7 @@ export function createSyncEngine({
       op: op === QUEUE_OP.DELETE ? QUEUE_OP.DELETE : QUEUE_OP.PUT,
       entityVersion: { ...entityVersion },
       queuedAt: now(),
+      queueToken: globalThis.crypto.randomUUID(),
     }
     await idbPut(db, queueStore, kayit)
     return kayit
@@ -324,7 +324,7 @@ export function createSyncEngine({
 
       for (const kayit of dilim) {
         const hazir = await kaydiHazirla(uid, subkeys, kayit)
-        temizlenecek.push(kayit.id)
+        temizlenecek.push(kayit)
         if (hazir?.skipped) continue
         belgeler.push({ opaqueEntityId: hazir.opaqueEntityId, document: hazir.document })
         chunkPlans.set(hazir.opaqueEntityId, hazir)
@@ -355,7 +355,7 @@ export function createSyncEngine({
         parti += 1
       }
       // Adım 5: gönderilen kayıtlar kuyruktan düşer.
-      if (temizlenecek.length > 0) await idbDeleteMany(db, queueStore, temizlenecek)
+      if (temizlenecek.length > 0) await idbDeleteMatching(db, queueStore, temizlenecek)
     }
     return { pushed: toplam, batches: parti }
   }
@@ -366,7 +366,6 @@ export function createSyncEngine({
     let imlec = baslangic
     let uygulanan = 0
     let cekilen = 0
-    let atlanan = 0
 
     for (let tur = 0; tur < 50; tur += 1) {
       const yanit = await transport.pullEntities({ uid, cursor: imlec, limit: pullLimit })
@@ -375,24 +374,9 @@ export function createSyncEngine({
       cekilen += belgeler.length
 
       for (const uzak of belgeler) {
-        // Çözülemeyen belge ilk denemelerde açık hata verir (imleç ilerlemez);
-        // aynı belge üst üste başarısız olursa karantinaya alınır ki tek bozuk
-        // kayıt tüm bulut→yerel akışını kalıcı olarak kilitlemesin.
-        try {
-          const sonuc = await uzakUygula(uid, subkeys, uzak)
-          uzakHataSayaci.delete(uzak?.opaqueEntityId)
-          if (sonuc) uygulanan += 1
-        } catch (error) {
-          const anahtar = uzak?.opaqueEntityId || 'bilinmeyen'
-          const deneme = (uzakHataSayaci.get(anahtar) || 0) + 1
-          if (deneme < UZAK_BELGE_DENEME_SINIRI) {
-            uzakHataSayaci.set(anahtar, deneme)
-            throw error
-          }
-          uzakHataSayaci.delete(anahtar)
-          atlanan += 1
-          console.warn('sync: uzak belge karantinaya alindi', anahtar, error?.message || error)
-        }
+        // Okunamayan belge sessizce atlanmaz; tekrar denemek için imleç korunur.
+        const sonuc = await uzakUygula(uid, subkeys, uzak)
+        if (sonuc) uygulanan += 1
         const yeni = cursorFromDocument(uzak)
         if (ilerlemeVarMi(imlec, yeni)) imlec = yeni
       }
@@ -402,7 +386,7 @@ export function createSyncEngine({
 
     // Adım 9: imleç yalnızca ilerlediyse kaydedilir.
     if (ilerlemeVarMi(baslangic, imlec)) await writeCursor(imlec)
-    return { pulled: cekilen, applied: uygulanan, quarantined: atlanan }
+    return { pulled: cekilen, applied: uygulanan, quarantined: 0 }
   }
 
   /** Adım 7-8: AAD doğrulaması, sürüm karşılaştırması, yerel uygulama. */
@@ -451,7 +435,7 @@ export function createSyncEngine({
     }
 
     const uzakSurum = parseEntityVersion(uzak.entityVersion)
-    if (!uzakSurum) return false
+    if (!uzakSurum) throw new Error('sync_payload_invalid')
 
     const yerelSurum = readLocalVersion
       ? await readLocalVersion(entityType, uzak.opaqueEntityId)
@@ -532,12 +516,13 @@ export function createSyncEngine({
 
   /** Kuyruk boşalana kadar çevrimi yineler. */
   async function drain({ maxRounds = 20 } = {}) {
-    let toplam = { pushed: 0, applied: 0, rounds: 0 }
+    let toplam = { pushed: 0, pulled: 0, applied: 0, rounds: 0 }
     for (let tur = 0; tur < maxRounds; tur += 1) {
       const sonuc = await runOnce()
       if (sonuc?.skipped) return { ...toplam, skipped: sonuc.skipped }
       toplam = {
         pushed: toplam.pushed + (sonuc.pushed || 0),
+        pulled: toplam.pulled + (sonuc.pulled || 0),
         applied: toplam.applied + (sonuc.applied || 0),
         rounds: toplam.rounds + 1,
       }

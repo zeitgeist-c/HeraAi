@@ -102,6 +102,31 @@ beforeEach(async () => {
 })
 
 describe('kuyruk birleştirme', () => {
+  it('çekme imlecinin nanosaniye hassasiyetini korur', async () => {
+    const engine = motorKur()
+    const cursor = { serverUpdatedAt: 5000.123456, opaqueEntityId: 'a', serverTimestampSeconds: 5, serverTimestampNanoseconds: 123456 }
+    await engine.writeCursor(cursor)
+    expect(await engine.readCursor()).toEqual(cursor)
+    await engine.runOnce()
+    expect(transport.pullEntities).toHaveBeenCalledWith(expect.objectContaining({ cursor }))
+  })
+
+  it('gönderim sırasında eklenen yeni değişikliği kuyruktan silmez', async () => {
+    const engine = motorKur()
+    yukKoy('sessions', 'race', { id: 'race', title: 'first' })
+    await engine.enqueue({ storageKey: 'sessions', logicalId: 'race', entityVersion: await surum(100) })
+    transport.pushEntities.mockImplementationOnce(async () => {
+      yukKoy('sessions', 'race', { id: 'race', title: 'second' })
+      await engine.enqueue({ storageKey: 'sessions', logicalId: 'race', entityVersion: await surum(200) })
+      return { ok: true }
+    })
+    await engine.runOnce()
+    expect(await engine.pendingCount()).toBe(1)
+    await engine.runOnce()
+    expect(await engine.pendingCount()).toBe(0)
+    expect(transport.pushEntities).toHaveBeenCalledTimes(2)
+  })
+
   it('kuyruk kimliği depolama anahtarı ve mantıksal kimlikten türetilir', () => {
     expect(queueId('sessions', 'abc')).toBe('sessions::abc')
     expect(queueId('geminiApiKeys', 'k1')).toBe('geminiApiKeys::k1')
@@ -496,7 +521,7 @@ describe('çekim ve uygulama', () => {
     expect(imlec).toBeNull()
   })
 
-  it('üst üste başarısız olan belgeyi karantinaya alır ve imleci ilerletir', async () => {
+  it('üst üste başarısız olan belgeyi sessizce atlamaz', async () => {
     const motor = motorKur()
     const opaque = await deriveOpaqueId(subkeys.hmacIdKey, 'session', 'bozuk-karantina')
     const yanlisAad = buildAad({
@@ -523,12 +548,10 @@ describe('çekim ve uygulama', () => {
 
     await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
     await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
-    const sonuc = await motor.runOnce()
-
-    expect(sonuc.quarantined).toBe(1)
-    // Karantinadan sonra imleç ilerler: tek bozuk kayıt akışı kilitlemez.
+    await expect(motor.runOnce()).rejects.toThrow('sync_payload_invalid')
     const imlec = await motor.readCursor()
-    expect(imlec.serverUpdatedAt).toBe(7000)
+    expect(imlec).toBeNull()
+    expect(uygulananlar).toHaveLength(0)
   })
 
   it('yerelde daha yeni sürüm varsa uzak kaydı uygulamaz', async () => {

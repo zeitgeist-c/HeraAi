@@ -69,6 +69,9 @@ let cachedSubkeys = null
 let listenerInstalled = false
 /** Aynı anda tek eşitleme koşusu (bellek kilidi). */
 let activeRun = false
+let pendingStorageChanges = Promise.resolve()
+let lastVersionTime = 0
+let versionCounter = 0
 const remoteWrites = new Map()
 
 function storageGet(keys) {
@@ -122,6 +125,10 @@ export function mapCloudSyncError(error) {
   const raw = String(error?.code || error?.message || '').toLowerCase()
   if (raw.includes('resource-exhausted') || raw.includes('quota')) return 'quota_exceeded'
   if (raw.includes('permission-denied')) return 'rules_denied'
+  if (raw.includes('failed-precondition')) {
+    return /index/i.test(String(error?.message || '')) ? 'sync_index_required' : 'sync_precondition_failed'
+  }
+  if (['sync_recovery_required', 'sync_device_not_linked', 'sync_not_enabled'].includes(raw)) return raw
   if (raw.includes('device_disabled')) return 'sync_device_disabled'
   if (raw.includes('unauthenticated') || raw.includes('signed_out')) return 'sync_signed_out'
   if (raw.includes('unavailable') || raw.includes('network') || raw.includes('offline')) return 'offline'
@@ -430,7 +437,10 @@ async function loadLinkedDeviceState(runtime, user) {
 }
 
 function newVersion(deviceId) {
-  return createEntityVersion({ wallTimeMs: Date.now(), deviceId })
+  const wallTimeMs = Math.max(Date.now(), lastVersionTime)
+  versionCounter = wallTimeMs === lastVersionTime ? versionCounter + 1 : 0
+  lastVersionTime = wallTimeMs
+  return createEntityVersion({ wallTimeMs, logicalCounter: versionCounter, deviceId })
 }
 
 async function enqueueAllKeys(runtime) {
@@ -661,6 +671,7 @@ export async function getCloudSyncStatus() {
       [LAST_ERROR_KEY]: errorCode,
       [LAST_ERROR_DETAIL_KEY]: {
         code: errorCode,
+        serviceCode: /^[a-z/-]+$/i.test(String(error?.code || '')) ? String(error.code) : null,
         message: String(error?.message || error || '').slice(0, 300),
         at: Date.now(),
       },
@@ -735,6 +746,7 @@ export async function runCloudSync() {
   activeRun = true
   let kilitAlindi = false
   try {
+    await pendingStorageChanges
     const lease = await storageGet([SYNC_LEASE_KEY])
     const leaseAt = Number(lease[SYNC_LEASE_KEY]) || 0
     if (leaseAt > 0 && Date.now() - leaseAt < SYNC_LEASE_TTL_MS) {
@@ -969,7 +981,7 @@ export function installCloudSyncListeners() {
   listenerInstalled = true
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return
-    enqueueStorageChange(changes).catch(error => {
+    pendingStorageChanges = pendingStorageChanges.then(() => enqueueStorageChange(changes)).catch(error => {
       storageSet({ [LAST_ERROR_KEY]: error?.message || 'sync_queue_failed' }).catch(() => undefined)
     })
   })

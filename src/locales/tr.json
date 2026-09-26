@@ -117,7 +117,11 @@
         "identity_unavailable": "Bu tarayıcı Google girişini desteklemiyor.",
         "firebase_not_configured": "Bulut yapılandırması bu sürümde eksik.",
         "google_oauth_not_configured": "Google girişi bu sürümde yapılandırılmamış.",
-        "sync_failed": "Senkronizasyon tamamlanamadı. Daha sonra yeniden deneyin."
+        "sync_failed": "Senkronizasyon tamamlanamadı. Daha sonra yeniden deneyin.",
+        "sync_busy": "Başka bir eşitleme hâlâ çalışıyor. Bu istek çalıştırılmadı; işlem bittikten sonra tekrar deneyin.",
+        "sync_paused": "Eşitleme duraklatılmış. Önce devam ettirin.",
+        "sync_index_required": "Firebase sorgusu için bir indeks eksik. Firestore indeksinin oluşturulması gerekiyor.",
+        "sync_precondition_failed": "Firebase yapılandırması eşitleme isteğini kabul etmiyor. Hata ayrıntısı incelenmeli."
       }
     },
     "api": {

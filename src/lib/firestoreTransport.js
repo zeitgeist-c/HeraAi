@@ -31,6 +31,10 @@ function normalizeSnapshot(snapshot) {
     ...value,
     opaqueEntityId: snapshot.id,
     serverUpdatedAt: timestampMillis(value.serverUpdatedAt),
+    ...(Number.isInteger(value.serverUpdatedAt?.seconds) ? {
+      serverTimestampSeconds: value.serverUpdatedAt.seconds,
+      serverTimestampNanoseconds: value.serverUpdatedAt.nanoseconds,
+    } : {}),
   }
 }
 
@@ -161,7 +165,9 @@ export function createFirestoreTransport({ db = getFirebaseFirestore() } = {}) {
       const constraints = [orderBy('serverUpdatedAt'), orderBy(documentId())]
       if (cursor?.serverUpdatedAt && cursor?.opaqueEntityId) {
         constraints.push(
-          startAfter(Timestamp.fromMillis(cursor.serverUpdatedAt), cursor.opaqueEntityId),
+          startAfter(Number.isInteger(cursor.serverTimestampSeconds)
+            ? new Timestamp(cursor.serverTimestampSeconds, cursor.serverTimestampNanoseconds)
+            : Timestamp.fromMillis(cursor.serverUpdatedAt), cursor.opaqueEntityId),
         )
       }
       constraints.push(limitQuery(limit))
