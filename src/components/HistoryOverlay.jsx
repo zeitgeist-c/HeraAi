@@ -26,6 +26,7 @@ function HistoryOverlay({
   const [titleDraft, setTitleDraft] = useState('')
   const [titleError, setTitleError] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [includeStarred, setIncludeStarred] = useState(false)
   const editInputRef = useRef(null)
   const renameTriggerRefs = useRef(new Map())
   const lastEditedSessionIdRef = useRef(null)
@@ -50,7 +51,9 @@ function HistoryOverlay({
     : sortedSessions
   const starredSessions = filteredSessions.filter((session) => session.isStarred)
   const otherSessions = filteredSessions.filter((session) => !session.isStarred)
-  const unstarredCount = otherSessions.length
+  const unstarredCount = sessions.filter(session => !session.isStarred).length
+  const protectedCount = sessions.filter(session => session.isStarred).length
+  const deleteCount = includeStarred ? sessions.length : unstarredCount
 
   useEffect(() => {
     if (editingSessionId) {
@@ -274,8 +277,8 @@ function HistoryOverlay({
           <button
             ref={bulkDeleteTriggerRef}
             type="button"
-            onClick={onRequestBulkDelete}
-            disabled={unstarredCount === 0 || isBulkDeleting}
+            onClick={() => { setIncludeStarred(false); onRequestBulkDelete() }}
+            disabled={startedSessions.length === 0 || isBulkDeleting}
             aria-haspopup="dialog"
             className="flex h-9 items-center gap-1.5 rounded-xl border border-destructive/25 px-3 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -342,19 +345,23 @@ function HistoryOverlay({
               </span>
               <div className="min-w-0">
                 <h3 id="bulk-delete-title" className="text-sm font-semibold">
-                  {t('chat.bulk_delete.title')}
+                  {t(includeStarred ? 'chat.bulk_delete.all_title' : 'chat.bulk_delete.title')}
                 </h3>
                 <p id="bulk-delete-description" className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t('chat.bulk_delete.description', { count: unstarredCount })}
+                  {t(includeStarred ? 'chat.bulk_delete.all_description' : 'chat.bulk_delete.description', { count: deleteCount })}
                 </p>
-                {starredSessions.length > 0 && (
+                {!includeStarred && protectedCount > 0 && (
                   <p className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
                     <Star className="h-3 w-3" fill="currentColor" />
-                    {t('chat.bulk_delete.protected', { count: starredSessions.length })}
+                    {t('chat.bulk_delete.protected', { count: protectedCount })}
                   </p>
                 )}
               </div>
             </div>
+            <label className="mt-3 flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={includeStarred} disabled={isBulkDeleting} onChange={event => setIncludeStarred(event.target.checked)} />
+              {t('chat.bulk_delete.include_starred')}
+            </label>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 ref={cancelBulkDeleteRef}
@@ -367,13 +374,13 @@ function HistoryOverlay({
               </button>
               <button
                 type="button"
-                onClick={onConfirmBulkDelete}
-                disabled={isBulkDeleting || unstarredCount === 0}
+                onClick={() => onConfirmBulkDelete(includeStarred)}
+                disabled={isBulkDeleting || deleteCount === 0}
                 className="flex h-9 items-center gap-1.5 rounded-xl bg-destructive px-3 text-xs font-semibold text-destructive-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isBulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                {t(isBulkDeleting ? 'chat.bulk_delete.deleting' : 'chat.bulk_delete.confirm', {
-                  count: unstarredCount,
+                {t(isBulkDeleting ? 'chat.bulk_delete.deleting' : includeStarred ? 'chat.bulk_delete.all_confirm' : 'chat.bulk_delete.confirm', {
+                  count: deleteCount,
                 })}
               </button>
             </div>
