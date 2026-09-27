@@ -382,22 +382,22 @@ describe('otomatik eşitleme ayarı ve kota sayacı', () => {
     expect(ayarlar.ratio.reads).toBeCloseTo(0.6)
   })
 
-  it('eşitleme sürerken ikinci çağrı kilide takılır, kilit sonra serbest kalır', async () => {
+  it('eşitleme sürerken ikinci çağrı aynı işlemin sonucunu bekler', async () => {
     let serbest
     transport.getDevice.mockImplementationOnce(async (_uid, id) => new Promise(resolve => {
       serbest = () => resolve(cloud.devices.get(id) || null)
     }))
 
     const birinci = runCloudSync()
-    const ikinci = await runCloudSync()
-
-    expect(ikinci).toEqual({ skipped: 'already_running' })
+    const ikinci = runCloudSync()
+    expect(ikinci).toBe(birinci)
 
     // İlk koşu kilidi aldı ve cihaz durumunu okumakta bekliyor; bırakmadan önce
     // o noktaya ulaştığını doğrula.
     await vi.waitFor(() => expect(serbest).toBeTypeOf('function'))
     serbest()
     await expect(birinci).resolves.toBeDefined()
+    await expect(ikinci).resolves.toEqual(await birinci)
     expect(storage.syncLease).toBe(0)
   })
 
@@ -410,24 +410,33 @@ describe('otomatik eşitleme ayarı ve kota sayacı', () => {
     expect(storage.syncLease).toBe(0)
   })
 
-  it('depolama kilidi tazeyse koşu hiç başlamaz (yeniden başlatma sonrası koruma)', async () => {
+  it('başarısız koşudan sonra kilit temizlenir ve yeniden deneme çalışır', async () => {
+    transport.getDevice.mockRejectedValueOnce(new Error('unavailable'))
+    const first = runCloudSync()
+    const joined = runCloudSync()
+    expect(joined).toBe(first)
+    await expect(first).rejects.toThrow('offline')
+    expect(storage.syncLease).toBe(0)
+    await expect(runCloudSync()).resolves.toEqual(expect.objectContaining({ rounds: expect.any(Number) }))
+  })
+
+  it('önceki worker taze bir depolama işareti bıraksa da yeni koşu çalışır', async () => {
     storage.syncLease = Date.now()
 
     const result = await runCloudSync()
 
-    expect(result).toEqual({ skipped: 'already_running' })
+    expect(result?.skipped).toBeUndefined()
     storage.syncLease = 0
   })
 
-  it('kilidi almayan koşu başkasının taze kilidini bırakmaz', async () => {
+  it('devralınan depolama işareti işlem tamamlanınca temizlenir', async () => {
     const taze = Date.now()
     storage.syncLease = taze
 
     const result = await runCloudSync()
 
-    expect(result).toEqual({ skipped: 'already_running' })
-    // Aksi halde koruma tek atımlık kalır: sonraki çağrı TTL beklemeden koşardı.
-    expect(storage.syncLease).toBe(taze)
+    expect(result?.skipped).toBeUndefined()
+    expect(storage.syncLease).toBe(0)
     storage.syncLease = 0
   })
 })

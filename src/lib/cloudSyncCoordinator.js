@@ -62,13 +62,12 @@ const AUTO_SYNC_INTERVAL_MS = 15 * 60 * 1000
 const AUTO_SYNC_SETTING_KEY = AUTO_SYNC_INTERVAL_KEY
 /** Eşitleme kilidi: aynı anda iki koşu olmaz. Bayat kilit devralınır. */
 const SYNC_LEASE_KEY = 'syncLease'
-const SYNC_LEASE_TTL_MS = 5 * 60 * 1000
 
 let runtimePromise = null
 let cachedSubkeys = null
 let listenerInstalled = false
 /** Aynı anda tek eşitleme koşusu (bellek kilidi). */
-let activeRun = false
+let activeRun = null
 let pendingStorageChanges = Promise.resolve()
 let lastVersionTime = 0
 let versionCounter = 0
@@ -736,31 +735,27 @@ async function performCloudSyncRun() {
 
 /**
  * Eşitlemeyi çalıştırır. Aynı anda iki koşu olmaz:
- * - Bellek kilidi (`activeRun`) eşzamanlı çağrıları anında birleştirir; kontrol
- *   ilk `await`'ten önce yapıldığı için iki çağrı kilidi birlikte geçemez.
- * - Depolama kilidi (`syncLease`) service worker yeniden başladığında yarım
- *   kalan bir koşunun üstüne binilmesini önler; bayat kilit devralınır.
+ * Eşzamanlı çağrılar aynı Promise'i bekler. Önceki service worker'dan kalan
+ * depolama işareti canlı kilit değildir; yeni worker güvenle devralır.
  */
-export async function runCloudSync() {
-  if (activeRun) return { skipped: 'already_running' }
-  activeRun = true
-  let kilitAlindi = false
-  try {
-    await pendingStorageChanges
-    const lease = await storageGet([SYNC_LEASE_KEY])
-    const leaseAt = Number(lease[SYNC_LEASE_KEY]) || 0
-    if (leaseAt > 0 && Date.now() - leaseAt < SYNC_LEASE_TTL_MS) {
-      return { skipped: 'already_running' }
+export function runCloudSync() {
+  if (activeRun) return activeRun
+  // Only the background service worker imports this coordinator. A marker
+  // from a previous worker lifetime cannot represent another live runner.
+  activeRun = (async () => {
+    try {
+      await pendingStorageChanges
+      await storageSet({ [SYNC_LEASE_KEY]: Date.now() })
+      return await performCloudSyncRun()
+    } finally {
+      try {
+        await storageSet({ [SYNC_LEASE_KEY]: 0 })
+      } finally {
+        activeRun = null
+      }
     }
-    await storageSet({ [SYNC_LEASE_KEY]: Date.now() })
-    kilitAlindi = true
-    return await performCloudSyncRun()
-  } finally {
-    activeRun = false
-    // Kilit yalnız bu koşu aldıysa bırakılır; aksi halde başka bir koşunun
-    // taze kilidi silinir ve yeniden başlatma koruması tek atımlık kalırdı.
-    if (kilitAlindi) await storageSet({ [SYNC_LEASE_KEY]: 0 })
-  }
+  })()
+  return activeRun
 }
 
 export async function setCloudSyncPaused(paused) {
