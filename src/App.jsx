@@ -2270,9 +2270,8 @@ function App() {
       let shouldPersistSessions = legacyAttachmentsMigrated || retiredModelMigration.changed
 
       if (nextSessions.length > 0) {
-        if (config.startupBehavior === 'resume') {
-          const requestedId = result.activeSessionId || nextSessions[0].id
-          const currentSession = nextSessions.find(session => session.id === requestedId) || nextSessions[0]
+        const currentSession = nextSessions.find(session => session.id === result.activeSessionId)
+        if (config.startupBehavior === 'resume' && currentSession) {
           nextActiveSessionId = currentSession.id
           nextMessages = currentSession.messages || welcomeMessages
         } else {
@@ -2823,7 +2822,7 @@ function App() {
     // mesajsız (yalnız karşılama içeren) eski oturumlar burada düşürülür.
     const nextSessions = [
       ...sessionsRef.current.filter(session => (
-        (session?.messages || []).some(message => message?.role === 'user')
+        session?.isStarred === true || (session?.messages || []).some(message => message?.role === 'user')
       )),
       createSession({ id, title: t('chat.new_chat'), messages: welcomeMsg }),
     ]
@@ -2834,6 +2833,7 @@ function App() {
     setSessions(nextSessions)
     setMessages(welcomeMsg)
     setAttachments([])
+    setInput('')
     void enqueueStorageWrite({ sessions: nextSessions, activeSessionId: id })
     setShowBulkDeleteConfirm(false)
     setShowHistory(false)
@@ -2959,8 +2959,7 @@ function App() {
   }, [cancelActiveGeneration, stickToBottomOnNextRender, t, trackStructuralStorageWrite])
 
   const requestBulkDelete = useCallback(() => {
-    const unstarredCount = sessionsRef.current.filter(session => session?.isStarred !== true).length
-    if (unstarredCount === 0) {
+    if (sessionsRef.current.length === 0) {
       notifySuccess(t('chat.bulk_delete.none', {
         defaultValue: 'There are no unstarred chats to delete.',
       }))
@@ -2970,25 +2969,25 @@ function App() {
     setShowBulkDeleteConfirm(true)
   }, [t])
 
-  const deleteUnstarredSessions = useCallback(async () => {
+  const deleteUnstarredSessions = useCallback(async (includeStarred = false) => {
+    includeStarred = includeStarred === true
     if (isBulkDeleting) return
 
     const initialSessions = sessionsRef.current
-    const initialUnstarredCount = initialSessions.filter(session => session?.isStarred !== true).length
+    const initialUnstarredCount = initialSessions.filter(session => includeStarred || session?.isStarred !== true).length
     if (initialUnstarredCount === 0) {
       setShowBulkDeleteConfirm(false)
       return
     }
 
     setIsBulkDeleting(true)
-    const currentActiveSessionId = activeSessionIdRef.current
     const generationSessionId = activeGenerationRef.current?.sessionId || null
     const generationSession = initialSessions.find(session => session?.id === generationSessionId)
 
     try {
       if (
         generationSessionId
-        && generationSession?.isStarred !== true
+        && (includeStarred || generationSession?.isStarred !== true)
       ) {
         await cancelActiveGeneration('clear_history')
         if (activeGenerationRef.current?.jobId) {
@@ -3018,17 +3017,13 @@ function App() {
               : localSession.messages
             return { ...session, messages: generationMessages || session.messages || [] }
           })
-        const preservedSessions = sourceSessions.filter(session => session?.isStarred === true)
+        const preservedSessions = sourceSessions.filter(session => !includeStarred && session?.isStarred === true)
         const deletedCount = sourceSessions.length - preservedSessions.length
 
         let nextSessions = preservedSessions
-        let nextActiveSessionId = currentActiveSessionId
+        let nextActiveSessionId = null
         let nextMessages = messagesRef.current
-        const preservedActiveSession = preservedSessions.find(session => session?.id === currentActiveSessionId)
-
-        if (preservedActiveSession) {
-          nextMessages = preservedActiveSession.messages || nextMessages
-        } else {
+        {
           // Temizlikten sonra yildizli sohbete atlanmaz: yildizlilar listede
           // kalir, kullanici isterse kendisi acar. Aktif sohbet yeni sohbet olur.
           const nextSessionId = Date.now().toString()
@@ -3059,7 +3054,6 @@ function App() {
           nextActiveSessionId,
           nextMessages,
           nextSessions,
-          preservedActiveSession,
         }
       }
 
@@ -3084,7 +3078,8 @@ function App() {
       setActiveSessionId(result.nextActiveSessionId)
       setMessages(result.nextMessages)
       setAttachments([])
-      if (!result.preservedActiveSession) stickToBottomOnNextRender()
+      setInput('')
+      stickToBottomOnNextRender()
 
       if (typeof chrome !== 'undefined' && chrome.storage?.local?.remove) {
         void chrome.storage.local.remove(['chatHistory']).catch(error => {
@@ -3093,6 +3088,7 @@ function App() {
       }
 
       setShowBulkDeleteConfirm(false)
+      setShowHistory(false)
       notifySuccess(t('chat.bulk_delete.success', {
         count: result.deletedCount,
         defaultValue: `${result.deletedCount} unstarred chats deleted.`,

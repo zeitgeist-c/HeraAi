@@ -27,6 +27,17 @@ const sessions = [
 ]
 
 describe('session management UI', () => {
+  it('requires explicit starred inclusion and counts all chats despite search', () => {
+    const confirm = vi.fn()
+    render(<HistoryOverlay sessions={sessions} activeSessionId="star-new" onSelect={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onToggleStar={vi.fn()} onRequestBulkDelete={vi.fn()} bulkDeleteOpen onCancelBulkDelete={vi.fn()} onConfirmBulkDelete={confirm} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByTestId('history-search'), { target: { value: 'Other old' } })
+    expect(screen.getByRole('button', { name: 'Delete 2' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Delete all chats, including starred chats' }))
+    expect(screen.getByRole('dialog', { name: 'Delete all chats, including starred chats?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all 4 chats' }))
+    expect(confirm).toHaveBeenCalledWith(true)
+  })
+
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('en')

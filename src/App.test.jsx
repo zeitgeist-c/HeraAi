@@ -4256,6 +4256,36 @@ describe('HeraAi App', () => {
     expect(screen.getByTitle('Permanent project name')).toBeInTheDocument();
   });
 
+  it('opens a fresh chat when the remembered chat is missing and history close preserves it', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = { theme: 'light', startupBehavior: 'resume', activeSessionId: 'deleted', sessions: [{ id: 'star', title: 'Do not auto open', isStarred: true, messages: [{ id: 'u', role: 'user', content: 'Saved question' }] }] };
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    expect(currentStorage.activeSessionId).not.toBe('star');
+    const freshId = currentStorage.activeSessionId;
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(currentStorage.activeSessionId).toBe(freshId);
+    expect(screen.queryByText('Saved question')).not.toBeInTheDocument();
+  });
+
+  it('deletes starred chats only after explicit all-chat confirmation and opens a fresh chat', async () => {
+    await i18n.changeLanguage('en');
+    currentStorage = { theme: 'light', startupBehavior: 'resume', activeSessionId: 'star', sessions: [{ id: 'star', title: 'Starred to delete', isStarred: true, messages: [{ id: 'u', role: 'user', content: 'Saved question' }] }] };
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bulk delete' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Delete all chats, including starred chats' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all 1 chats' }));
+    await waitFor(() => expect(currentStorage.sessions.every(session => session.id !== 'star')).toBe(true));
+    expect(currentStorage.sessions).toHaveLength(1);
+    expect(currentStorage.activeSessionId).toBe(currentStorage.sessions[0].id);
+    expect(screen.queryByRole('heading', { name: 'Chat History' })).not.toBeInTheDocument();
+  });
+
   it('persists stars, groups them first, and bulk-deletes only unstarred chats', async () => {
     await i18n.changeLanguage('en');
     currentStorage = {
@@ -4317,11 +4347,12 @@ describe('HeraAi App', () => {
     ));
     expect(freshChat).toMatchObject({ title: 'New Chat', isStarred: false });
     expect(currentStorage.activeSessionId).toBe(freshChat.id);
-    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Chat History' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     expect(screen.queryByText('Delete this chat')).not.toBeInTheDocument();
     expect(screen.getByText('Pin this chat')).toBeInTheDocument();
     expect(screen.getByText('Already starred')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus());
   });
 
   it('başka cihazdan eşitlenen yeni sohbeti geçmiş listesinde gösterir', async () => {
@@ -4416,13 +4447,15 @@ describe('HeraAi App', () => {
     const freshChat = currentStorage.sessions.find(session => session.id !== 'protected-starred');
     expect(freshChat).toMatchObject({ title: 'New Chat', isStarred: false });
     expect(currentStorage.activeSessionId).toBe(freshChat.id);
-    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Chat History' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
     expect(screen.queryByRole('dialog', { name: 'Delete unstarred chats?' })).not.toBeInTheDocument();
     expect(screen.queryByText('Running unstarred chat')).not.toBeInTheDocument();
     expect(screen.getByText('Protected starred chat')).toBeInTheDocument();
   });
 
-  it('creates one fresh unstarred chat and keeps history open when bulk deletion has no survivor', async () => {
+  it('creates one fresh unstarred chat and closes history after bulk deletion', async () => {
     await i18n.changeLanguage('en');
     currentStorage = {
       theme: 'light',
@@ -4453,9 +4486,8 @@ describe('HeraAi App', () => {
     });
     expect(currentStorage.sessions[0].id).not.toBe('only-chat');
     expect(currentStorage.activeSessionId).toBe(currentStorage.sessions[0].id);
-    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
-    // Yeni boş sohbet geçmiş listesinde görünmez: liste boş durumunu gösterir.
-    expect(screen.getByText('No chat history found.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Chat History' })).not.toBeInTheDocument();
+    expect(document.querySelector('textarea')).toBeInTheDocument();
     expect(screen.queryByText('Only unstarred chat')).not.toBeInTheDocument();
   });
 
@@ -5008,8 +5040,9 @@ describe('HeraAi App', () => {
       if (
         rejectNextBulkWrite
         && Array.isArray(data?.sessions)
-        && data.sessions.length === 1
+        && data.sessions.length === 2
         && data.sessions[0]?.id === 'retry-starred'
+        && data.sessions.every(session => session.id !== 'retry-unstarred')
       ) {
         rejectNextBulkWrite = false;
         return Promise.reject(new Error('simulated bulk storage failure'));
@@ -5037,12 +5070,11 @@ describe('HeraAi App', () => {
       expect(screen.getByRole('dialog', { name: 'Delete unstarred chats?' })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
-      await waitFor(() => expect(currentStorage.sessions.map(session => session.id)).toEqual([
-        'retry-starred',
-      ]));
+      await waitFor(() => expect(currentStorage.sessions.some(session => session.id === 'retry-unstarred')).toBe(false));
+      expect(currentStorage.sessions.some(session => session.id === 'retry-starred')).toBe(true);
       expect(screen.queryByRole('dialog', { name: 'Delete unstarred chats?' })).not.toBeInTheDocument();
       expect(screen.queryByText('Retry deletable chat')).not.toBeInTheDocument();
-      expect(screen.getByText('Retry protected chat')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Chat History' })).not.toBeInTheDocument();
     } finally {
       consoleErrorSpy.mockRestore();
     }
@@ -5110,11 +5142,14 @@ describe('HeraAi App', () => {
         await Promise.resolve();
       });
 
-      expect(currentStorage.sessions.map(session => session.id)).toEqual(['streaming-starred']);
+      expect(currentStorage.sessions).toHaveLength(2);
+      expect(currentStorage.sessions.some(session => session.id === 'streaming-starred')).toBe(true);
       expect(currentStorage.activeGeneration?.status).toBe('running');
       expect(global.chrome.runtime.sendMessage.mock.calls.some(([message]) => message?.type === 'CANCEL')).toBe(false);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
+      fireEvent.click(screen.getByText('Streaming protected chat'));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
