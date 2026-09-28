@@ -392,7 +392,8 @@
       "url_retrieval_failed": "Verilen public sayfaların tamamı güvenilir biçimde alınamadı.",
       "already_running": "Başka bir yanıt hâlâ çalışıyor. Yeni bir yanıt başlatmadan önce onu durdurun.",
       "invalid_request": "Yanıt isteği eksik kaldı. Lütfen yeniden deneyin.",
-      "generation_failed": "AI yanıtı oluşturulamadı."
+      "generation_failed": "AI yanıtı oluşturulamadı.",
+      "generation_start_failed": "Yanıt uygulama içinde başlatılamadı. Lütfen yeniden deneyin."
     },
     "connection_error": "AI istegi basarisiz oldu. API anahtarinizi ve baglantinizi kontrol edin.",
     "cancelled": "İstek iptal edildi",

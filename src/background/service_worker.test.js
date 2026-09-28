@@ -38,13 +38,14 @@ const createChromeMock = ({
   withSidePanel = true,
   initialStorage = {},
   offscreenOpen = false,
+  offscreenJobId = null,
   withGetContexts = true,
 } = {}) => {
   const storage = clone(initialStorage);
   const events = [];
   let documentOpen = offscreenOpen;
   let activeOffscreenJobId = offscreenOpen
-    ? (initialStorage.activeGeneration?.jobId || null)
+    ? (offscreenJobId || initialStorage.activeGeneration?.jobId || null)
     : null;
   let terminalForwardingJobId = null;
 
@@ -674,6 +675,40 @@ describe('background generation coordinator', () => {
       activeJobId: 'existing-job',
       errorCode: 'already_running',
     });
+  });
+
+  it('clears an orphaned offscreen job before starting a new API request', async () => {
+    const mock = createChromeMock({
+      initialStorage: { sessions: [] },
+      offscreenOpen: true,
+      offscreenJobId: 'orphaned-job',
+    });
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage());
+
+    expect(response).toMatchObject({ ok: true, activeGeneration: { jobId: 'job-1', status: 'running' } });
+    expect(mock.closeDocument).toHaveBeenCalledTimes(1);
+    expect(mock.createDocument).toHaveBeenCalledTimes(1);
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')).toHaveLength(1);
+    expect(mock.storage.activeGeneration.jobId).toBe('job-1');
+  });
+
+  it('reports a local startup error distinctly when offscreen creation fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const mock = createChromeMock({ initialStorage: { sessions: [] } });
+    mock.createDocument.mockRejectedValueOnce(new Error('Offscreen unavailable'));
+    const listener = await loadWorker(mock);
+
+    const response = await dispatch(listener, startMessage());
+
+    expect(response).toMatchObject({
+      ok: false,
+      errorCode: 'generation_start_failed',
+      activeGeneration: { status: 'error', errorCode: 'generation_start_failed' },
+    });
+    expect(runtimeMessages(mock, 'HERA_GENERATION_START')).toHaveLength(0);
+    consoleError.mockRestore();
   });
 
   it('serializes simultaneous START messages so only the first can claim storage', async () => {

@@ -78,22 +78,29 @@ function SyncPanel() {
     } catch {
       // Ayar okunamazsa panel çalışmaya devam eder; varsayılan aralık geçerli olur.
     }
+    return response.status
   }, [])
 
-  // Düğmeden gelen yenileme de ilk yüklemedeki hata eşlemesini kullanır; aksi
-  // halde tıklama sessizce başarısız olurdu.
+  // Bulut durumu okunamasa bile Firebase oturumunu ayrı kanaldan doğrula.
   const refreshWithFeedback = useCallback(() => {
-    refresh().catch(error => {
-      setStatus({ signedIn: false, state: 'error', lastError: describeRuntimeError(error) })
+    refresh().catch(async error => {
+      const errorCode = describeRuntimeError(error)
+      try {
+        const authState = await sendRuntimeMessage({ type: 'AUTH_GET_STATE' })
+        if (authState?.ok && authState.user?.uid) {
+          setStatus({ signedIn: true, user: authState.user, cloudUnavailable: true, state: 'error', lastError: errorCode, lastErrorCode: errorCode })
+          return
+        }
+      } catch {
+        // Auth sorgusu da ulaşılmazsa yalnız doğrulanamayan durum gösterilir.
+      }
+      setStatus({ signedIn: false, state: 'error', lastError: errorCode })
     })
   }, [refresh])
 
   useEffect(() => {
-    refresh().catch(error => {
-      // Ham Chrome metni panele taşınmaz; kod haritası üzerinden gösterilir.
-      setStatus({ signedIn: false, state: 'error', lastError: describeRuntimeError(error) })
-    })
-  }, [refresh])
+    refreshWithFeedback()
+  }, [refreshWithFeedback])
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.focus()
@@ -125,12 +132,36 @@ function SyncPanel() {
   // tamamlanıp tamamlanmadığı taze bir oturum sorgusuyla doğrulanır.
   const handleSignIn = async () => {
     setBusy('signin')
+    const showSignedIn = async user => {
+      let freshStatus = null
+      let errorCode = 'sync_signed_out'
+      try {
+        freshStatus = await refresh()
+      } catch (error) {
+        errorCode = describeRuntimeError(error)
+      }
+      if (freshStatus?.signedIn !== true || freshStatus.user?.uid !== user?.uid) {
+        const confirmedUser = await pollForResult({
+          check: async () => {
+            const state = await sendRuntimeMessage({ type: 'AUTH_GET_STATE' })
+            return state?.ok && state.user?.uid === user?.uid ? state.user : null
+          },
+          attempts: 2,
+        })
+        if (!confirmedUser) {
+          setStatus({ signedIn: false, state: 'error', lastError: errorCode })
+          notifyError(t('setup.sync.sign_in_unfinished'))
+          return false
+        }
+        setStatus({ signedIn: true, user: confirmedUser, cloudUnavailable: true, state: 'error', lastError: errorCode, lastErrorCode: errorCode })
+      }
+      notifySuccess(t('setup.sync.signed_in'))
+      return true
+    }
     try {
       const response = await sendRuntimeMessage({ type: 'AUTH_SIGN_IN' })
-      if (!response?.ok) throw new Error(response?.errorCode || 'auth_failed')
-      notifySuccess(t('setup.sync.signed_in'))
-      await refresh()
-      return response
+      if (!response?.ok || !response.user?.uid) throw new Error(response?.errorCode || 'auth_failed')
+      return await showSignedIn(response.user) ? response : null
     } catch (error) {
       const code = describeRuntimeError(error)
       if (code === SYNC_CHANNEL_LOST) {
@@ -141,9 +172,7 @@ function SyncPanel() {
           },
         })
         if (user) {
-          notifySuccess(t('setup.sync.signed_in'))
-          await refresh()
-          return { ok: true, user }
+          return await showSignedIn(user) ? { ok: true, user } : null
         }
         notifyError(t('setup.sync.sign_in_unfinished'))
         return null

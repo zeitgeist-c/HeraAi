@@ -18,7 +18,7 @@ const baseStatus = {
   lastError: null,
   lastErrorCode: null,
   blockedUntil: null,
-  user: { email: 'user@example.com' },
+  user: { uid: 'uid-1', email: 'user@example.com' },
   deviceId: 'dev-1',
 }
 
@@ -359,6 +359,91 @@ describe('SyncPanel Google girişi dayanıklılığı', () => {
     expect(notifySuccess).toHaveBeenCalledWith('Signed in to your Google account.')
     expect(notifyError).not.toHaveBeenCalled()
     expect(sentMessages('AUTH_GET_STATE').length).toBeGreaterThan(0)
+  })
+
+  it('Google girişi başarılıysa sonraki durum sorgusu kopsa bile oturumu açık gösterir', async () => {
+    let statusReads = 0
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') {
+        statusReads += 1
+        if (statusReads === 1) callback({ ok: true, status: signedOutStatus })
+        else failWithChannelLoss(callback)
+        return Promise.resolve()
+      }
+      if (message.type === 'AUTH_SIGN_IN') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+        return Promise.resolve()
+      }
+      if (message.type === 'AUTH_GET_STATE') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+        return Promise.resolve()
+      }
+      callback({ ok: true })
+      return Promise.resolve()
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    expect(await screen.findByText(/Your Google session remains signed in/i)).toBeInTheDocument()
+    expect(notifySuccess).toHaveBeenCalledWith('Signed in to your Google account.')
+    expect(notifyError).not.toHaveBeenCalled()
+    expect(sentMessages('AUTH_GET_STATE')).toHaveLength(1)
+  })
+
+  it('açılışta bulut durum sorgusu koparsa mevcut Google oturumunu korur', async () => {
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') failWithChannelLoss(callback)
+      else if (message.type === 'AUTH_GET_STATE') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+      } else callback({ ok: true })
+      return Promise.resolve()
+    })
+
+    render(<SyncPanel />)
+
+    expect(await screen.findByText(/Your Google session remains signed in/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument()
+    expect(sentMessages('AUTH_GET_STATE')).toHaveLength(1)
+  })
+
+  it('başarılı girişten hemen sonra eski signed-out durumu gelirse girişi geri almaz', async () => {
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') callback({ ok: true, status: signedOutStatus })
+      else if (message.type === 'AUTH_SIGN_IN') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+      } else if (message.type === 'AUTH_GET_STATE') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+      } else callback({ ok: true })
+      return Promise.resolve()
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    expect(await screen.findByText(/Your Google session remains signed in/i)).toBeInTheDocument()
+    expect(notifySuccess).toHaveBeenCalledWith('Signed in to your Google account.')
+    expect(notifyError).not.toHaveBeenCalled()
+  })
+
+  it('giriş yanıtı gelse de Firebase oturumu doğrulanmazsa başarı bildirmez', async () => {
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message.type === 'SYNC_GET_STATUS') callback({ ok: true, status: signedOutStatus })
+      else if (message.type === 'AUTH_SIGN_IN') {
+        callback({ ok: true, user: { uid: 'uid-1', email: 'user@example.com' } })
+      } else if (message.type === 'AUTH_GET_STATE') callback({ ok: true, user: null })
+      else callback({ ok: true })
+      return Promise.resolve()
+    })
+    render(<SyncPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith(
+      'Sign-in did not finish; the connection was lost. Try again.',
+    ))
+    expect(notifySuccess).not.toHaveBeenCalledWith('Signed in to your Google account.')
+    expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeInTheDocument()
   })
 
   it('giriş tamamlanmadıysa ham metin yerine açıklama gösterir', async () => {

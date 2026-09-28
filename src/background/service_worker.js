@@ -831,7 +831,22 @@ async function handleGenerationStart(message) {
     }
 
     await ensureOffscreenDocument();
-    await probeOffscreenDocument();
+    const offscreenProbe = await probeOffscreenDocument();
+    // Storage owns the single active job. If it contained no older job when
+    // START arrived, a different job left in the offscreen document is orphaned.
+    // Recreate that document before dispatching or its already_running reply
+    // would be reported as a generic API failure without an API request.
+    if (
+      !storedGeneration
+      && [
+        ...offscreenProbe.activeJobIds,
+        ...offscreenProbe.terminalForwardingJobIds,
+      ].some(jobId => jobId !== runningGeneration.jobId)
+    ) {
+      if (!await closeOffscreenDocument()) throw new Error('Orphaned offscreen job could not be cleared');
+      await ensureOffscreenDocument();
+      await probeOffscreenDocument();
+    }
     await sendOffscreenCommandWithRetry({
       type: 'HERA_GENERATION_START',
       jobId: runningGeneration.jobId,
@@ -869,14 +884,18 @@ async function handleGenerationStart(message) {
       ok: true,
       activeGeneration: generationSnapshot(handedOffGeneration),
     };
-  } catch (_error) {
+  } catch (error) {
+    console.error('Generation could not start before the provider request', {
+      name: error?.name || 'Error',
+      code: error?.code || null,
+    });
     const failedGeneration = await writeTerminalError(
       runningGeneration,
-      'generation_failed',
+      'generation_start_failed',
     );
     return {
       ok: false,
-      errorCode: 'generation_failed',
+      errorCode: 'generation_start_failed',
       activeGeneration: generationSnapshot(failedGeneration),
     };
   }

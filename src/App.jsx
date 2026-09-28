@@ -3275,13 +3275,17 @@ function App() {
 
   const stopDictationRecording = useCallback((shouldTranscribe = true) => {
     const recorder = dictationRecorderRef.current
-    if (!recorder || recorder.state === 'inactive') return
+    if (!recorder || recorder.state === 'inactive') {
+      // Durdurulacak kayit yoksa onstop hic gelmez; arayuzu kayitta takili birakma.
+      if (dictationPhaseRef.current !== 'idle') resetDictation()
+      return
+    }
     dictationShouldTranscribeRef.current = shouldTranscribe
     clearDictationTimers()
     // Mikrofon akisi onstop icinde birakilir; burada birakmak kodlayicinin
     // son karelerini kesiyor ve dikte son sozcukleri kaybediyordu.
     recorder.stop()
-  }, [clearDictationTimers])
+  }, [clearDictationTimers, resetDictation])
 
   const cancelDictation = useCallback(() => {
     dictationStartEpochRef.current += 1
@@ -3361,7 +3365,10 @@ function App() {
     dictationPhaseRef.current = 'requesting'
     setDictationPhase('requesting')
     const permissionGranted = await requestMicrophonePermission()
-    if (startEpoch !== dictationStartEpochRef.current) return
+    if (startEpoch !== dictationStartEpochRef.current) {
+      console.info('Dictation start superseded by a newer request.')
+      return
+    }
     if (permissionGranted === false) {
       resetDictation()
       notifyError(t('chat.voice_permission_denied'))
@@ -3374,6 +3381,7 @@ function App() {
         video: false,
       })
       if (startEpoch !== dictationStartEpochRef.current) {
+        console.info('Dictation microphone stream discarded by a newer request.')
         stream.getTracks().forEach(track => track.stop())
         return
       }
@@ -3391,8 +3399,17 @@ function App() {
         const shouldTranscribe = dictationShouldTranscribeRef.current
         const blob = new Blob(dictationChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
         releaseDictationStream()
-        if (shouldTranscribe && blob.size > 0) void processDictation(blob)
-        else resetDictation()
+        if (shouldTranscribe && blob.size > 0) {
+          void processDictation(blob)
+          return
+        }
+        // Kayit durdu ama kodlayici ses verisi uretmediyse sessizce sonme:
+        // kullanici kendisi iptal etmediyse anlasilir bir uyari goster.
+        if (shouldTranscribe) {
+          console.warn('Dictation ended without audio data; nothing to transcribe.')
+          notifyError(t('chat.voice_empty'))
+        }
+        resetDictation()
       }
       recorder.onerror = () => {
         notifyError(t('chat.voice_failed'))
@@ -3427,6 +3444,9 @@ function App() {
   useEffect(() => {
     const handleVoiceVisibility = () => {
       if (document.visibilityState !== 'hidden') return
+      if (dictationPhaseRef.current !== 'idle') {
+        console.info('Dictation cancelled because the panel was hidden.')
+      }
       cancelDictation()
     }
     document.addEventListener('visibilitychange', handleVoiceVisibility)
@@ -3461,6 +3481,14 @@ function App() {
       && requestsPreviousWebSource(userText)
       && existingContextUrls.length > 0
     if (!userText && draftAttachments.length === 0) return
+    // A terminal result may still be waiting for its storage acknowledgement.
+    // Give finalization another chance before treating it as a running request.
+    if (
+      activeGenerationRef.current?.jobId
+      && TERMINAL_GENERATION_STATUSES.has(activeGenerationRef.current.status)
+    ) {
+      await finalizeGeneration(activeGenerationRef.current)
+    }
     if (activeGenerationRef.current?.jobId || cancellationPromiseRef.current) {
       notifyError(t('chat.generation_errors.already_running', {
         defaultValue: t('chat.connection_error'),
@@ -3846,7 +3874,7 @@ function App() {
         }
       }
     }
-  }, [input, attachments, appConfig, selectedModel, selectedProvider, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
+  }, [input, attachments, appConfig, selectedModel, selectedProvider, finalizeGeneration, handleGenerationState, mergeSessionMessages, persistSessionMessagesFromLatestStorage, resolveSessionTitle, setGenerating, stickToBottomOnNextRender, stopAssistantDisplayQueue, t])
 
   handleSendRef.current = handleSend
 

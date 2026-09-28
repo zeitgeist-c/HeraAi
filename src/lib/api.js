@@ -233,11 +233,8 @@ function geminiKeyStatus(classification) {
 }
 
 function logGeminiFailure(modelId, classification, err) {
-  console.error('Gemini request failed', {
-    model: modelId,
-    reason: classification,
-    httpStatus: getGeminiHttpStatus(err) || null,
-  })
+  const status = getGeminiHttpStatus(err)
+  console.error(`Gemini request failed: model=${modelId}, reason=${classification}, httpStatus=${status || 'unknown'}`)
 }
 
 function classifyTavilyStatus(status) {
@@ -475,7 +472,6 @@ async function* attemptGeminiModel(entries, createStreamRequest, createFallbackR
       }
 
       if (hasStartedStreaming || GEMINI_NON_RETRYABLE_FAILURE.has(status)) {
-        logGeminiFailure(attemptModelId, status, resolvedError)
         return {
           ok: false,
           classification: status,
@@ -484,10 +480,8 @@ async function* attemptGeminiModel(entries, createStreamRequest, createFallbackR
         }
       }
       if (status === 'model_unavailable') {
-        logGeminiFailure(attemptModelId, status, resolvedError)
         return { ok: false, classification: status, error: resolvedError }
       }
-      logGeminiFailure(attemptModelId, status, resolvedError)
     } finally {
       streamRequest?.cleanup()
     }

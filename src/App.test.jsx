@@ -4054,6 +4054,48 @@ describe('HeraAi App', () => {
     });
   });
 
+  it('retries a terminal acknowledgement when the next prompt is sent', async () => {
+    const sessionId = 'terminal-retry-session';
+    const terminal = {
+      jobId: 'terminal-retry-job', requestId: 'terminal-retry-job', sessionId,
+      userMessageId: 'terminal-retry-user', assistantMessageId: 'terminal-retry-answer',
+      model: 'gemini-3.1-flash-lite', provider: 'gemini', mode: 'chat',
+      status: 'completed', revision: 1, content: 'Previous answer', sources: [],
+      startedAt: Date.now(), updatedAt: Date.now(),
+    };
+    currentStorage = {
+      theme: 'light', startupBehavior: 'resume', activeSessionId: sessionId,
+      sessions: [{ id: sessionId, title: 'Previous chat', updatedAt: Date.now(), messages: [
+        { id: 'terminal-retry-user', role: 'user', content: 'Previous question' },
+        { id: 'terminal-retry-answer', role: 'model', content: 'Previous answer', status: 'done' },
+      ] }],
+      activeGeneration: terminal,
+    };
+    const defaultRuntimeSend = global.chrome.runtime.sendMessage.getMockImplementation();
+    let allowAcknowledgement = false;
+    global.chrome.runtime.sendMessage.mockImplementation(message => {
+      if (message?.type === 'DONE_ACK' && !allowAcknowledgement) {
+        return Promise.reject(new Error('Temporary acknowledgement failure'));
+      }
+      return defaultRuntimeSend(message);
+    });
+
+    render(<App />);
+    expect(await findChatText('Previous question')).toBeInTheDocument();
+    await waitFor(() => expect(global.chrome.runtime.sendMessage.mock.calls.filter(([message]) => (
+      message?.type === 'DONE_ACK'
+    ))).toHaveLength(4), { timeout: 6000 });
+    allowAcknowledgement = true;
+
+    fireEvent.change(document.querySelector('textarea'), { target: { value: 'Next question' } });
+    fireEvent.click(getSendButton());
+
+    await waitFor(() => expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'HERA_GENERATION_START', sessionId }),
+    ), { timeout: 5000 });
+    expect(currentStorage.activeGeneration?.jobId).not.toBe('terminal-retry-job');
+  }, 12000);
+
   it('reconciles a no-op DONE_ACK and adopts the worker replacement job', async () => {
     const oldSessionId = 'ack-old-session';
     const replacementSessionId = 'ack-replacement-session';
@@ -5751,6 +5793,77 @@ describe('HeraAi App', () => {
     expect(chunkSizes[0]).toBe(chunkSizes[1]);
     expect(chunkSizes[2]).toBeLessThan(chunkSizes[0]);
     expect(document.querySelector('textarea')).toHaveValue('Voice transcript Voice transcript Voice transcript');
+  });
+
+  it('warns instead of silently dropping dictation when no audio was captured', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    global.MediaRecorder = class EmptyMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { this.state = 'recording'; }
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob([], { type: this.mimeType }) });
+        this.onstop?.();
+      }
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/Anlaşılır bir konuşma|No intelligible speech/i),
+      expect.any(Object),
+    ));
+    expect(voiceApi.transcribeAudio).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+  });
+
+  it('recovers to idle when stopping dictation with no active recorder', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    global.MediaRecorder = class DeadMediaRecorder {
+      static isTypeSupported = vi.fn().mockReturnValue(true);
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+      }
+      start() { /* tarayici kayit durumuna hic girmedi */ }
+      stop() { /* onstop gelmez */ }
+    };
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    expect(voiceApi.transcribeAudio).not.toHaveBeenCalled();
   });
 
   it('keeps voice tools available without settings switches', async () => {
