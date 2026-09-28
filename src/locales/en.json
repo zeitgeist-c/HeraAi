@@ -392,7 +392,8 @@
             "url_retrieval_failed": "The supplied public pages could not all be retrieved reliably.",
             "already_running": "Another response is already running. Stop it before starting a new one.",
             "invalid_request": "The response request was incomplete. Please retry.",
-            "generation_failed": "The AI response could not be generated."
+            "generation_failed": "The AI response could not be generated.",
+            "generation_start_failed": "The extension could not start the response. Please retry."
         },
         "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",

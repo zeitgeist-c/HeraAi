@@ -618,6 +618,7 @@ describe('streamChat fallback', () => {
   })
 
   it('falls back to the next key when the primary rate-limits during stream creation', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.generateContentStreamMock
       .mockRejectedValueOnce(Object.assign(new Error('429 RATE_LIMIT'), { status: 429 }))
       .mockResolvedValueOnce(geminiStream('chunk from g2'))
@@ -638,6 +639,8 @@ describe('streamChat fallback', () => {
     ])
     expect(events.find(e => e.event === 'chunk').data.text).toBe('chunk from g2')
     expect(events.some(e => e.event === 'error')).toBe(false)
+    expect(errorLog).not.toHaveBeenCalled()
+    errorLog.mockRestore()
   })
 
   it.each([
@@ -710,6 +713,7 @@ describe('streamChat fallback', () => {
   })
 
   it('does not fall back when a single key returns an invalid 400 error', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.generateContentStreamMock.mockRejectedValueOnce(
       Object.assign(new Error('API_KEY_INVALID'), { status: 400 })
     )
@@ -726,6 +730,10 @@ describe('streamChat fallback', () => {
     ])
     expect(events.some(e => e.event === 'error')).toBe(true)
     expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
+    expect(errorLog).toHaveBeenCalledExactlyOnceWith(
+      'Gemini request failed: model=gemini-3.1-flash-lite, reason=invalid_key, httpStatus=400'
+    )
+    errorLog.mockRestore()
   })
 
   it('does not fall back when a single key refuses content for SAFETY reasons', async () => {
@@ -817,6 +825,7 @@ describe('streamChat fallback', () => {
   })
 
   it('falls back to gemini-3.5-flash-lite when the requested model hits quota', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.generateContentStreamMock
       .mockRejectedValueOnce(Object.assign(new Error('quota exceeded for gemini-3.8-flash'), { status: 429 }))
       .mockResolvedValueOnce(geminiStream('Lite answer'))
@@ -839,6 +848,8 @@ describe('streamChat fallback', () => {
       data: { provider: 'gemini', requestedModel: 'gemini-3.8-flash', resolvedModel: 'gemini-3.5-flash-lite' },
     })
     expect(events.some(event => event.event === 'error')).toBe(false)
+    expect(errorLog).not.toHaveBeenCalled()
+    errorLog.mockRestore()
   })
 
   it('tries the other lite model when the lightest lite model hits quota', async () => {
