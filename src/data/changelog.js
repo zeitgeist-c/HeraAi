@@ -1,6 +1,78 @@
 // Yama notları veri dosyası. Yeni sürümde en üste { version, date, changes } ekle.
 // changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
+import manifest from '../../manifest.json';
+
 export const CHANGELOG = Object.freeze([
+{
+  version: '1.10.23',
+  date: '2026-09-29',
+  changes: {
+    tr: [
+      'Dikte kaydı ses üretmeden biterse sessizce sönmüyor; anlaşılır bir uyarı gösteriliyor',
+      'Durdurulacak kayıt yoksa arayüz kayıtta takılı kalmıyor; panel gizlenince iptal bilgisi veriliyor',
+      'Yanıt uygulama içinde başlatılamazsa genel hata yerine “Yanıt uygulama içinde başlatılamadı” bildiriliyor',
+      'Bulut durumu okunamazsa oturum ayrı kanaldan doğrulanıyor; giriş yapılmışken yanlış “çıkış yapıldı” gösterilmiyor',
+    ],
+    en: [
+      'A dictation recording that ends without audio no longer dies silently; a clear warning is shown',
+      'With no recording to stop the interface no longer sticks in recording state; hiding the panel reports the cancellation',
+      'When a response cannot start inside the app, “The extension could not start the response” is reported instead of a generic error',
+      'When cloud status is unreadable the session is verified on a separate channel; a signed-in user is no longer shown as signed out',
+    ],
+  },
+},
+{
+  version: '1.10.22',
+  date: '2026-09-27',
+  changes: {
+    tr: [
+      'Açılışta son açık sohbet sürdürülüyor; kayıtlı sohbet yoksa rastgele seçim yerine yeni sohbet açılıyor',
+      'Geçmişten seçim yapmadan kapatma mevcut sohbeti koruyor; yıldızlama yalnız bilgiyi değiştiriyor',
+      'Temizleme varsayılanı yıldızsızları siliyor; yıldızlılar dahil tam silme onay penceresinde ayrı seçim istiyor',
+      'Temizleme sonrası yeni sohbet açılıyor, geçmiş kapanıyor ve taslak ekleri temizleniyor',
+    ],
+    en: [
+      'Startup resumes the last open chat; with no stored chat a new chat opens instead of a random pick',
+      'Closing history without a selection keeps the current chat; starring only changes metadata',
+      'Cleanup deletes unstarred chats by default; full deletion including starred chats needs a separate confirmation choice',
+      'After cleanup a new chat opens, history closes and draft attachments are cleared',
+    ],
+  },
+},
+{
+  version: '1.10.21',
+  date: '2026-09-27',
+  changes: {
+    tr: [
+      'Çalışan bir eşitleme varken gelen ikinci istek ayrı iş başlatmıyor; çalışan işin gerçek sonucunu bekliyor',
+      'Önceki arka plan yaşamından kalan kilit işareti artık işlem çalışıyormuş gibi gösterilmiyor',
+      'Kilit işareti başarıda ve hatada temizleniyor; hata sonrası yeniden deneme mümkün',
+    ],
+    en: [
+      'A second request arriving while a sync is running no longer starts a separate job; it waits for the running job’s real result',
+      'A lock marker left by a previous background lifetime is no longer shown as a running operation',
+      'The lock marker is cleared on success and on error; retrying after a failure works',
+    ],
+  },
+},
+{
+  version: '1.10.20',
+  date: '2026-09-27',
+  changes: {
+    tr: [
+      'Gönderim sürerken gelen yeni değişiklik artık kaybolmuyor; kuyruk onayı gönderilen kayıtla mevcut kaydı karşılaştırıyor',
+      'Çözülemeyen uzak belge sessizce atlanmıyor; açık hata veriliyor ve imleç ilerlemiyor',
+      'Manuel eşitlemede kilit, duraklatma veya oturum nedeniyle atlanan işlem artık başarı bildirilmiyor; atlama nedeni gösteriliyor',
+      'Eşitleme durum paneli gerçek durumu bildiriyor; Firebase zaman damgası tam duyarlıkla saklanıyor',
+    ],
+    en: [
+      'A change arriving mid-upload is no longer lost; queue acknowledgement now compares the sent record with the current one',
+      'An unresolvable remote document is no longer skipped silently; a clear error is shown and the cursor does not advance',
+      'A manual sync run skipped on lock, pause or session no longer reports success; the skip reason is shown',
+      'The sync status panel reports the real state; Firebase timestamps are stored at full precision',
+    ],
+  },
+},
 {
   version: '1.10.19',
   date: '2026-09-25',
@@ -963,4 +1035,7 @@ export const CHANGELOG = Object.freeze([
   },
 ])
 
-export const LATEST_VERSION = CHANGELOG[0]?.version ?? null
+// Başlıkta gösterilen sürüm tek kaynaktan gelir: manifest.json (release akışında
+// package.json ile eşitlenir). CHANGELOG yalnızca yama notu listesidir; bir sürümde
+// girdi atlanırsa bile başlık eski sürümü göstermez.
+export const LATEST_VERSION = manifest.version ?? CHANGELOG[0]?.version ?? null
