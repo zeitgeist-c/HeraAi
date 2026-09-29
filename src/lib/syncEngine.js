@@ -200,8 +200,9 @@ export function createSyncEngine({
     durum = yeni
     try {
       onState(yeni, detay)
-    } catch {
-      // Durum dinleyicisi hata verirse eşitleme durmamalı.
+    } catch (dinleyiciHatasi) {
+      // Durum dinleyicisi hata verirse eşitleme durmamalı; tanı için kaydedilir.
+      console.error('Sync state listener failed', dinleyiciHatasi)
     }
   }
 
@@ -431,7 +432,7 @@ export function createSyncEngine({
       }
     } catch (error) {
       if (error?.message === 'sync_chunk_incomplete') throw error
-      throw new Error('sync_payload_invalid')
+      throw new Error('sync_payload_invalid', { cause: error })
     }
 
     const uzakSurum = parseEntityVersion(uzak.entityVersion)

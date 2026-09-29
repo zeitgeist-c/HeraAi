@@ -4,6 +4,22 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.24',
+  date: '2026-09-30',
+  changes: {
+    tr: [
+      'Başlık sürümü manifest dosyasından okunuyor; geçmiş yama notları tamamlandı',
+      'Kullanılmayan anahtar seçim kodu kaldırıldı; dışa aktarma/içe aktarma turu testlerle doğrulandı',
+      'Belge okuma (mammoth) 1.13.0 sürümüne yükseltildi; eşitleme hata kayıtları tanı için zenginleştirildi',
+    ],
+    en: [
+      'Header version is read from the manifest file; past release notes were backfilled',
+      'Unused key-selection code removed; export/import round-trip verified by tests',
+      'Document reading (mammoth) upgraded to 1.13.0; sync error logs enriched for diagnosis',
+    ],
+  },
+},
+{
   version: '1.10.23',
   date: '2026-09-29',
   changes: {
