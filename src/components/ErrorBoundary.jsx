@@ -1,5 +1,6 @@
 import { Component } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import i18n from '../i18n'
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -25,16 +26,16 @@ class ErrorBoundary extends Component {
         <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-8">
           <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-8 max-w-md text-center">
             <AlertTriangle className="w-16 h-16 text-destructive mx-auto mb-4" />
-            <h1 className="text-xl font-bold mb-2">Something went wrong</h1>
+            <h1 className="text-xl font-bold mb-2">{i18n.t('common.crash_title')}</h1>
             <p className="text-muted-foreground mb-6">
-              {this.state.error?.message || 'An unexpected error occurred. Please try reloading the extension.'}
+              {this.state.error?.message || i18n.t('common.crash_message')}
             </p>
             <button
               onClick={this.handleReload}
               className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
-              Reload
+              {i18n.t('common.reload')}
             </button>
           </div>
         </div>

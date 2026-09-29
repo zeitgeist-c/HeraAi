@@ -462,6 +462,9 @@
     "unavailable": "Kullanılabilir mikrofon bulunamadı. Cihazınızı ve Chrome ayarlarını kontrol edin."
   },
   "common": {
-    "back": "Geri"
+    "back": "Geri",
+    "crash_title": "Bir şeyler ters gitti",
+    "crash_message": "Beklenmeyen bir hata oluştu. Lütfen uzantıyı yeniden yüklemeyi deneyin.",
+    "reload": "Yeniden yükle"
   }
 }

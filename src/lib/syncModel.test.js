@@ -5,7 +5,6 @@ import {
   CRYPTO_VERSION,
   ENTITY_TYPES,
   REVISION_RETENTION_DAYS,
-  backupDateKey,
   buildAccountRootDocument,
   buildDeviceDocument,
   buildEntityDocument,
@@ -288,10 +287,6 @@ describe('syncModel revizyon politikasi', () => {
     expect(REVISION_RETENTION_DAYS).toBe(7)
   })
 
-  it('yedek tarih anahtari yerel gundur', () => {
-    expect(backupDateKey(new Date(2026, 8, 21))).toBe('2026-09-21')
-    expect(backupDateKey(new Date(2026, 0, 5))).toBe('2026-01-05')
-  })
 
   it('model ozeti koleksiyonlari raporlar', () => {
     const ozet = describeCloudModel()

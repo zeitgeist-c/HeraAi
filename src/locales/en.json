@@ -462,6 +462,9 @@
         "unavailable": "No usable microphone was found. Check your device and Chrome settings."
     },
     "common": {
-        "back": "Back"
+        "back": "Back",
+        "crash_title": "Something went wrong",
+        "crash_message": "An unexpected error occurred. Please try reloading the extension.",
+        "reload": "Reload"
     }
 }

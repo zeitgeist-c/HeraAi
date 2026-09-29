@@ -253,13 +253,6 @@ export function isRevisionExpired(revisionWallTimeMs, nowMs, days = REVISION_RET
   return Number(revisionWallTimeMs) < cutoff
 }
 
-/** Yedek belgesinin tarih anahtarı (yerel gün). */
-export function backupDateKey(date) {
-  const d = date instanceof Date ? date : new Date(date)
-  const pad = value => String(value).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
 /** Modelin özeti (teşhis ve testler için). */
 export function describeCloudModel() {
   return {

@@ -14,7 +14,7 @@ describe('session import and export', () => {
     vi.restoreAllMocks()
   })
 
-  it('exports version 2.2 metadata and provider provenance without attachment payloads', async () => {
+  it('exports version 2.3 metadata and provider provenance without attachment payloads', async () => {
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:hera-export')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
@@ -54,7 +54,7 @@ describe('session import and export', () => {
     const blob = createObjectURL.mock.calls[0][0]
     const exported = JSON.parse(await readBlob(blob))
     expect(exported).toMatchObject({
-      version: '2.2',
+      version: '2.3',
       sessions: [{
         id: 'session-1',
         title: 'Saved title',
@@ -221,5 +221,32 @@ describe('session import and export', () => {
     expect(blob.type).toBe('text/markdown')
     expect(await readBlob(blob)).toContain('Merhaba')
     expect(click).toHaveBeenCalled()
+  })
+
+  it('preserves message ids, sync policy and createdAt on import', async () => {
+    const file = new File([JSON.stringify({
+      version: '2.2',
+      sessions: [{
+        id: 'contract-session',
+        title: 'Contract',
+        syncPolicy: 'local_only',
+        updatedAt: 300,
+        createdAt: 299,
+        messages: [
+          { id: 'msg-1', role: 'user', content: 'Selam' },
+          { role: 'model', content: 'Merhaba' },
+        ],
+      }],
+    })], 'contract.json', { type: 'application/json' })
+
+    const imported = await importSessions(file)
+    expect(imported[0]).toMatchObject({
+      id: 'contract-session',
+      syncPolicy: 'local_only',
+      createdAt: 299,
+    })
+    expect(imported[0].messages[0].id).toBe('msg-1')
+    expect(typeof imported[0].messages[1].id).toBe('string')
+    expect(imported[0].messages[1].id).not.toBe('')
   })
 })
