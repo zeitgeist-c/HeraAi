@@ -363,6 +363,10 @@ describe('HeraAi App', () => {
     }
 
     try {
+      if (controller.signal.aborted) {
+        generationControllers.delete(message.jobId);
+        return;
+      }
       const events = message.mode === 'web'
         ? api.streamResearch(message.requestMessages, geminiKeys, tavilyKeys, controller.signal, message.model, options)
         : message.mode === 'vision'
@@ -412,6 +416,8 @@ describe('HeraAi App', () => {
   };
 
   afterEach(() => {
+    generationControllers.forEach(controller => controller.abort());
+    generationControllers.clear();
     resetDefaultVault();
   });
 

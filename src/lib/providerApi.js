@@ -167,6 +167,12 @@ function assertNoPdf(attachments) {
   }
 }
 
+// Ic rol ('user' | 'model') -> OpenAI uyumlu sohbet rolu. Gemini donusturucu
+// 'model' rolunu korur; yalniz OpenRouter/Ollama donusturuculeri kullanir.
+function toExternalChatRole(role) {
+  return role === 'model' ? 'assistant' : 'user'
+}
+
 function toOpenRouterMessages(messages, systemInstruction, fallbackImage = null) {
   const result = []
   if (systemInstruction?.trim()) result.push({ role: 'system', content: systemInstruction.trim() })
@@ -191,7 +197,7 @@ function toOpenRouterMessages(messages, systemInstruction, fallbackImage = null)
       }
     }
     result.push({
-      role: message.role === 'model' ? 'assistant' : 'user',
+      role: toExternalChatRole(message.role),
       content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts,
     })
   })
@@ -220,7 +226,7 @@ function toOllamaMessages(messages, systemInstruction, fallbackImage = null) {
       if (attachment?.mimeType?.startsWith('image/') && attachment.data) images.push(attachment.data)
     }
     result.push({
-      role: message.role === 'model' ? 'assistant' : 'user',
+      role: toExternalChatRole(message.role),
       content: textParts.filter(Boolean).join('\n\n'),
       ...(images.length > 0 ? { images } : {}),
     })
