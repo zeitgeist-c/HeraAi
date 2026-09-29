@@ -5,17 +5,20 @@ import { sanitizeRetiredModelMessages, sanitizeRetiredModelSessions } from './mo
 export const exportSessions = (sessions) => {
   const sanitizedSessions = sanitizeRetiredModelSessions(sessions).sessions
   const exportData = {
-    version: '2.2',
+    version: '2.3',
     exportedAt: new Date().toISOString(),
     sessions: sanitizedSessions.map(s => ({
       id: s.id,
       title: s.title,
       isTitleCustom: s.isTitleCustom === true,
       isStarred: s.isStarred === true,
+      syncPolicy: s.syncPolicy === 'local_only' ? 'local_only' : 'synced',
       updatedAt: s.updatedAt,
+      ...(Number.isFinite(s.createdAt) ? { createdAt: s.createdAt } : {}),
       activeAttachmentIds: s.activeAttachmentIds || [],
       activeWebUrls: s.activeWebUrls || [],
       messages: s.messages.map(m => ({
+        ...(typeof m.id === 'string' && m.id ? { id: m.id } : {}),
         role: m.role,
         content: m.content,
         ...(typeof m.displayContent === 'string' ? { displayContent: m.displayContent } : {}),
@@ -96,16 +99,21 @@ export const importSessions = (file) => {
           return
         }
 
-        const sessions = data.sessions.map(s => ({
+        const sessions = data.sessions.map((s, sessionIndex) => ({
           id: s.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
           title: s.title || 'Imported Chat',
           isTitleCustom: s.isTitleCustom === true,
           isStarred: s.isStarred === true,
+          syncPolicy: s.syncPolicy === 'local_only' ? 'local_only' : 'synced',
           updatedAt: s.updatedAt || Date.now(),
+          ...(Number.isFinite(s.createdAt) ? { createdAt: s.createdAt } : {}),
           activeAttachmentIds: Array.isArray(s.activeAttachmentIds) ? s.activeAttachmentIds : [],
           activeWebUrls: Array.isArray(s.activeWebUrls) ? s.activeWebUrls : [],
-          messages: sanitizeRetiredModelMessages(s.messages || []).messages.map(message => ({
+          messages: sanitizeRetiredModelMessages(s.messages || []).messages.map((message, messageIndex) => ({
             ...message,
+            id: typeof message?.id === 'string' && message.id
+              ? message.id
+              : `imported-${Date.now().toString(36)}-${sessionIndex}-${messageIndex}`,
             content: typeof message?.content === 'string' ? message.content : '',
             ...(message.model && !message.provider
               ? { provider: getProviderForModel(message.model) }
