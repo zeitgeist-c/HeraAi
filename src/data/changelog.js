@@ -4,6 +4,20 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.25',
+  date: '2026-10-03',
+  changes: {
+    tr: [
+      'Dikte yeniden kararlı modele döndü; saçma tamamlama ve uydurma azaldı',
+      'Uzun kayıt parça talimatı sertleşti; yarım kelime tamamlanmıyor',
+    ],
+    en: [
+      'Dictation is back on the stable model; stray completions reduced',
+      'Long-recording chunk instruction hardened; partial words are not completed',
+    ],
+  },
+},
+{
   version: '1.10.24',
   date: '2026-09-30',
   changes: {

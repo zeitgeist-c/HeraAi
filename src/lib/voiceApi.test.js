@@ -44,9 +44,9 @@ describe('voice API', () => {
     expect(statuses).toEqual([{ keyId: 'g1', status: 'success' }])
   })
 
-  it('uses Gemini 3.5 Flash Lite for dictation with 3.1 Flash Lite as the fallback', () => {
-    expect(DICTATION_PRIMARY_MODEL).toBe('gemini-3.5-flash-lite')
-    expect(DICTATION_FALLBACK_MODEL).toBe('gemini-3.1-flash-lite')
+  it('uses Gemini 3.1 Flash Lite for dictation with 3.5 Flash Lite as the fallback', () => {
+    expect(DICTATION_PRIMARY_MODEL).toBe('gemini-3.1-flash-lite')
+    expect(DICTATION_FALLBACK_MODEL).toBe('gemini-3.5-flash-lite')
     expect(DICTATION_MODEL).toBe(DICTATION_PRIMARY_MODEL)
   })
 

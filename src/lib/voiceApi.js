@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai'
 
-export const DICTATION_PRIMARY_MODEL = 'gemini-3.5-flash-lite'
-export const DICTATION_FALLBACK_MODEL = 'gemini-3.1-flash-lite'
+export const DICTATION_PRIMARY_MODEL = 'gemini-3.1-flash-lite'
+export const DICTATION_FALLBACK_MODEL = 'gemini-3.5-flash-lite'
 export const DICTATION_TERTIARY_MODEL = 'gemini-3.6-flash'
 export const DICTATION_MODEL = DICTATION_PRIMARY_MODEL
 // Ucuncu model yalniz sunucu reddi (5xx) ve gecersiz istek (400) icin denenir;
@@ -126,11 +126,11 @@ async function requestTranscriptionWithModel({ wavBase64, keys, signal, onKeySta
       contents: [{
         role: 'user',
         parts: [
-          { text: 'Transcribe the spoken audio verbatim in its original language, keeping natural punctuation and casing. Do not translate, summarise, answer, omit, or paraphrase anything. Return only the plain transcript. If there is no intelligible speech, return an empty response.' },
+          { text: 'Transcribe the spoken audio exactly as heard, in its original language. This may be a fragment of a longer recording cut at an arbitrary point, so never complete partial words or sentences and never add anything that was not spoken. No translation, summary, answer, or commentary. Return only the plain transcript. If there is no intelligible speech, return an empty response.' },
           { inlineData: { mimeType: 'audio/wav', data: wavBase64 } },
         ],
       }],
-      config: { abortSignal: requestSignal },
+      config: { abortSignal: requestSignal, temperature: 0, maxOutputTokens: 8192, responseMimeType: 'text/plain' },
     }),
   })
   return String(response?.text || '').trim()
