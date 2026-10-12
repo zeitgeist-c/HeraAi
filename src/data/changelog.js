@@ -4,6 +4,30 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.27',
+  date: '2026-10-12',
+  changes: {
+    tr: [
+      'Ekran kırpma artık kilitlenmiyor: görüntü alınamaz veya kayıt takılırsa hata gösteriliyor, yeniden deneme açılıyor',
+    ],
+    en: [
+      'Screen crop no longer locks up: a stalled capture or save now shows an error and frees the flow for retry',
+    ],
+  },
+},
+{
+  version: '1.10.26',
+  date: '2026-10-12',
+  changes: {
+    tr: [
+      'Chrome Web Store yayınına hazırlık: mağaza paketi yerel imza anahtarı olmadan üretiliyor, kurulum boş başlıyor',
+    ],
+    en: [
+      'Chrome Web Store readiness: the store package ships without the local signing key, installs start clean',
+    ],
+  },
+},
+{
   version: '1.10.25',
   date: '2026-10-03',
   changes: {
