@@ -4,6 +4,18 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.28',
+  date: '2026-10-12',
+  changes: {
+    tr: [
+      'Bağımlılık bakımı: Gemini istemcisi ve derleme yamaları güncellendi; emekli edilen eski eşitleme modülleri paketten çıkarıldı',
+    ],
+    en: [
+      'Dependency maintenance: updated the Gemini client and build patches; retired legacy sync modules dropped from the package',
+    ],
+  },
+},
+{
   version: '1.10.27',
   date: '2026-10-12',
   changes: {

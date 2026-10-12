@@ -22,6 +22,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
 
 # key yalnızca mağazaya giden kopyadan çıkarılır (yeni mağaza kimliği + temiz kurulum).
 $distManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$distManifestBackup = Get-Content -LiteralPath $manifestPath -Raw
 if ($distManifest.PSObject.Properties.Name -contains 'key') {
   $distManifest.PSObject.Properties.Remove('key')
   # BOM'suz UTF-8 yaz (Set-Content -Encoding UTF8 BOM koyar, manifestte istemeyiz).
@@ -31,6 +32,7 @@ if ($distManifest.PSObject.Properties.Name -contains 'key') {
 } else {
   Write-Host 'Store manifest copy has no key field.'
 }
+try {
 
 $zipPath = Join-Path $releaseDir "HeraAi-$version-store.zip"
 
@@ -86,3 +88,8 @@ $sidecarPath = "$zipPath.sha256"
 $sidecarLine = "$hashValue  $([System.IO.Path]::GetFileName($zipPath))`n"
 [System.IO.File]::WriteAllText($sidecarPath, $sidecarLine, [System.Text.Encoding]::ASCII)
 Write-Host "Created $sidecarPath"
+} finally {
+  # dist olduğu gibi bırakılır: paketlenmemiş kurulumun kimliği değişmesin.
+  [System.IO.File]::WriteAllText($manifestPath, $distManifestBackup, (New-Object System.Text.UTF8Encoding $false))
+  Write-Host 'Restored dist manifest with key.'
+}
