@@ -1,7 +1,7 @@
 {
   "name": "heraai",
   "private": true,
-  "version": "1.10.27",
+  "version": "1.10.28",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,8 +13,8 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.24.0",
-    "dompurify": "^3.4.16",
+    "@google/genai": "^2.28.0",
+    "dompurify": "^3.4.17",
     "firebase": "^12.19.0",
     "i18next": "^25.10.10",
     "i18next-browser-languagedetector": "^8.2.1",
@@ -46,9 +46,9 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
     "jsdom": "^28.1.0",
-    "postcss": "^8.5.28",
+    "postcss": "^8.5.29",
     "tailwindcss": "^3.4.19",
-    "vite": "^7.3.1",
+    "vite": "^7.3.7",
     "vitest": "^4.1.11"
   }
 }
