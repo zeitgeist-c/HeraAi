@@ -107,6 +107,8 @@ function clampComposerHeight(value, allowedMax = composerAllowedMaxHeight()) {
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running'])
 const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted'])
 const SCREENSHOT_DECODE_TIMEOUT_MS = 10000
+const SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000
+const CROP_PROCESS_TIMEOUT_MS = 30000
 const DICTATION_MAX_DURATION_MS = 200000
 const MIC_PERMISSION_WAIT_MS = 120000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -514,6 +516,7 @@ function App() {
   const panelVisibleRef = useRef(document.visibilityState !== 'hidden')
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
+  const cropRunIdRef = useRef(0)
   const cropTargetRef = useRef(null)
   const cropTogglePendingRef = useRef(false)
   const autoScrollRef = useRef(true)
@@ -1923,7 +1926,24 @@ function App() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) return null;
 
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const dataUrl = await new Promise((resolve, reject) => {
+      // captureVisibleTab normalde hemen sonuçlanır; yanıt gelmezse kırpma
+      // akışı sessizce kilitlenmesin diye zamanaşımıyla reddedilir.
+      const timeoutId = setTimeout(
+        () => reject(new Error('screenshot_capture_timeout')),
+        SCREENSHOT_CAPTURE_TIMEOUT_MS,
+      );
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }).then(
+        (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+      );
+    });
     const img = new Image();
     img.src = dataUrl;
     // Çözülemeyen görüntüde söz hiç sonuçlanmazsa kırpma akışı kilitli kalırdı
@@ -2000,19 +2020,27 @@ function App() {
         }
         if (!clearCropSelectionState(msg.requestId || null)) return false
         cropProcessingRef.current = true;
-        void (async () => {
-          try {
-            setGenerating(true);
-            const file = await captureScreenshot(msg.coords)
-            if (file) {
-              const ref = await putAttachment({
-                blob: file,
-                name: file.name,
-                mimeType: 'image/png',
-                size: file.size,
-                kind: 'image',
+        const runId = (cropRunIdRef.current += 1)
+        const processCropDone = async () => {
+          setGenerating(true);
+          const file = await captureScreenshot(msg.coords)
+          // Zamanaşımı sonrası geç gelen sonuç uygulanmaz (çift kayıt olmasın).
+          if (runId !== cropRunIdRef.current) return
+          if (file) {
+            const ref = await putAttachment({
+              blob: file,
+              name: file.name,
+              mimeType: 'image/png',
+              size: file.size,
+              kind: 'image',
+            })
+            if (runId !== cropRunIdRef.current) {
+              void deleteAttachment(ref.id).catch(cleanupError => {
+                console.error('Stale screenshot cleanup failed', cleanupError)
               })
-              setAttachments(previous => {
+              return
+            }
+            setAttachments(previous => {
                 const currentSession = sessionsRef.current.find(session => (
                   session?.id === activeSessionIdRef.current
                 ))
@@ -2031,10 +2059,24 @@ function App() {
                 }
               })
             }
+          }
+        void (async () => {
+          let watchdogId = null
+          const watchdog = new Promise((_, reject) => {
+            // Kayıt katmanı yanıt vermezse akış sonsuza kadar kilitli kalırdı;
+            // zamanaşımında bayrak sıfırlanır, yeniden deneme açılır.
+            watchdogId = setTimeout(
+              () => reject(new Error('crop_process_timeout')),
+              CROP_PROCESS_TIMEOUT_MS,
+            )
+          })
+          try {
+            await Promise.race([processCropDone(), watchdog])
           } catch (err) {
             console.error("Screenshot error", err);
             notifyError(t('chat.file_error'))
           } finally {
+            if (watchdogId) clearTimeout(watchdogId)
             setGenerating(Boolean(activeGenerationRef.current?.jobId));
             cropProcessingRef.current = false;
           }

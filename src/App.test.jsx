@@ -2792,6 +2792,88 @@ describe('HeraAi App', () => {
     expect(global.chrome.scripting.executeScript).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a file error when the screenshot capture never settles', async () => {
+    await i18n.changeLanguage('en');
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    global.chrome.tabs.captureVisibleTab.mockImplementationOnce(() => new Promise(() => {}));
+    const toastError = vi.spyOn(toast, 'error');
+    vi.useFakeTimers();
+    try {
+      emitRuntimeMessage({
+        type: 'HERAAI_CROP_DONE',
+        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/loading the file/i), expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers the crop flow after a stalled crop run instead of staying busy forever', async () => {
+    await i18n.changeLanguage('en');
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    global.chrome.tabs.query.mockImplementationOnce(() => new Promise(() => {}));
+    const toastError = vi.spyOn(toast, 'error');
+    vi.useFakeTimers();
+    try {
+      emitRuntimeMessage({
+        type: 'HERAAI_CROP_DONE',
+        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(35000);
+      });
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/loading the file/i), expect.anything());
+
+      const OriginalImage = global.Image;
+      global.Image = class MockImage {
+        naturalWidth = 10;
+        naturalHeight = 10;
+        onload = null;
+
+        set src(_value) {
+          setTimeout(() => this.onload?.(), 0);
+        }
+      };
+      const originalCreateElement = document.createElement.bind(document);
+      document.createElement = vi.fn((tagName, options) => {
+        if (tagName === 'canvas') {
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({ drawImage: vi.fn() }),
+            toDataURL: () => 'data:image/png;base64,crop-retry',
+          };
+        }
+        return originalCreateElement(tagName, options);
+      });
+      try {
+        emitRuntimeMessage({
+          type: 'HERAAI_CROP_DONE',
+          coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1000);
+        });
+      } finally {
+        document.createElement = originalCreateElement;
+        global.Image = OriginalImage;
+      }
+      expect(toastError).not.toHaveBeenCalledWith(expect.stringMatching(/still being prepared/i), expect.anything());
+      await act(async () => {});
+      expect(screen.getByText(/screenshot-/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps OCR disabled for a document and enables it for supported image types', async () => {
     render(<App />);
 
