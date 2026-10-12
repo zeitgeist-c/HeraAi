@@ -115,6 +115,24 @@ function normalizePlainText(text) {
   return text.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim()
 }
 
+function excelCellToText(value) {
+  if (value === null || value === undefined) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map(part => part?.text ?? '').join('')
+    }
+    if ('result' in value) return excelCellToText(value.result)
+    if ('text' in value) return String(value.text ?? '')
+    return ''
+  }
+  return String(value)
+}
+
+function csvEscapeCell(text) {
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+}
+
 async function structuredHtmlText(html) {
   let sanitized
   if (typeof window !== 'undefined') {
@@ -237,22 +255,33 @@ export async function processAttachmentFile(file) {
     } catch {
       throw new AttachmentValidationError('attachment_invalid', 'The DOCX file is invalid or corrupted.')
     }
+  } else if (mimeType === 'application/vnd.ms-excel') {
+    // Guvenlik: emekli BIFF (.xls) bicimi yalniz savunmasiz kutuphane ile
+    // okunabiliyordu; kullaniciya donusturme yolu gosterilir (.doc ornegi gibi).
+    throw new AttachmentValidationError('spreadsheet_legacy_unsupported', 'Legacy .xls files are not supported. Save the workbook as .xlsx and try again.')
   } else if (
     mimeType.includes('spreadsheetml.sheet')
-    || mimeType === 'application/vnd.ms-excel'
   ) {
     kind = 'text'
     try {
-      const { default: XLSX } = await import('xlsx')
-      const workbook = XLSX.read(buffer, { type: 'array' })
+      const { default: ExcelJS } = await import('exceljs')
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(buffer)
       const sections = []
-      for (const sheetName of workbook.SheetNames || []) {
-        const sheet = workbook.Sheets[sheetName]
-        if (!sheet) continue
-        const csv = XLSX.utils.sheet_to_csv(sheet).trim()
-        if (!csv) continue
-        sections.push(`--- SHEET: ${sheetName} ---\n${csv}`)
-      }
+      workbook.eachSheet((sheet) => {
+        const lines = []
+        sheet.eachRow({ includeEmpty: false }, (row) => {
+          // values seyrek dizi olabilir; delikler sutun kaymasin diye donguyle okunur.
+          const raw = row.values || []
+          const cells = []
+          for (let index = 1; index < raw.length; index += 1) cells.push(excelCellToText(raw[index]))
+          while (cells.length > 0 && cells[cells.length - 1] === '') cells.pop()
+          if (cells.some(cell => cell !== '')) lines.push(cells.map(csvEscapeCell).join(','))
+        })
+        const csv = lines.join('\n').trim()
+        if (!csv) return
+        sections.push(`--- SHEET: ${sheet.name} ---\n${csv}`)
+      })
       modelText = normalizePlainText(sections.join('\n\n'))
     } catch {
       throw new AttachmentValidationError('attachment_invalid', 'The spreadsheet file is invalid or corrupted.')

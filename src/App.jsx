@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { Send, Square, Paperclip, Loader2, X, FileText, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, TextAlignStart, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
+import { Send, Square, Paperclip, Loader2, X, Languages, Lightbulb, Scissors, Globe, ScanText, Mic, Link2, TextAlignStart, ArrowUpToLine, ArrowDownToLine } from 'lucide-react'
 import { notifyError, notifySuccess } from './lib/notify'
 
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import StatsPanel from './components/StatsPanel'
 import ChangelogPanel from './components/ChangelogPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ModelSelector from './components/ModelSelector'
+import { AttachmentGallery } from './components/ImageLightbox'
 import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
 import {
   DEFAULT_MODEL,
@@ -109,6 +110,7 @@ const TERMINAL_GENERATION_STATUSES = new Set(['completed', 'cancelled', 'error',
 const SCREENSHOT_DECODE_TIMEOUT_MS = 10000
 const SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000
 const CROP_PROCESS_TIMEOUT_MS = 30000
+const CROP_QUEUE_LIMIT = 5
 const DICTATION_MAX_DURATION_MS = 200000
 const MIC_PERMISSION_WAIT_MS = 120000
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -517,6 +519,7 @@ function App() {
   const scheduledScrollFrameRef = useRef(null)
   const cropProcessingRef = useRef(false)
   const cropRunIdRef = useRef(0)
+  const cropQueueRef = useRef([])
   const cropTargetRef = useRef(null)
   const cropTogglePendingRef = useRef(false)
   const autoScrollRef = useRef(true)
@@ -2011,19 +2014,35 @@ function App() {
         return false
       }
       if (msg.type === 'HERAAI_CROP_DONE') {
-        if (cropProcessingRef.current) {
-          // İlk kırpıntının kaydı sürerken gelen ikinci istek kuyruğa alınmıyor:
-          // sessizce yutmak yerine seçim durumu temizlenir ve kullanıcı uyarılır.
-          clearCropSelectionState(msg.requestId || null)
+        if (!clearCropSelectionState(msg.requestId || null)) return false
+        // Hizli art arda kirpintilar siraya girer; "mesgul" hatasi cikmaz.
+        // Asiri yigilmada yeni istek uyariyla dusurulur.
+        if (cropQueueRef.current.length >= CROP_QUEUE_LIMIT) {
           notifyError(t('chat.crop_busy'))
           return false
         }
-        if (!clearCropSelectionState(msg.requestId || null)) return false
-        cropProcessingRef.current = true;
-        const runId = (cropRunIdRef.current += 1)
+        cropQueueRef.current.push({ coords: msg.coords, requestId: msg.requestId })
+        void pumpCropQueue()
+        return false
+      }
+      return false
+    };
+
+    const pumpCropQueue = async () => {
+      if (cropProcessingRef.current) return
+      const next = cropQueueRef.current.shift()
+      if (!next) return
+      cropProcessingRef.current = true;
+      const runId = (cropRunIdRef.current += 1)
+      await runCropRequest(next, runId)
+      cropProcessingRef.current = false;
+      void pumpCropQueue()
+    }
+
+    const runCropRequest = async (request, runId) => {
         const processCropDone = async () => {
           setGenerating(true);
-          const file = await captureScreenshot(msg.coords)
+          const file = await captureScreenshot(request.coords)
           // Zamanaşımı sonrası geç gelen sonuç uygulanmaz (çift kayıt olmasın).
           if (runId !== cropRunIdRef.current) return
           if (file) {
@@ -2060,30 +2079,26 @@ function App() {
               })
             }
           }
-        void (async () => {
-          let watchdogId = null
-          const watchdog = new Promise((_, reject) => {
-            // Kayıt katmanı yanıt vermezse akış sonsuza kadar kilitli kalırdı;
-            // zamanaşımında bayrak sıfırlanır, yeniden deneme açılır.
-            watchdogId = setTimeout(
-              () => reject(new Error('crop_process_timeout')),
-              CROP_PROCESS_TIMEOUT_MS,
-            )
-          })
-          try {
-            await Promise.race([processCropDone(), watchdog])
-          } catch (err) {
-            console.error("Screenshot error", err);
-            notifyError(t('chat.file_error'))
-          } finally {
-            if (watchdogId) clearTimeout(watchdogId)
-            setGenerating(Boolean(activeGenerationRef.current?.jobId));
-            cropProcessingRef.current = false;
-          }
-        })()
+        let watchdogId = null
+        const watchdog = new Promise((_, reject) => {
+          // Kayıt katmanı yanıt vermezse akış sonsuza kadar kilitli kalırdı;
+          // zamanaşımında bayrak sıfırlanır, yeniden deneme açılır.
+          watchdogId = setTimeout(
+            () => reject(new Error('crop_process_timeout')),
+            CROP_PROCESS_TIMEOUT_MS,
+          )
+        })
+        try {
+          await Promise.race([processCropDone(), watchdog])
+        } catch (err) {
+          console.error("Screenshot error", err);
+          notifyError(t('chat.file_error'))
+        } finally {
+          if (watchdogId) clearTimeout(watchdogId)
+          setGenerating(Boolean(activeGenerationRef.current?.jobId));
+          cropProcessingRef.current = false;
+        }
       }
-      return false
-    };
     if (chrome && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener(listener);
     }
@@ -4719,31 +4734,7 @@ function App() {
             </div>
           )}
           {attachments.length > 0 && (
-            <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-2">
-              {attachments.map((att, idx) => (
-                <div key={`${att.name}-${idx}`} className="group relative flex max-w-[170px] shrink-0 items-center gap-2 rounded-lg border border-border/70 bg-secondary/65 py-1 pl-1 pr-7">
-                  {att.mimeType.startsWith('image/') && att.data ? (
-                    <img src={`data:${att.mimeType};base64,${att.data}`} alt="" className="h-7 w-7 rounded-md object-cover" />
-                  ) : (
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-background/70">
-                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                    </span>
-                  )}
-                  <span className="truncate text-[11px]">{att.name}</span>
-                  {att.availability && att.availability !== 'ready' && (
-                    <span className="text-[10px] text-destructive">{t('chat.attachment_unavailable')}</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(idx)}
-                    aria-label={t('chat.tooltips.remove_attachment')}
-                    className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
+            <AttachmentGallery attachments={attachments} onRemove={removeAttachment} />
           )}
 
           <textarea
@@ -4767,7 +4758,7 @@ function App() {
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 className="hidden"
-                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,.docx,.xlsx,.xls,.txt,.csv,.json,.xml,.html,.htm,.md"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,.docx,.xlsx,.txt,.csv,.json,.xml,.html,.htm,.md"
                 multiple
               />
               <button

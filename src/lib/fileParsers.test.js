@@ -76,19 +76,15 @@ describe('attachment parsing', () => {
   })
 
   it('extracts XLSX sheets as text with sheet names', async () => {
-    const { default: XLSX } = await import('xlsx')
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([['Ad', 'Yas'], ['Ali', 30]]),
-      'Kisiler',
-    )
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([['Urun', 'Fiyat'], ['Elma', 10]]),
-      'Stok',
-    )
-    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
+    const { default: ExcelJS } = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    const kisiler = workbook.addWorksheet('Kisiler')
+    kisiler.addRow(['Ad', 'Yas'])
+    kisiler.addRow(['Ali', 30])
+    const stok = workbook.addWorksheet('Stok')
+    stok.addRow(['Urun', 'Fiyat'])
+    stok.addRow(['Elma', 10])
+    const buffer = await workbook.xlsx.writeBuffer()
     const result = await processAttachmentFile(new File([buffer], 'veriler.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))
@@ -99,21 +95,11 @@ describe('attachment parsing', () => {
     expect(result.modelText).toContain('Elma')
   })
 
-  it('extracts legacy XLS workbooks as text', async () => {
-    const { default: XLSX } = await import('xlsx')
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([['Ad', 'Yas'], ['Ayse', 25]]),
-      'Kisiler',
-    )
-    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'biff8' })
-    const result = await processAttachmentFile(new File([buffer], 'veriler.xls', {
+  it('rejects legacy XLS workbooks with a conversion hint', async () => {
+    const oleHeader = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0])
+    await expect(processAttachmentFile(new File([oleHeader], 'veriler.xls', {
       type: 'application/vnd.ms-excel',
-    }))
-    expect(result).toMatchObject({ mimeType: 'application/vnd.ms-excel', kind: 'text' })
-    expect(result.modelText).toContain('Kisiler')
-    expect(result.modelText).toContain('Ayse')
+    }))).rejects.toMatchObject({ code: 'spreadsheet_legacy_unsupported' })
   })
 
   it('rejects spoofed spreadsheets and reports empty ones', async () => {
@@ -121,10 +107,10 @@ describe('attachment parsing', () => {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))).rejects.toMatchObject({ code: 'attachment_type_mismatch' })
 
-    const { default: XLSX } = await import('xlsx')
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([]), 'Bos')
-    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
+    const { default: ExcelJS } = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    workbook.addWorksheet('Bos')
+    const buffer = await workbook.xlsx.writeBuffer()
     await expect(processAttachmentFile(new File([buffer], 'bos.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))).rejects.toMatchObject({ code: 'attachment_empty' })

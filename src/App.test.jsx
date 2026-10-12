@@ -839,7 +839,7 @@ describe('HeraAi App', () => {
 
     expect(pasteEvent.defaultPrevented).toBe(true);
     await waitFor(() => expect(input).toHaveValue('before https://example.com'));
-    await waitFor(() => expect(screen.getAllByText(/pasted-image-/)).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTitle(/pasted-image-/)).toHaveLength(1));
     expect(input.selectionStart).toBe('before https://example.com'.length);
     expect(input.selectionEnd).toBe('before https://example.com'.length);
   });
@@ -863,7 +863,7 @@ describe('HeraAi App', () => {
     fireEvent(input, pasteEvent);
 
     expect(pasteEvent.defaultPrevented).toBe(false);
-    expect(screen.queryByText(/pasted-image-/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/pasted-image-/)).not.toBeInTheDocument();
   });
 
   it('adds the current page URL to the composer via the page button', async () => {
@@ -2516,12 +2516,12 @@ describe('HeraAi App', () => {
         files: [new File([validImageBytes('image/png', 'context')], 'context.png', { type: 'image/png' })],
       },
     });
-    await waitFor(() => expect(within(composer).getByText('context.png')).toBeInTheDocument());
+    await waitFor(() => expect(within(composer).getByTitle('context.png')).toBeInTheDocument());
     fireEvent.change(input, { target: { value: 'Inspect this file' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('First file answer')).toBeInTheDocument();
 
-    expect(within(composer).queryByText('context.png')).not.toBeInTheDocument();
+    expect(within(composer).queryByTitle('context.png')).not.toBeInTheDocument();
     expect(screen.getAllByText('context.png')).toHaveLength(1);
 
     fireEvent.change(fileInput, {
@@ -2529,7 +2529,7 @@ describe('HeraAi App', () => {
         files: [new File([validImageBytes('image/png', 'second-context')], 'second-context.png', { type: 'image/png' })],
       },
     });
-    await waitFor(() => expect(within(composer).getByText('second-context.png')).toBeInTheDocument());
+    await waitFor(() => expect(within(composer).getByTitle('second-context.png')).toBeInTheDocument());
     fireEvent.change(input, { target: { value: 'Inspect this second file' } });
     fireEvent.click(getSendButton());
     expect(await screen.findByText('File follow-up answer')).toBeInTheDocument();
@@ -2561,15 +2561,15 @@ describe('HeraAi App', () => {
     const secondFile = new File([validImageBytes('image/webp', 'second')], 'second.webp', { type: 'image/webp' });
 
     fireEvent.change(fileInput, { target: { files: [firstFile] } });
-    await waitFor(() => expect(screen.getByText('first.png')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle('first.png')).toBeInTheDocument());
 
     const dataTransfer = { types: ['Files'], files: [secondFile], dropEffect: 'none' };
     fireEvent.dragEnter(panel, { dataTransfer });
     expect(screen.getByTestId('file-drop-overlay')).toBeInTheDocument();
     fireEvent.drop(panel, { dataTransfer });
 
-    await waitFor(() => expect(screen.getByText('second.webp')).toBeInTheDocument());
-    expect(screen.getByText('first.png')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('second.webp')).toBeInTheDocument());
+    expect(screen.getByTitle('first.png')).toBeInTheDocument();
     expect(screen.queryByTestId('file-drop-overlay')).not.toBeInTheDocument();
 
     fireEvent.dragEnter(panel, { dataTransfer: { types: ['text/plain'], files: [] } });
@@ -2611,12 +2611,12 @@ describe('HeraAi App', () => {
       type: 'HERAAI_CROP_DONE',
       coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
     });
-    await waitFor(() => expect(screen.getByText(/screenshot-/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle(/screenshot-/)).toBeInTheDocument());
     emitRuntimeMessage({
       type: 'HERAAI_CROP_DONE',
       coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
     });
-    await waitFor(() => expect(screen.getAllByText(/screenshot-/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTitle(/screenshot-/)).toHaveLength(2));
 
     const translateButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-languages'));
     fireEvent.click(translateButton);
@@ -2868,9 +2868,175 @@ describe('HeraAi App', () => {
       }
       expect(toastError).not.toHaveBeenCalledWith(expect.stringMatching(/still being prepared/i), expect.anything());
       await act(async () => {});
-      expect(screen.getByText(/screenshot-/)).toBeInTheDocument();
+      expect(screen.getByTitle(/screenshot-/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('queues rapid crops instead of reporting busy', async () => {
+    await i18n.changeLanguage('en');
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const OriginalImage = global.Image;
+    global.Image = class MockImage {
+      naturalWidth = 10;
+      naturalHeight = 10;
+      onload = null;
+
+      set src(_value) {
+        setTimeout(() => this.onload?.(), 0);
+      }
+    };
+    const originalCreateElement = document.createElement.bind(document);
+    let canvasIndex = 0;
+    document.createElement = vi.fn((tagName, options) => {
+      if (tagName === 'canvas') {
+        canvasIndex += 1;
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage: vi.fn() }),
+          toDataURL: () => `data:image/png;base64,crop-${canvasIndex}`,
+        };
+      }
+      return originalCreateElement(tagName, options);
+    });
+    const toastError = vi.spyOn(toast, 'error');
+    try {
+      emitRuntimeMessage({
+        type: 'HERAAI_CROP_DONE',
+        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+      });
+      emitRuntimeMessage({
+        type: 'HERAAI_CROP_DONE',
+        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+      });
+      await waitFor(() => expect(screen.getAllByTitle(/screenshot-/)).toHaveLength(2));
+      expect(toastError).not.toHaveBeenCalledWith(expect.stringMatching(/still being prepared/i), expect.anything());
+    } finally {
+      document.createElement = originalCreateElement;
+      global.Image = OriginalImage;
+    }
+  });
+
+  it('opens a lightbox preview when a crop thumbnail is clicked', async () => {
+    await i18n.changeLanguage('en');
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-crop');
+    URL.revokeObjectURL = vi.fn();
+    const OriginalImage = global.Image;
+    global.Image = class MockImage {
+      naturalWidth = 10;
+      naturalHeight = 10;
+      onload = null;
+
+      set src(_value) {
+        setTimeout(() => this.onload?.(), 0);
+      }
+    };
+    const originalCreateElement = document.createElement.bind(document);
+    document.createElement = vi.fn((tagName, options) => {
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage: vi.fn() }),
+          toDataURL: () => 'data:image/png;base64,crop-lightbox',
+        };
+      }
+      return originalCreateElement(tagName, options);
+    });
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+      emitRuntimeMessage({
+        type: 'HERAAI_CROP_DONE',
+        coords: { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 },
+      });
+      const thumbnail = await screen.findByTitle(/screenshot-/);
+      expect(thumbnail.tagName).toBe('BUTTON');
+      expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument();
+      await waitFor(() => expect(thumbnail.querySelector('img')).toBeInTheDocument());
+
+      fireEvent.click(thumbnail);
+      expect(await screen.findByTestId('image-lightbox-img')).toBeInTheDocument();
+
+      const lightbox = screen.getByTestId('image-lightbox');
+      fireEvent.click(lightbox.querySelector('button'));
+      await waitFor(() => expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument());
+    } finally {
+      document.createElement = originalCreateElement;
+      global.Image = OriginalImage;
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it('navigates gallery images with arrows and edge limits', async () => {
+    await i18n.changeLanguage('en');
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-gallery');
+    URL.revokeObjectURL = vi.fn();
+    const OriginalImage = global.Image;
+    global.Image = class MockImage {
+      naturalWidth = 10;
+      naturalHeight = 10;
+      onload = null;
+
+      set src(_value) {
+        setTimeout(() => this.onload?.(), 0);
+      }
+    };
+    const originalCreateElement = document.createElement.bind(document);
+    let canvasIndex = 0;
+    document.createElement = vi.fn((tagName, options) => {
+      if (tagName === 'canvas') {
+        canvasIndex += 1;
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage: vi.fn() }),
+          toDataURL: () => `data:image/png;base64,gallery-${canvasIndex}`,
+        };
+      }
+      return originalCreateElement(tagName, options);
+    });
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+      const coords = { x: 0, y: 0, width: 10, height: 10, pixelRatio: 1, viewportWidth: 10, viewportHeight: 10 };
+      emitRuntimeMessage({ type: 'HERAAI_CROP_DONE', coords });
+      emitRuntimeMessage({ type: 'HERAAI_CROP_DONE', coords });
+      await waitFor(() => {
+        const buttons = screen.getAllByTitle(/screenshot-/);
+        expect(buttons).toHaveLength(2);
+        buttons.forEach((button) => expect(button).not.toBeDisabled());
+      });
+
+      fireEvent.click(screen.getAllByTitle(/screenshot-/)[0]);
+      expect(await screen.findByTestId('image-lightbox-img')).toBeInTheDocument();
+      expect(screen.getByTestId('gallery-counter')).toHaveTextContent('1 / 2');
+      expect(screen.getByTestId('gallery-prev')).toBeDisabled();
+      expect(screen.getByTestId('gallery-next')).not.toBeDisabled();
+
+      fireEvent.click(screen.getByTestId('gallery-next'));
+      expect(screen.getByTestId('gallery-counter')).toHaveTextContent('2 / 2');
+      expect(screen.getByTestId('gallery-next')).toBeDisabled();
+      expect(screen.getByTestId('gallery-prev')).not.toBeDisabled();
+
+      fireEvent.click(screen.getByTestId('gallery-prev'));
+      expect(screen.getByTestId('gallery-counter')).toHaveTextContent('1 / 2');
+    } finally {
+      document.createElement = originalCreateElement;
+      global.Image = OriginalImage;
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
     }
   });
 
@@ -2889,7 +3055,7 @@ describe('HeraAi App', () => {
 
     for (const [name, type] of [['scan.png', 'image/png'], ['photo.jpg', 'image/jpeg'], ['page.webp', 'image/webp']]) {
       fireEvent.change(fileInput, { target: { files: [new File([validImageBytes(type)], name, { type })] } });
-      await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByTitle(name)).toBeInTheDocument());
       expect(getOcrButton()).toBeEnabled();
     }
   });
@@ -2910,7 +3076,7 @@ describe('HeraAi App', () => {
         ],
       },
     });
-    await waitFor(() => expect(screen.getByText('second.webp')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle('second.webp')).toBeInTheDocument());
 
     const input = document.querySelector('textarea');
     fireEvent.change(input, { target: { value: 'translate this extra instruction' } });
@@ -3933,7 +4099,7 @@ describe('HeraAi App', () => {
     fireEvent.change(fileInput, {
       target: { files: [new File([validImageBytes('image/png', 'draft-image')], 'draft.png', { type: 'image/png' })] },
     });
-    await waitFor(() => expect(screen.getByText('draft.png')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle('draft.png')).toBeInTheDocument());
 
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
@@ -3952,7 +4118,7 @@ describe('HeraAi App', () => {
       }),
     ]);
     expect(composer).toHaveValue('Unsent draft');
-    expect(screen.getByText('draft.png')).toBeInTheDocument();
+    expect(screen.getByTitle('draft.png')).toBeInTheDocument();
   });
 
   it('starts generation through the background runtime after one atomic queued-state write', async () => {
