@@ -8,6 +8,7 @@ import { notifyError, notifySuccess } from '../lib/notify'
 
 import { getMessageDisplayContent } from '../lib/messageDisplay'
 import ResponseDuration from './ResponseDuration'
+import { GalleryLightbox } from './ImageLightbox'
 
 const COPY_TIMEOUT_MS = 2000
 const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
@@ -103,6 +104,7 @@ const ChatMessage = ({
   // Mesaj kimliği ebeveynin key'inde olduğundan başka mesaja geçince durum kendiliğinden sıfırlanır.
   const [userManualChoice, setUserManualChoice] = useState(null)
   const [userCollapsible, setUserCollapsible] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState(null)
   const userBodyRef = useRef(null)
   const userOpen = userManualChoice ?? searchCurrent
   const retryMenuId = useId()
@@ -116,6 +118,10 @@ const ChatMessage = ({
   const displayedWebUrls = Array.isArray(message.displayWebUrls)
     ? message.displayWebUrls
     : (Array.isArray(message.webUrls) ? message.webUrls : [])
+  const previewImages = displayedAttachments
+    .map((attachment, displayedIndex) => ({ attachment, displayedIndex }))
+    .filter(({ attachment }) => attachment?.mimeType?.startsWith('image/') && (attachment?.data || attachment?.id))
+  const previewPositionOf = (displayedIndex) => previewImages.findIndex((entry) => entry.displayedIndex === displayedIndex)
   const isPending = message.status === 'thinking' || message.status === 'streaming'
   const availableRetryModels = Array.isArray(retryModels)
     ? retryModels.map(model => typeof model === 'string'
@@ -377,20 +383,39 @@ const ChatMessage = ({
 
           {(displayedAttachments.length > 0 || displayedWebUrls.length > 0) && (
             <div className={`${visibleContent ? 'mt-2 ' : ''}flex flex-wrap gap-1.5`}>
-              {displayedAttachments.map((attachment, index) => (
-                <div
-                  key={`${attachment.name || 'attachment'}-${index}`}
-                  className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground"
-                >
-                  {attachment.mimeType?.startsWith('image/')
-                    ? <ImageIcon className="h-3 w-3 shrink-0" />
-                    : <FileText className="h-3 w-3 shrink-0" />}
-                  <span className="max-w-[150px] truncate">{attachment.name || t('chat.attachment')}</span>
-                  {attachment.availability && attachment.availability !== 'ready' && (
-                    <span className="text-destructive">{t('chat.attachment_unavailable')}</span>
-                  )}
-                </div>
-              ))}
+              {displayedAttachments.map((attachment, index) => {
+                const previewPosition = previewPositionOf(index)
+                const chipClassName = 'flex min-w-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/55 px-2 py-1 text-[11px] text-muted-foreground'
+                const chipBody = (
+                  <>
+                    {attachment.mimeType?.startsWith('image/')
+                      ? <ImageIcon className="h-3 w-3 shrink-0" />
+                      : <FileText className="h-3 w-3 shrink-0" />}
+                    <span className="max-w-[150px] truncate">{attachment.name || t('chat.attachment')}</span>
+                    {attachment.availability && attachment.availability !== 'ready' && (
+                      <span className="text-destructive">{t('chat.attachment_unavailable')}</span>
+                    )}
+                  </>
+                )
+                return previewPosition < 0 ? (
+                  <div
+                    key={`${attachment.name || 'attachment'}-${index}`}
+                    className={chipClassName}
+                  >
+                    {chipBody}
+                  </div>
+                ) : (
+                  <button
+                    key={`${attachment.name || 'attachment'}-${index}`}
+                    type="button"
+                    onClick={() => setPreviewIndex(previewPosition)}
+                    title={attachment.name}
+                    className={`${chipClassName} cursor-pointer transition-colors hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45`}
+                  >
+                    {chipBody}
+                  </button>
+                )
+              })}
               {displayedWebUrls.map(url => (
                 <a
                   key={url}
@@ -435,6 +460,14 @@ const ChatMessage = ({
             </div>
           )}
         </div>
+        {previewIndex !== null && previewImages.length > 0 && (
+          <GalleryLightbox
+            images={previewImages}
+            index={Math.min(previewIndex, previewImages.length - 1)}
+            onIndex={setPreviewIndex}
+            onClose={() => setPreviewIndex(null)}
+          />
+        )}
       </article>
     )
   }

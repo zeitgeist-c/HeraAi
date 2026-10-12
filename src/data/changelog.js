@@ -4,6 +4,20 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.10.29',
+  date: '2026-10-12',
+  changes: {
+    tr: [
+      'Kırpıntılar sıraya giriyor; taslakta kare önizleme, ok tuşlu galeri ve sayaç var',
+      'Sohbet geçmişindeki resimler isme tıklayınca önizleniyor; tablolar exceljs ile okunuyor, eski .xls yönlendiriliyor',
+    ],
+    en: [
+      'Crops now queue up; drafts show square previews with an arrow-key gallery and counter',
+      'History images preview on chip click; spreadsheets read via exceljs, legacy .xls redirected',
+    ],
+  },
+},
+{
   version: '1.10.28',
   date: '2026-10-12',
   changes: {

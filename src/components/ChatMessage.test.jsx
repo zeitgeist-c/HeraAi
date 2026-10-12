@@ -126,7 +126,47 @@ describe('ChatMessage copy actions', () => {
     expect(onEdit).not.toHaveBeenCalled()
   })
 
-  it('shows only newly introduced context chips without draft removal buttons', () => {
+  it('opens a lightbox preview when a history image chip is clicked', async () => {
+    render(<ChatMessage message={{
+      id: 20,
+      role: 'user',
+      content: 'Look at these crops',
+      attachments: [
+        { id: 'crop-a', name: 'screenshot-a.png', mimeType: 'image/png', data: 'aW1hZ2UtMQ==' },
+        { id: 'crop-b', name: 'screenshot-b.png', mimeType: 'image/png', data: 'aW1hZ2UtMg==' },
+        { id: 'doc-1', name: 'notes.pdf', mimeType: 'application/pdf' },
+      ],
+    }} />)
+
+    expect(screen.getByText('screenshot-a.png')).toBeInTheDocument()
+    expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTitle('screenshot-a.png'))
+    expect(await screen.findByTestId('image-lightbox-img')).toBeInTheDocument()
+    expect(screen.getByTestId('gallery-counter')).toHaveTextContent('1 / 2')
+
+    fireEvent.click(screen.getByTestId('gallery-next'))
+    expect(screen.getByTestId('gallery-counter')).toHaveTextContent('2 / 2')
+    expect(screen.getByTestId('gallery-next')).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId('gallery-prev'))
+    expect(screen.getByTestId('gallery-counter')).toHaveTextContent('1 / 2')
+    expect(screen.getByTestId('gallery-prev')).toBeDisabled()
+  })
+
+  it('reports a missing history image instead of hanging in the lightbox', async () => {
+    render(<ChatMessage message={{
+      id: 21,
+      role: 'user',
+      content: 'Old crop',
+      attachments: [{ id: 'gone-attachment-id', name: 'screenshot-old.png', mimeType: 'image/png' }],
+    }} />)
+
+    fireEvent.click(screen.getByTitle('screenshot-old.png'))
+    expect(await screen.findByTestId('image-lightbox-missing')).toBeInTheDocument()
+  })
+
+  it('shows only newly introduced context chips without draft removal buttons', async () => {
     render(<ChatMessage message={{
       id: 11,
       role: 'user',
