@@ -97,6 +97,15 @@ describe('needsWebSearch', () => {
     'Enflasyon ne durumda?',
     'Kripto piyasası nasıl?',
     'Dolar kuru kaç oldu?',
+    'gta 6 oyunu ne zaman çıkacaktı tam tarihi nedir',
+    'GTA 6 ne zaman çıkacak?',
+    'Yeni sezon ne zaman yayınlanacak?',
+    'Filmin yayın tarihi belli oldu mu?',
+    'Oyun ertelendi mi?',
+    'Zam haberi açıklandı mı?',
+    'When will GTA 6 be released?',
+    'What is the release date?',
+    'Has the game been delayed?',
   ])('detects an explicit or current-data request: %s', (text) => {
     expect(needsWebSearch(text)).toBe(true)
   })

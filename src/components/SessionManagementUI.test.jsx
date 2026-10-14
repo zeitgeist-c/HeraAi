@@ -143,6 +143,20 @@ describe('session management UI', () => {
     expect(onCopyChat).toHaveBeenCalledTimes(1)
   })
 
+  it('exposes a full-page open button in the header', () => {
+    const onOpenFullPage = vi.fn()
+    render(
+      <AppHeader
+        {...headerProps}
+        activeSessionTitle="Current chat"
+        onOpenFullPage={onOpenFullPage}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('header-open-full-page'))
+    expect(onOpenFullPage).toHaveBeenCalledTimes(1)
+  })
+
   it('groups sessions, orders them by recency, and exposes sibling row actions', async () => {
     const onRename = vi.fn()
     const onToggleStar = vi.fn()

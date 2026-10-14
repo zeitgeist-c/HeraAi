@@ -8,7 +8,7 @@ export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
 export const DEFAULT_OLLAMA_MODEL = 'gemma4:31b'
 export const AUTO_MODEL_KEY = 'auto'
-export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud', 'nemotron-3-ultra'])
+export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud', 'nemotron-3-ultra', 'qwen/qwen3.8-27b:free', 'nex-agi/nex-n2.5-pro:free'])
 
 const geminiModel = (modelId, label, speed, routing = {}) => ({
   key: `${PROVIDERS.GEMINI}:${modelId}`,
@@ -44,27 +44,29 @@ export const MODEL_CATALOG = Object.freeze([
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:qwen/qwen3.8-27b:free`,
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-super-120b-a12b:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'qwen/qwen3.8-27b:free',
-    label: 'Qwen3.8 27B',
+    modelId: 'nvidia/nemotron-3-super-120b-a12b:free',
+    label: 'Nemotron 3 Super 120B',
     speed: 'medium',
     routing: { quality: 4, coding: 4 },
     capabilities: {
-      supportsImage: true,
+      // OpenRouter listesi bu modeli yalniz metin girisli gosteriyor.
+      supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
     },
   },
   {
-    key: `${PROVIDERS.OPENROUTER}:nex-agi/nex-n2.5-pro:free`,
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3.5-lightning:free`,
     provider: PROVIDERS.OPENROUTER,
-    modelId: 'nex-agi/nex-n2.5-pro:free',
-    label: 'Nex-N2.5 Pro',
-    speed: 'slow',
-    routing: { quality: 5, coding: 5 },
+    modelId: 'nvidia/nemotron-3.5-lightning:free',
+    label: 'Nemotron 3.5 Lightning',
+    speed: 'fast',
+    routing: { quality: 3, coding: 3 },
     capabilities: {
-      supportsImage: true,
+      // OpenRouter listesi bu modeli yalniz metin girisli gosteriyor.
+      supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
     },

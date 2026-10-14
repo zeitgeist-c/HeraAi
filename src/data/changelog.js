@@ -4,6 +4,26 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.11.0',
+  date: '2026-10-14',
+  changes: {
+    tr: [
+      'Araç çubuğu simgesi artık her Chromium tarayıcıda açılıyor; yan panel yoksa normal sekme (Opera dahil)',
+      'Başlık çubuğuna tam sayfada aç düğmesi eklendi',
+      'OpenRouter listesi yenilendi: Nemotron 3 Super 120B ve Nemotron 3.5 Lightning (ücretsiz); kalkan Qwen ve Nex emekliye ayrıldı',
+      'Web araması gerektiğinde modele sorularak bulunuyor; zaman ve yayın soruları kaçırılmıyor',
+      'Bağımlılık bakımı: React ve PostCSS yamaları; kullanılmayan tip paketleri çıkarıldı',
+    ],
+    en: [
+      'Toolbar icon now opens in every Chromium browser; falls back to a regular tab without a side panel (including Opera)',
+      'Added an open-in-full-page button to the header',
+      'OpenRouter list refreshed: Nemotron 3 Super 120B and Nemotron 3.5 Lightning (free); retired the removed Qwen and Nex',
+      'Web search is now decided by asking the model when needed; time and release questions are no longer missed',
+      'Dependency maintenance: React and PostCSS patches; unused type packages removed',
+    ],
+  },
+},
+{
   version: '1.10.29',
   date: '2026-10-12',
   changes: {

@@ -6,7 +6,7 @@ import {
   getProviderForModel,
 } from './models.js'
 import { streamRemoteProvider, testOllamaKey, testOpenRouterKey } from './providerApi.js'
-import { classifyWithGemmaRouter as classifyWithGemmaRouterImpl } from './autoRouter.js'
+import { classifyWithGemmaRouter as classifyWithGemmaRouterImpl, classifyNeedsWebSearch as classifyNeedsWebSearchImpl } from './autoRouter.js'
 
 export { DEFAULT_MODEL, MODEL_CAPABILITIES, MODELS }
 const GEMINI_API_VERSION = 'v1'
@@ -1277,4 +1277,8 @@ export async function testKey(provider, key, _model = DEFAULT_MODEL) {
 
 export async function classifyWithGemmaRouter(args) {
   return classifyWithGemmaRouterImpl(args)
+}
+
+export async function classifyNeedsWebSearch(args) {
+  return classifyNeedsWebSearchImpl(args)
 }

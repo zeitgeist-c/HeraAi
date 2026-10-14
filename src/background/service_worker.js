@@ -1481,15 +1481,32 @@ if (typeof chrome.storage?.local?.setAccessLevel === 'function') {
 
 installCloudSyncListeners();
 
-// Prefer the native side panel. Browsers without this Chrome-specific API
-// open Hera in a regular extension tab instead.
+// Prefer the native side panel. Some Chromium-based browsers (Opera, Vivaldi,
+// Brave, Edge) expose the sidePanel namespace but ignore openPanelOnActionClick
+// or reject sidePanel.open, so the toolbar click always gets an explicit
+// fallback to a regular extension tab.
 if (chrome.sidePanel?.setPanelBehavior) {
   Promise.resolve(
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }),
   ).catch((error) => console.error(error));
-} else {
-  chrome.action.onClicked.addListener(() => {
-    openHeraTab().catch((error) => console.error(error));
+}
+
+if (chrome.action?.onClicked) {
+  chrome.action.onClicked.addListener(async (tab) => {
+    if (tab?.windowId && chrome.sidePanel?.open) {
+      try {
+        await chrome.sidePanel.open({ windowId: tab.windowId });
+        return;
+      } catch {
+        // Panel open rejected (Opera and other Chromium forks): fall through
+        // to the extension tab below.
+      }
+    }
+    try {
+      await openHeraTab();
+    } catch (error) {
+      console.error(error);
+    }
   });
 }
 
@@ -1512,9 +1529,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'heraai-send' && info.selectionText) {
     chrome.storage.local.set({ selectedText: info.selectionText }, () => {
       if (tab?.windowId && chrome.sidePanel?.open) {
-        chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {
-          // Writing to storage is enough for the side panel to pick up later.
-        });
+        chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => (
+          openHeraTab().catch((error) => console.error(error))
+        ));
       } else {
         openHeraTab().catch((error) => console.error(error));
       }
@@ -1523,9 +1540,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'heraai-page' && info.pageUrl) {
     chrome.storage.local.set({ pendingPageUrl: info.pageUrl }, () => {
       if (tab?.windowId && chrome.sidePanel?.open) {
-        chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {
-          // Writing to storage is enough for the side panel to pick up later.
-        });
+        chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => (
+          openHeraTab().catch((error) => console.error(error))
+        ));
       } else {
         openHeraTab().catch((error) => console.error(error));
       }

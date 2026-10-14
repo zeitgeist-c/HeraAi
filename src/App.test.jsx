@@ -39,6 +39,7 @@ vi.mock('./lib/api', () => ({
   streamResearch: vi.fn(),
   streamVision: vi.fn(),
   testKey: vi.fn(),
+  classifyNeedsWebSearch: vi.fn(async () => ({ needsSearch: null })),
   MODELS: [
     'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite',
@@ -2397,6 +2398,43 @@ describe('HeraAi App', () => {
     ]);
   });
 
+  it('asks the search gate when the heuristic stays silent and researches on yes', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    api.classifyNeedsWebSearch.mockResolvedValueOnce({ needsSearch: true });
+    api.streamResearch.mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Gate research answer' } }]));
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Kediler neden mırlar?' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Gate research answer')).toBeInTheDocument();
+
+    expect(api.classifyNeedsWebSearch).toHaveBeenCalledWith({
+      text: 'Kediler neden mırlar?',
+      geminiKeys: expect.any(Array),
+    });
+    expect(api.streamResearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays in chat when the search gate answers no', async () => {
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    api.classifyNeedsWebSearch.mockResolvedValueOnce({ needsSearch: false });
+
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+
+    const input = document.querySelector('textarea');
+    fireEvent.change(input, { target: { value: 'Kediler neden mırlar?' } });
+    fireEvent.click(getSendButton());
+    expect(await screen.findByText('Hello from AI')).toBeInTheDocument();
+
+    expect(api.classifyNeedsWebSearch).toHaveBeenCalledTimes(1);
+    expect(api.streamResearch).not.toHaveBeenCalled();
+    expect(api.streamChat).toHaveBeenCalledTimes(1);
+  });
+
   it('routes public URLs per request and reuses them only when explicitly requested', async () => {
     api.streamResearch
       .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Page summary' } }]))
@@ -3488,8 +3526,8 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'google/gemma-4-26b-a4b-it:free',
-      'qwen/qwen3.8-27b:free',
-      'nex-agi/nex-n2.5-pro:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3.5-lightning:free',
       'gpt-oss:120b',
       'nemotron-3-super',
       'gemma4:31b',
@@ -3499,8 +3537,8 @@ describe('HeraAi App', () => {
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Ollama')).toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
-      .filter(option => option.dataset.modelId === 'nex-agi/nex-n2.5-pro:free')
-      .map(option => option.textContent)).toEqual(['Nex-N2.5 Pro📷']);
+      .filter(option => option.dataset.modelId === 'nvidia/nemotron-3-super-120b-a12b:free')
+      .map(option => option.textContent)).toEqual(['Nemotron 3 Super 120B']);
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-3).map(option => option.textContent)).toEqual([
       'GPT-OSS 120B',
       'Nemotron 3 Super',
@@ -3511,7 +3549,8 @@ describe('HeraAi App', () => {
     // Ollama yolu görsel kabul etmiyor; katalog da 📷 rozetini göstermez.
     expect(rowText('gemma4:31b')).toBe('Gemma 4 31B');
     expect(rowText('google/gemma-4-26b-a4b-it:free')).toBe('Gemma 4 26B📷');
-    expect(rowText('nex-agi/nex-n2.5-pro:free')).toBe('Nex-N2.5 Pro📷');
+    expect(rowText('nvidia/nemotron-3.5-lightning:free')).toBe('Nemotron 3.5 Lightning');
+    expect(rowText('nvidia/nemotron-3-super-120b-a12b:free')).toBe('Nemotron 3 Super 120B');
     expect(rowText('gemini-3.1-flash-lite')).toBe('Gemini 3.1 Flash Lite📷');
     expect(rowText('gemini-3.8-flash')).toBe('Gemini 3.8 Flash📷');
     // Model satırları yalnızca isim + görüntü simgesi taşır; amaç etiketleri kaldırıldı.
@@ -3528,9 +3567,9 @@ describe('HeraAi App', () => {
     fireEvent.click(screen.getByText('OpenRouter'));
     const rowText = id => listbox.querySelector(`[data-model-id="${id}"]`)?.textContent || '';
     expect(rowText('gemini-3.1-flash-lite')).toContain('📷');
-    expect(rowText('nex-agi/nex-n2.5-pro:free')).toContain('📷');
-    expect(rowText('qwen/qwen3.8-27b:free')).toContain('📷');
+    expect(rowText('nvidia/nemotron-3.5-lightning:free')).not.toContain('📷');
     expect(rowText('google/gemma-4-26b-a4b-it:free')).toContain('📷');
+    expect(rowText('nvidia/nemotron-3-super-120b-a12b:free')).not.toContain('📷');
   });
 
   it('collapses provider groups in the model selector independently', async () => {
@@ -3541,14 +3580,14 @@ describe('HeraAi App', () => {
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
     const listbox = screen.getByRole('listbox');
     expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
-    expect(listbox.querySelector('[data-model-id="nex-agi/nex-n2.5-pro:free"]')).not.toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('OpenRouter'));
-    expect(listbox.querySelector('[data-model-id="nex-agi/nex-n2.5-pro:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).toBeInTheDocument();
     expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('OpenRouter'));
-    expect(listbox.querySelector('[data-model-id="nex-agi/nex-n2.5-pro:free"]')).not.toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).not.toBeInTheDocument();
   });
 
   it('lists the added OpenRouter free models and selects one', async () => {
@@ -3559,14 +3598,14 @@ describe('HeraAi App', () => {
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
     fireEvent.click(screen.getByText('OpenRouter'));
     const listbox = screen.getByRole('listbox');
-    expect(listbox.querySelector('[data-model-id="qwen/qwen3.8-27b:free"]')).toBeInTheDocument();
-    expect(listbox.querySelector('[data-model-id="nex-agi/nex-n2.5-pro:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3-super-120b-a12b:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).toBeInTheDocument();
     expect(listbox.querySelector('[data-model-id="google/gemma-4-26b-a4b-it:free"]')).toBeInTheDocument();
 
-    fireEvent.click(listbox.querySelector('[data-model-id="qwen/qwen3.8-27b:free"]'));
+    fireEvent.click(listbox.querySelector('[data-model-id="nvidia/nemotron-3-super-120b-a12b:free"]'));
     await waitFor(() => expect(
       document.querySelector('button[data-testid="model-selector"]'),
-    ).toHaveTextContent('Qwen3.8 27B'));
+    ).toHaveTextContent('Nemotron 3 Super 120B'));
   });
 
   it('collapses the selected model group too', async () => {
@@ -3714,7 +3753,7 @@ describe('HeraAi App', () => {
   });
 
   it.each([
-    ['nex-agi/nex-n2.5-pro:free', 'openrouter'],
+    ['nvidia/nemotron-3.5-lightning:free', 'openrouter'],
     ['nemotron-3-super', 'ollama'],
     ['gpt-oss:120b', 'ollama'],
   ])('persists provider and model together when selecting %s', async (modelId, providerId) => {
@@ -3787,8 +3826,8 @@ describe('HeraAi App', () => {
       'gemini-3.7-flash',
       'gemini-3.8-flash',
       'google/gemma-4-26b-a4b-it:free',
-      'qwen/qwen3.8-27b:free',
-      'nex-agi/nex-n2.5-pro:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3.5-lightning:free',
       'gpt-oss:120b',
       'nemotron-3-super',
       'gemma4:31b',

@@ -69,6 +69,7 @@ import {
 } from './lib/modelMigration'
 import { createAutoSyncScheduler, touchesSyncedKeys } from './lib/autoSyncScheduler'
 import { WHEEL_TARGET_INNER, resolveWheelTarget } from './lib/composerWheel'
+import { classifyNeedsWebSearch } from './lib/api'
 
 function appendToInputValue(current, text) {
   const safeCurrent = typeof current === 'string' ? current : ''
@@ -76,6 +77,25 @@ function appendToInputValue(current, text) {
   if (!safeText) return safeCurrent
   const separator = safeCurrent.trim() ? '\n' : ''
   return `${safeCurrent}${separator}${safeText}`
+}
+
+// Arama kapisi: sezgi sessiz kaldiginda Gemini'ye sorulur. Cevap uretecek
+// saglayicidan bagimsiz calisir; kararsizlikta null doner ve gonderim
+// sezgiye geri duser. 8 sn tavan, asla gonderimi bekletmez.
+const SEARCH_GATE_TIMEOUT_MS = 8_000
+
+async function resolveSearchGate(userText) {
+  try {
+    const resolution = await resolveKeysForRequest('gemini')
+    if (!resolution?.keys?.length) return null
+    const verdict = await Promise.race([
+      classifyNeedsWebSearch({ text: userText, geminiKeys: resolution.keys }),
+      new Promise(resolve => setTimeout(() => resolve({ needsSearch: null }), SEARCH_GATE_TIMEOUT_MS)),
+    ])
+    return verdict?.needsSearch ?? null
+  } catch {
+    return null
+  }
 }
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 96
@@ -3194,6 +3214,24 @@ function App() {
     }
   }, [t])
 
+  const handleOpenFullPage = useCallback(() => {
+    try {
+      const url = typeof chrome !== 'undefined' && chrome?.runtime?.getURL
+        ? chrome.runtime.getURL('index.html')
+        : null
+      if (url && chrome?.tabs?.create) {
+        chrome.tabs.create({ url })
+        return
+      }
+      if (url) {
+        window.open(url, '_blank', 'noopener')
+        return
+      }
+    } catch {
+      // Uzantı bağlamı dışında sessizce yoksay.
+    }
+  }, [])
+
   const handleImport = useCallback(async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -3567,6 +3605,18 @@ function App() {
     let mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
       : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
+    // Arama kapisi erken baslatilir (beklenmez): boya sirasini degistirmez,
+    // START gonderilmeden hemen once sonucu alinir.
+    const searchGatePromise = !retryUserMessage
+      && mode === 'chat'
+      && !actionOptions?.modeOverride
+      && draftAttachments.length === 0
+      && !canReusePreviousImage
+      && autoDetectedUrls.length === 0
+      && !autoWebSearch
+      && !/```/.test(userText)
+      ? resolveSearchGate(userText)
+      : null
     const hasModelOverride = MODELS.includes(actionOptions?.modelOverride)
     let requestModel = hasModelOverride
       ? actionOptions.modelOverride
@@ -3788,6 +3838,20 @@ function App() {
         setAttachments([])
       }
     })
+
+    // Boyadan sonra: kapi "ara" dediyse ve mod hâlâ sohbetse arastirmaya
+    // yükseltilir. URL yokluğunda bağlam yeniden hesaplanmaz; yalnız mod ve
+    // arama bağlamı güncellenir.
+    if (searchGatePromise && mode === 'chat') {
+      const gateVerdict = await searchGatePromise
+      if (gateVerdict === true) {
+        mode = 'web'
+        webContext.kind = 'search'
+        userMsg.mode = 'web'
+        generation.mode = 'web'
+        void recordToolUsage('search')
+      }
+    }
 
     const persistLocalStartFailure = async (errorCode = 'generation_failed') => {
       const storedSession = sessionsRef.current.find(session => session.id === requestSessionId)
@@ -4590,6 +4654,7 @@ function App() {
         onExportMarkdown={handleExportMarkdown}
         onCopyChat={handleCopyChat}
         onImport={handleImport}
+        onOpenFullPage={handleOpenFullPage}
         onSettings={() => setShowSettings(true)}
         onStats={() => setShowStats(true)}
         onChangelog={() => setShowChangelog(true)}

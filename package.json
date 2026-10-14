@@ -1,7 +1,7 @@
 {
   "name": "heraai",
   "private": true,
-  "version": "1.10.29",
+  "version": "1.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,8 +21,8 @@
     "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.575.0",
     "mammoth": "^1.13.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-hot-toast": "^2.6.1",
     "react-i18next": "^16.6.6",
     "react-markdown": "^10.1.0",
@@ -35,8 +35,6 @@
     "@tailwindcss/typography": "^0.5.20",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.3",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.6.1",
     "eslint": "^9.39.5",
@@ -46,7 +44,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
     "jsdom": "^28.1.0",
-    "postcss": "^8.5.29",
+    "postcss": "^8.5.30",
     "tailwindcss": "^3.4.19",
     "vite": "^7.3.7",
     "vitest": "^4.1.11"
