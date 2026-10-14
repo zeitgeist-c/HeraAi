@@ -26,8 +26,8 @@ describe('provider-aware model catalog', () => {
       ['gemini', 'gemini-3.7-flash'],
       ['gemini', 'gemini-3.8-flash'],
       ['openrouter', 'google/gemma-4-26b-a4b-it:free'],
-      ['openrouter', 'qwen/qwen3.8-27b:free'],
-      ['openrouter', 'nex-agi/nex-n2.5-pro:free'],
+      ['openrouter', 'nvidia/nemotron-3-super-120b-a12b:free'],
+      ['openrouter', 'nvidia/nemotron-3.5-lightning:free'],
       ['ollama', 'gpt-oss:120b'],
       ['ollama', 'nemotron-3-super'],
       ['ollama', 'gemma4:31b'],
@@ -43,8 +43,8 @@ describe('provider-aware model catalog', () => {
       'gemini-3.6-flash': 'medium',
       'gemini-3.7-flash': 'slow',
       'gemini-3.8-flash': 'slow',
-      'nex-agi/nex-n2.5-pro:free': 'slow',
-      'qwen/qwen3.8-27b:free': 'medium',
+      'nvidia/nemotron-3.5-lightning:free': 'fast',
+      'nvidia/nemotron-3-super-120b-a12b:free': 'medium',
       'google/gemma-4-26b-a4b-it:free': 'fast',
       'gpt-oss:120b': 'fast',
       'nemotron-3-super': 'medium',
@@ -75,6 +75,8 @@ describe('provider-aware model catalog', () => {
 
   it('declares PDF as Gemini-only and marks text-only models accurately', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage === false).map(model => model.modelId)).toEqual([
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3.5-lightning:free',
       'gpt-oss:120b',
       'nemotron-3-super',
       'gemma4:31b',
@@ -82,11 +84,9 @@ describe('provider-aware model catalog', () => {
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsPdf).every(model => model.provider === 'gemini')).toBe(true)
     expect(MODEL_CATALOG.filter(model => model.capabilities.supportsImage && model.provider === 'openrouter').map(model => model.modelId)).toEqual([
       'google/gemma-4-26b-a4b-it:free',
-      'qwen/qwen3.8-27b:free',
-      'nex-agi/nex-n2.5-pro:free',
     ])
-    expect(getProviderForModel('nex-agi/nex-n2.5-pro:free')).toBe('openrouter')
-    expect(getProviderForModel('qwen/qwen3.8-27b:free')).toBe('openrouter')
+    expect(getProviderForModel('nvidia/nemotron-3.5-lightning:free')).toBe('openrouter')
+    expect(getProviderForModel('nvidia/nemotron-3-super-120b-a12b:free')).toBe('openrouter')
     expect(getProviderForModel('google/gemma-4-26b-a4b-it:free')).toBe('openrouter')
     expect(getProviderForModel('nemotron-3-super')).toBe('ollama')
     expect(getProviderForModel('gemma4:31b')).toBe('ollama')
@@ -96,18 +96,18 @@ describe('provider-aware model catalog', () => {
   it('keeps the OpenRouter fallback inside the catalog', () => {
     expect(OPENROUTER_MODEL_IDS).toEqual([
       'google/gemma-4-26b-a4b-it:free',
-      'qwen/qwen3.8-27b:free',
-      'nex-agi/nex-n2.5-pro:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3.5-lightning:free',
     ])
-    expect(getOpenRouterFallbackModel('google/gemma-4-26b-a4b-it:free')).toBe('qwen/qwen3.8-27b:free')
-    expect(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free')).toBe('nex-agi/nex-n2.5-pro:free')
-    expect(getOpenRouterFallbackModel('nex-agi/nex-n2.5-pro:free')).toBe('google/gemma-4-26b-a4b-it:free')
-    expect(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free', { hasImage: true })).toBe('nex-agi/nex-n2.5-pro:free')
+    expect(getOpenRouterFallbackModel('google/gemma-4-26b-a4b-it:free')).toBe('nvidia/nemotron-3-super-120b-a12b:free')
+    expect(getOpenRouterFallbackModel('nvidia/nemotron-3-super-120b-a12b:free')).toBe('nvidia/nemotron-3.5-lightning:free')
+    expect(getOpenRouterFallbackModel('nvidia/nemotron-3.5-lightning:free')).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(getOpenRouterFallbackModel('nvidia/nemotron-3-super-120b-a12b:free', { hasImage: true })).toBe('google/gemma-4-26b-a4b-it:free')
     // An id this system does not know (an old session, a hand-edited export)
     // lands on the first catalog model instead of the provider's own router.
     expect(getOpenRouterFallbackModel('meta-llama/legacy-model:free')).toBe('google/gemma-4-26b-a4b-it:free')
     expect(getOpenRouterFallbackModel('gemini-3.6-flash')).toBe('google/gemma-4-26b-a4b-it:free')
-    expect(MODEL_CATALOG.map(model => model.modelId)).toContain(getOpenRouterFallbackModel('qwen/qwen3.8-27b:free'))
+    expect(MODEL_CATALOG.map(model => model.modelId)).toContain(getOpenRouterFallbackModel('nvidia/nemotron-3-super-120b-a12b:free'))
   })
 
   it('migrates the retired MiniMax and Nemotron 3 Ultra selections to the Ollama default', () => {
@@ -160,8 +160,6 @@ describe('provider-aware model catalog', () => {
       'gemini:gemini-3.7-flash',
       'gemini:gemini-3.8-flash',
       'openrouter:google/gemma-4-26b-a4b-it:free',
-      'openrouter:qwen/qwen3.8-27b:free',
-      'openrouter:nex-agi/nex-n2.5-pro:free',
     ])
     expect(getAutoCandidateKeys({ mode: 'web' })).toEqual([
       'gemini:gemini-3.1-flash-lite',

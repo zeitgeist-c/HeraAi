@@ -301,6 +301,7 @@
             "export": "Export",
             "export_markdown": "Markdown",
             "copy_chat": "Copy Chat",
+            "open_full_page": "Open in full page",
             "import": "Import",
             "more": "More options",
             "close": "Close",

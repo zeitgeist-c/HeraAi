@@ -225,6 +225,23 @@ const AUTO_WEB_SEARCH_PHRASES = Object.freeze([
   'vizyonda',
   'çıkış tarihi',
   'cikis tarihi',
+  'çıkacak',
+  'cikacak',
+  'çıkar mı',
+  'cikar mi',
+  'yayınlanacak',
+  'yayinlanacak',
+  'yayın tarihi',
+  'yayin tarihi',
+  'ne zaman',
+  'olacak mı',
+  'olacak mi',
+  'ne oldu',
+  'duyuru',
+  'açıklan',
+  'aciklan',
+  'ertelendi',
+  'ertelenecek',
   'son sürüm',
   'son surum',
   'sonuçlar',
@@ -236,6 +253,14 @@ const AUTO_WEB_SEARCH_PHRASES = Object.freeze([
   'stock price',
   'breaking news',
   'news about',
+  'when will',
+  'release date',
+  'will be released',
+  'has been released',
+  'announc',
+  'delay',
+  'postpon',
+  'what happened',
 ])
 
 const EXPLICIT_SEARCH_PATTERN = /araştır|arastir|internette (bak|ara)|web'?de ara|google'?da ara|kaynak bul/i
@@ -244,7 +269,7 @@ const CURRENT_YEAR_PATTERN = /\b20[2-9]\d\b/
 export function needsWebSearch(text) {
   const normalized = String(text || '').toLocaleLowerCase('tr')
   if (!normalized.trim()) return false
-  // Kod istekleri, ceviri ve "bunu ozetle" turu mesajlar arastirmaya gitmez.
+  // Kod istekleri arastirmaya gitmez.
   if (/```/.test(text)) return false
   if (EXPLICIT_SEARCH_PATTERN.test(normalized)) return true
   if (AUTO_WEB_SEARCH_PHRASES.some(phrase => normalized.includes(phrase))) return true

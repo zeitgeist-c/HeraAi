@@ -74,13 +74,13 @@ describe('OpenRouter provider adapter', () => {
 
   it('sends the selected catalog model and routes nothing on its own', async () => {
     global.fetch.mockResolvedValue(streamResponse([
-      'data: {"model":"qwen/qwen3.8-27b:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
+      'data: {"model":"nvidia/nemotron-3-super-120b-a12b:free","choices":[{"delta":{"content":"hi"}}]}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'qwen/qwen3.8-27b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
 
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(body.model).toBe('qwen/qwen3.8-27b:free')
+    expect(body.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
     expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(events).toEqual(expect.arrayContaining([
       { event: 'chunk', data: { text: 'hi' } },
@@ -92,16 +92,16 @@ describe('OpenRouter provider adapter', () => {
     global.fetch
       .mockResolvedValueOnce(streamResponse([], 404))
       .mockResolvedValueOnce(streamResponse([
-        'data: {"model":"qwen/qwen3.8-27b:free","choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: {"model":"nvidia/nemotron-3-super-120b-a12b:free","choices":[{"delta":{"content":"ok"}}]}\n\n',
       ]))
 
     const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
     expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('google/gemma-4-26b-a4b-it:free')
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
     expect(events).toEqual(expect.arrayContaining([
-      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'google/gemma-4-26b-a4b-it:free', resolvedModel: 'qwen/qwen3.8-27b:free' } },
+      { event: 'model_resolved', data: { provider: 'openrouter', requestedModel: 'google/gemma-4-26b-a4b-it:free', resolvedModel: 'nvidia/nemotron-3-super-120b-a12b:free' } },
       { event: 'chunk', data: { text: 'ok' } },
     ]))
     expect(events.find(event => event.event === 'error')).toBeUndefined()
@@ -129,7 +129,7 @@ describe('OpenRouter provider adapter', () => {
     const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
     expect(events.find(event => event.event === 'error')).toBeUndefined()
   })
@@ -148,7 +148,7 @@ describe('OpenRouter provider adapter', () => {
       keys,
       undefined,
       null,
-      'nex-agi/nex-n2.5-pro:free',
+      'nvidia/nemotron-3.5-lightning:free',
     ))
 
     expect(global.fetch).toHaveBeenCalledTimes(2)
@@ -157,18 +157,16 @@ describe('OpenRouter provider adapter', () => {
     expect(events.some(event => event.event === 'error')).toBe(false)
   })
 
-  it('keeps the image fallback inside the catalog too', async () => {
-    global.fetch
-      .mockResolvedValueOnce(streamResponse([], 429))
-      .mockResolvedValueOnce(streamResponse([
-        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
-      ]))
+  it('keeps the image request on the single image-capable catalog model', async () => {
+    global.fetch.mockResolvedValue(streamResponse([
+      'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+    ]))
     const imageMessages = [{ role: 'user', content: 'Look', attachments: [{ mimeType: 'image/png', data: 'BASE64' }] }]
 
     const events = await collect(streamRemoteProvider('openrouter', imageMessages, {}, keys, undefined, null, 'google/gemma-4-26b-a4b-it:free'))
 
-    expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(global.fetch.mock.calls[1][1].body).model).toBe('qwen/qwen3.8-27b:free')
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe('google/gemma-4-26b-a4b-it:free')
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('ok')
   })
 
@@ -177,7 +175,7 @@ describe('OpenRouter provider adapter', () => {
       'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"code":429,"message":"rate limit"}}\n\n',
     ]))
 
-    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'qwen/qwen3.8-27b:free'))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, keys, undefined, null, 'nvidia/nemotron-3-super-120b-a12b:free'))
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(events.find(event => event.event === 'chunk')?.data.text).toBe('partial')

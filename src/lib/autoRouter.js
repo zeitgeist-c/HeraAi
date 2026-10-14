@@ -494,3 +494,76 @@ export async function classifyWithGemmaRouter({
   }
   return { fallback: true, updatedHealth }
 }
+
+const SEARCH_GATE_PROMPT_PREFIX = [
+  'Decide if answering the user message needs a live web search: current prices, dates, news, releases, scores, weather, or anything else that changes over time. Reply with JSON only.',
+  '{"needsSearch":false} — "Merhaba"',
+  '{"needsSearch":false} — "Bana bir masal anlat"',
+  '{"needsSearch":false} — "Bu cümleyi İngilizceye çevir"',
+  '{"needsSearch":true} — "GTA 6 ne zaman çıkacak?"',
+  '{"needsSearch":true} — "Bugün dolar kaç lira?"',
+  'User message:',
+].join('\n')
+
+export function buildSearchGatePrompt(text = '') {
+  const body = String(text ?? '').slice(0, 2000)
+  return `${SEARCH_GATE_PROMPT_PREFIX}\n"""${body}"""\nReply with JSON only.`
+}
+
+export function parseSearchGateResponse(rawText) {
+  const input = String(rawText ?? '')
+  const objectMatch = input.match(/\{[^{}]*\}/)
+  if (objectMatch) {
+    try {
+      const parsed = JSON.parse(objectMatch[0])
+      if (typeof parsed?.needsSearch === 'boolean') return parsed.needsSearch
+    } catch {
+      // Fall through to the loose matchers below.
+    }
+    const keyMatch = objectMatch[0].match(/"needssearch"\s*:\s*(true|false)/i)
+    if (keyMatch) return keyMatch[1].toLowerCase() === 'true'
+  }
+  const words = input.toLowerCase().match(/\b(true|yes|evet|false|no|hayır|hayir)\b/g) || []
+  const verdicts = new Set(words.map(word => (
+    word === 'true' || word === 'yes' || word === 'evet'
+  )))
+  if (verdicts.size === 1) return [...verdicts][0]
+  return null
+}
+
+// Anahtar kelime sezgisi sessiz kaldiginda modele sorulur: cevap
+// uretecek saglayicidan bagimsizdir, yalnizca Gemini anahtari ister.
+// Kararsiz kalinirsa (anahtar yok, hata, anlasilmaz cevap) null doner ve
+// cagiran taraf sezgiye geri duser; gonderim asla engellenmez.
+export async function classifyNeedsWebSearch({
+  text = '',
+  geminiKeys = [],
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  if (!String(text ?? '').trim()) return { needsSearch: null }
+  const keys = normalizeRouterKeys(geminiKeys)
+  if (keys.length === 0) return { needsSearch: null }
+  const prompt = buildSearchGatePrompt(text)
+  const unusableKeyIds = new Set()
+  for (const routerModel of [ROUTER_PRIMARY_MODEL_ID, ROUTER_BACKUP_MODEL_ID]) {
+    let failedOver = false
+    for (const entry of keys) {
+      if (unusableKeyIds.has(entry.id)) continue
+      const outcome = await attemptRouterCall({ routerModel, apiKey: entry.key, prompt, fetchImpl })
+      if (outcome.ok) {
+        const decision = parseSearchGateResponse(outcome.text)
+        if (decision !== null) return { needsSearch: decision }
+        failedOver = true
+        break
+      }
+      if (isKeyLevelFailure(outcome.type)) {
+        unusableKeyIds.add(entry.id)
+        continue
+      }
+      failedOver = true
+      break
+    }
+    void failedOver
+  }
+  return { needsSearch: null }
+}

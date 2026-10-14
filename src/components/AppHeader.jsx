@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Copy,
   Download,
+  ExternalLink,
   FileDown,
   History,
   Menu,
@@ -37,6 +38,7 @@ function AppHeader({
   onSettings,
   onStats,
   onChangelog,
+  onOpenFullPage,
   searchOpen = false,
   searchQuery = '',
   searchCounterText = '',
@@ -285,6 +287,16 @@ function AppHeader({
           className="hera-icon-button"
         >
           <Copy className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          data-testid="header-open-full-page"
+          title={t('chat.tooltips.open_full_page')}
+          aria-label={t('chat.tooltips.open_full_page')}
+          onClick={onOpenFullPage}
+          className="hera-icon-button"
+        >
+          <ExternalLink className="h-4 w-4" />
         </button>
         <button
           type="button"

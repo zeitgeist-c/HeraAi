@@ -281,8 +281,24 @@ describe('background service worker browser compatibility', () => {
     expect(mock.setPanelBehavior).toHaveBeenCalledWith({
       openPanelOnActionClick: true,
     });
-    expect(mock.actionListener).not.toHaveBeenCalled();
+    expect(mock.actionListener).toHaveBeenCalledTimes(1);
     expect(mock.setAccessLevel).toHaveBeenCalledWith({ accessLevel: 'TRUSTED_CONTEXTS' });
+  });
+
+  it('opens the side panel on toolbar click and falls back to a tab', async () => {
+    const mock = createChromeMock({ withSidePanel: true });
+    await loadWorker(mock);
+    const actionHandler = mock.actionListener.mock.calls[0][0];
+
+    await actionHandler({ windowId: 7 });
+    expect(mock.openPanel).toHaveBeenCalledWith({ windowId: 7 });
+    expect(mock.createTab).not.toHaveBeenCalled();
+
+    mock.openPanel.mockRejectedValueOnce(new Error('panel unavailable'));
+    await actionHandler({ windowId: 7 });
+    expect(mock.createTab).toHaveBeenCalledWith({
+      url: 'chrome-extension://test/index.html',
+    });
   });
 
   it('opens Hera in a tab when the side panel API is unavailable', async () => {

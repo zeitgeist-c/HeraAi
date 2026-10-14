@@ -11,11 +11,14 @@ import {
   ROUTER_REQUEST_TIMEOUT_MS,
   ROUTER_TEXT_MAX_CHARS,
   buildRouterPrompt,
+  buildSearchGatePrompt,
+  classifyNeedsWebSearch,
   classifyWithGemmaRouter,
   getRouterCooldownUntil,
   isKeyLevelFailure,
   isRouterFallbackableClassification,
   parseRouterResponse,
+  parseSearchGateResponse,
   recordRouterFailure,
   recordRouterSuccess,
   selectLocalFallback,
@@ -291,9 +294,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: '```js\nconst a = 1\n``` bu ne yapar?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Katalog 24.09.2026'da yenilendi: kodlama puanı 5 olan üç model var
-      // (Gemini 3.8 Flash, Nex-N2.5 Pro, Gemma 4 31B) ve eşitlikte
-      // katalog sırası kazanır.
+      // Katalog 24.09.2026'da yenilendi: kodlama puanı 5 olan tek model
+      // Gemini 3.8 Flash; OpenRouter tarafinda yavas kademe kalmadi.
       modelKey: 'gemini:gemini-3.8-flash',
       reasonCode: 'coding',
     })
@@ -304,8 +306,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'X ve Y yaklaşımlarını karşılaştır, neden biri daha iyi? Hangisini seçmeliyim?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Qwen3.8 27B (Q4, orta hız) kalite barajını geçen en hızlı model.
-      modelKey: 'openrouter:qwen/qwen3.8-27b:free',
+      // Nemotron 3 Super 120B (Q4, orta hız) kalite barajını geçen en hızlı model.
+      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
       reasonCode: 'complex_reasoning',
     })
   })
@@ -333,14 +335,14 @@ describe('local fallback provider fairness and need signals', () => {
 
   it('routes hard image questions to a quality-gated image model', () => {
     // Kural: kalite barajını geçen adaylar arasından en HIZLI olan seçilir.
-    // Qwen3.8 27B (Q4, orta hız) barajı geçer ve Gemini 3.8 Flash'tan (yavaş)
-    // hızlı olduğu için görsel işlerde onu geçer; ikisi de görsel desteklidir.
+    // Orta hızda görsel destekli OpenRouter modeli kalmadı; barajı geçen
+    // yavaş modeller arasında katalogda önde olan Gemini 3.8 Flash kazanır.
     expect(selectLocalFallback({
       text: 'Bu iki grafiği karşılaştır, neden farklı? Hangisi doğru?',
       mimeTypes: ['image/png'],
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'openrouter:qwen/qwen3.8-27b:free',
+      modelKey: 'gemini:gemini-3.8-flash',
       reasonCode: 'vision',
     })
   })
@@ -350,5 +352,53 @@ describe('local fallback provider fairness and need signals', () => {
       .toBe('gemini:gemini-3.1-flash-lite')
     expect(selectLocalFallback({ text: 'm'.repeat(1501), candidates: MODEL_CATALOG }))
       .toMatchObject({ modelKey: 'openrouter:google/gemma-4-26b-a4b-it:free', reasonCode: 'fast' })
+  })
+})
+
+describe('search gate', () => {
+  it('builds a short classification prompt containing the user text', () => {
+    const prompt = buildSearchGatePrompt('GTA 6 ne zaman çıkacak?')
+    expect(prompt).toContain('GTA 6 ne zaman çıkacak?')
+    expect(prompt).toContain('needsSearch')
+  })
+
+  it.each([
+    ['{"needsSearch":true}', true],
+    ['Ön ek {"needsSearch":false} son ek', false],
+    ['{"needsSearch": true}', true],
+    ['YES', true],
+    ['no', false],
+  ])('parses a model verdict: %s', (text, expected) => {
+    expect(parseSearchGateResponse(text)).toBe(expected)
+  })
+
+  it.each([
+    'yanıt metni',
+    'true or false?',
+    '',
+    'belki',
+  ])('stays undecided on ambiguous input: %s', (response) => {
+    expect(parseSearchGateResponse(response)).toBeNull()
+  })
+
+  it('asks the model and returns its verdict', async () => {
+    const fetchImpl = successFetch('{"needsSearch":true}')
+    await expect(classifyNeedsWebSearch({ text: 'GTA 6 ne zaman?', geminiKeys: keys, fetchImpl }))
+      .resolves.toEqual({ needsSearch: true })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toContain(ROUTER_PRIMARY_MODEL_ID)
+  })
+
+  it('returns null without keys and never calls the network', async () => {
+    const fetchImpl = successFetch('{"needsSearch":true}')
+    await expect(classifyNeedsWebSearch({ text: 'GTA 6 ne zaman?', geminiKeys: [], fetchImpl }))
+      .resolves.toEqual({ needsSearch: null })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('returns null when every key fails', async () => {
+    const fetchImpl = httpErrorFetch(401, 'invalid key')
+    await expect(classifyNeedsWebSearch({ text: 'GTA 6 ne zaman?', geminiKeys: keys, fetchImpl }))
+      .resolves.toEqual({ needsSearch: null })
   })
 })
