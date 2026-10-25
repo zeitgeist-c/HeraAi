@@ -4,6 +4,22 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.12.0',
+  date: '2026-10-25',
+  changes: {
+    tr: [
+      'Ayarlar ekranına API anahtarlarından model keşfi, arama ve kişisel model seçimi eklendi',
+      'Sohbet seçicisi yalnız etkin modelleri gösterir; kişisel katalogda yedek modeller de seçimle sınırlandırılır',
+      'Kullanıcı başına bulut kotası ve hesap sahibi muafiyeti için sunucu altyapısı hazırlandı; canlı geçiş ayrıca yapılır',
+    ],
+    en: [
+      'Settings now supports API model discovery, search and personal model selection',
+      'The chat selector shows enabled models; personal catalog fallbacks also respect model selections',
+      'Server infrastructure prepared for per-user cloud quotas and owner exemption; production activation is separate',
+    ],
+  },
+},
+{
   version: '1.11.0',
   date: '2026-10-14',
   changes: {

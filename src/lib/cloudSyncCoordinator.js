@@ -1,5 +1,6 @@
 import { getCurrentAuthUser, waitForCurrentAuthUser } from './authService'
 import { createFirestoreTransport } from './firestoreTransport'
+import { CLOUD_GATEWAY_URL } from './cloudGatewayTransport'
 import { getAttachment } from './attachmentStore'
 import { normalizeSessionAttachmentMetadata } from './attachmentSyncPolicy'
 import { buildBackupPayload, decryptBackup, encryptBackup } from './backupRestore'
@@ -122,6 +123,7 @@ function randomId() {
 
 export function mapCloudSyncError(error) {
   const raw = String(error?.code || error?.message || '').toLowerCase()
+  if (['daily_quota_exceeded', 'public_quota_exceeded', 'public_cloud_paused', 'cloud_migration_required', 'account_capacity_exceeded', 'legacy_cleanup_admin_required'].includes(raw)) return raw
   if (raw.includes('resource-exhausted') || raw.includes('quota')) return 'quota_exceeded'
   if (raw.includes('permission-denied')) return 'rules_denied'
   if (raw.includes('failed-precondition')) {
@@ -211,13 +213,20 @@ async function recordSyncUsage(result) {
 
 /** Panel ayarı + bugünkü kota kullanımı. */
 export async function getAutoSyncSettings() {
-  const stored = await storageGet([AUTO_SYNC_SETTING_KEY, AUTO_SYNC_USAGE_KEY])
+  const stored = await storageGet([AUTO_SYNC_SETTING_KEY, AUTO_SYNC_USAGE_KEY, 'cloudQuota'])
+  const user = getCurrentAuthUser()
   const usage = currentUsage(stored[AUTO_SYNC_USAGE_KEY])
+  const quota = user?.uid === stored.cloudQuota?.uid ? stored.cloudQuota : null
+  const ratio = quota ? {
+    reads: quota.exempt ? 0 : (quota.usage?.reads || 0) / quota.limits.reads,
+    writes: quota.exempt ? 0 : (quota.usage?.writes || 0) / quota.limits.writes,
+  } : quotaUsageRatio(usage)
   return {
     intervalMinutes: normalizeAutoSyncMinutes(stored[AUTO_SYNC_SETTING_KEY]),
     usage,
-    ratio: quotaUsageRatio(usage),
-    slowMode: isSlowMode(usage),
+    ratio,
+    slowMode: quota ? Math.max(ratio.reads, ratio.writes) >= 0.5 : isSlowMode(usage),
+    cloudQuota: quota,
   }
 }
 
@@ -698,6 +707,7 @@ async function performCloudSyncRun() {
     if (stored[SYNC_ENABLED_KEY] !== true) throw new Error('sync_not_enabled')
     if (stored[SYNC_PAUSED_KEY] === true) return { skipped: 'paused' }
     if (Number(stored[BLOCKED_UNTIL_KEY]) > Date.now()) throw new Error('quota_exceeded')
+    if (runtime.transport.beginSync) await runtime.transport.beginSync()
     const deviceState = await loadLinkedDeviceState(runtime, user)
     if (deviceState.disabled) return { skipped: 'device_disabled' }
     if (!deviceState.linked) throw new Error('sync_recovery_required')
@@ -712,7 +722,7 @@ async function performCloudSyncRun() {
     })
     await storageSet({ [LAST_SYNC_KEY]: now, [LAST_ERROR_KEY]: null, [BLOCKED_UNTIL_KEY]: null, [LAST_ERROR_DETAIL_KEY]: null })
     await storageSet({ [KEY_TOMBSTONES]: {} })
-    await recordSyncUsage(result)
+    if (!CLOUD_GATEWAY_URL) await recordSyncUsage(result)
     return result
   } catch (error) {
     const errorCode = mapCloudSyncError(error)
@@ -727,6 +737,7 @@ async function performCloudSyncRun() {
       },
     }
     if (errorCode === 'quota_exceeded') update[BLOCKED_UNTIL_KEY] = nextPacificQuotaReset()
+    if (['daily_quota_exceeded', 'public_quota_exceeded'].includes(errorCode) && error.resetsAt) update[BLOCKED_UNTIL_KEY] = error.resetsAt
     console.error('Cloud sync failed:', errorCode, error)
     await storageSet(update)
     throw new Error(errorCode)

@@ -18,9 +18,9 @@ import { cancelCropOverlay, injectCropOverlay } from './lib/injectCropOverlay'
 import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
-  MODEL_CATALOG,
-  MODEL_CAPABILITIES,
-  MODELS,
+  configureModelCatalog,
+  getRuntimeModelCatalog,
+  getModelDescriptor,
   describeModelFallback,
   getProviderForModel,
   resolveModelSelection,
@@ -472,10 +472,11 @@ function applySessionMetadataPatch(session, metadataPatch = {}) {
 
 function App() {
   const { t } = useTranslation()
-  const localizedModelCatalog = useMemo(() => MODEL_CATALOG.map(model => ({
+  const [modelCatalog, setModelCatalog] = useState(getRuntimeModelCatalog)
+  const localizedModelCatalog = useMemo(() => modelCatalog.map(model => ({
     ...model,
     label: model.labelKey ? t(model.labelKey) : model.label,
-  })), [t])
+  })), [t, modelCatalog])
   const localizedModelLabels = useMemo(() => Object.freeze(Object.fromEntries(
     localizedModelCatalog.map(model => [model.modelId, model.label]),
   )), [localizedModelCatalog])
@@ -497,6 +498,12 @@ function App() {
   const [isCropActive, setIsCropActive] = useState(false)
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDER)
+  const selectedProviderRef = useRef(selectedProvider)
+  const selectedModelRef = useRef(selectedModel)
+  useEffect(() => {
+    selectedProviderRef.current = selectedProvider
+    selectedModelRef.current = selectedModel
+  }, [selectedProvider, selectedModel])
   const msgIdCounter = useRef(0)
   const scrollRef = useRef(null)
   const composerInputRef = useRef(null)
@@ -604,11 +611,15 @@ function App() {
     const readAutoSettings = () => {
       try {
         chrome.storage?.local?.get?.(
-          ['syncAutoIntervalMinutes', 'syncUsage'],
+          ['syncAutoIntervalMinutes', 'syncUsage', 'cloudQuota'],
           stored => {
             if (chrome.runtime?.lastError) return
             autoSyncIntervalRef.current = stored?.syncAutoIntervalMinutes
-            autoSyncUsageRef.current = stored?.syncUsage
+            const quota = stored?.cloudQuota
+            autoSyncUsageRef.current = quota ? {
+              reads: quota.exempt ? 0 : (quota.usage?.reads || 0) / quota.limits.reads * 50000,
+              writes: quota.exempt ? 0 : (quota.usage?.writes || 0) / quota.limits.writes * 20000,
+            } : stored?.syncUsage
           },
         )
       } catch {
@@ -617,7 +628,7 @@ function App() {
     }
     readAutoSettings()
     const listener = changes => {
-      if (changes?.syncAutoIntervalMinutes || changes?.syncUsage) readAutoSettings()
+      if (changes?.syncAutoIntervalMinutes || changes?.syncUsage || changes?.cloudQuota) readAutoSettings()
     }
     try {
       chrome.storage?.onChanged?.addListener?.(listener)
@@ -2253,6 +2264,7 @@ function App() {
           'showSources',
           'selectedText',
           'selectedModel',
+          'modelPreferences',
           'selectedProvider',
           'modelSelectionMode',
           'apiKeyUsageMode',
@@ -2300,7 +2312,9 @@ function App() {
       const translate = i18n.getFixedT(config.language)
       setAppConfig(config)
       applyTheme(config.theme, config.customPrimaryColor)
+      setModelCatalog(configureModelCatalog(result.modelPreferences))
       const resolvedSelection = resolveModelSelection(result.selectedProvider, result.selectedModel)
+        || { modelId: DEFAULT_MODEL, provider: DEFAULT_PROVIDER }
       const resolvedSelectedModel = resolvedSelection.modelId
       setSelectedModel(resolvedSelectedModel)
       setSelectedProvider(resolvedSelection.provider)
@@ -2521,6 +2535,17 @@ function App() {
 
     const storageListener = (changes, namespace) => {
       if (namespace !== 'local') return
+      if (changes.modelPreferences) {
+        const catalog = configureModelCatalog(changes.modelPreferences.newValue)
+        setModelCatalog(catalog)
+        const next = resolveModelSelection(selectedProviderRef.current, selectedModelRef.current)
+        if (next) {
+          setSelectedModel(next.modelId)
+          setSelectedProvider(next.provider)
+          void chrome.storage.local.set({ selectedModel: next.modelId, selectedProvider: next.provider })
+            .catch(() => notifyError(i18n.t('models_panel.save_error')))
+        }
+      }
       if (changes.selectedText?.newValue) {
         setInput(previous => appendToInputValue(previous, changes.selectedText.newValue))
         void chrome.storage.local.remove(['selectedText'])
@@ -3617,11 +3642,11 @@ function App() {
       && !/```/.test(userText)
       ? resolveSearchGate(userText)
       : null
-    const hasModelOverride = MODELS.includes(actionOptions?.modelOverride)
+    const hasModelOverride = getRuntimeModelCatalog().some(model => model.modelId === actionOptions?.modelOverride)
     let requestModel = hasModelOverride
       ? actionOptions.modelOverride
       : selectedModel
-    let requestProvider = getProviderForModel(requestModel, selectedProvider)
+    let requestProvider = hasModelOverride ? getProviderForModel(requestModel, selectedProvider) : selectedProvider
     let explicitUrls = []
     try {
       explicitUrls = mode === 'web'
@@ -3687,7 +3712,7 @@ function App() {
     }
 
     const selectedRequestModels = [
-      { modelId: requestModel, provider: requestProvider, capabilities: MODEL_CAPABILITIES[requestModel] },
+      { modelId: requestModel, provider: requestProvider, capabilities: getModelDescriptor(requestModel, requestProvider)?.capabilities },
     ]
     if (sourceAttachments.some(attachment => attachment?.mimeType === 'application/pdf')
       && selectedRequestModels.some(model => model.capabilities?.supportsPdf !== true)) {
@@ -4375,7 +4400,7 @@ function App() {
 
     const retryOptions = (retryUserMessage) => ({
       retryUserMessage,
-      ...(MODELS.includes(modelOverride) ? { modelOverride } : {}),
+      ...(getRuntimeModelCatalog().some(model => model.modelId === modelOverride) ? { modelOverride } : {}),
     })
 
     if (message.role === 'user' && (message.content || message.attachments?.length)) {
@@ -4614,8 +4639,8 @@ function App() {
     }`
   )
 
-  const handleModelChange = (nextModel) => {
-    const nextProvider = getProviderForModel(nextModel)
+  const handleModelChange = (nextModel, provider) => {
+    const nextProvider = provider || getProviderForModel(nextModel)
     setSelectedModel(nextModel)
     setSelectedProvider(nextProvider)
     if (chrome && chrome.storage) {
@@ -4980,6 +5005,7 @@ function App() {
         <div data-testid="composer-meta" className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
           <ModelSelector
             selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
             models={localizedModelCatalog}
             modelLabels={localizedModelLabels}
             onModelChange={handleModelChange}

@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Admin gateway is the only data path. Role and quota documents are also closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

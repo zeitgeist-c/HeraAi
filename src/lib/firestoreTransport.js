@@ -18,6 +18,7 @@ import {
 
 import { getFirebaseFirestore } from './firebaseClient'
 import { cloudPaths, compareEntityVersions } from './syncModel'
+import { CLOUD_GATEWAY_URL, createCloudGatewayTransport } from './cloudGatewayTransport'
 
 function timestampMillis(value) {
   if (typeof value?.toMillis === 'function') return value.toMillis()
@@ -39,6 +40,7 @@ function normalizeSnapshot(snapshot) {
 }
 
 export function createFirestoreTransport({ db = getFirebaseFirestore() } = {}) {
+  if (CLOUD_GATEWAY_URL) return createCloudGatewayTransport()
   async function deleteRefs(refs) {
     for (let offset = 0; offset < refs.length; offset += 400) {
       const batch = writeBatch(db)

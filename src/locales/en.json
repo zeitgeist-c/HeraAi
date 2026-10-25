@@ -121,7 +121,13 @@
                 "sync_busy": "Another sync is still running. This request did not run; retry after it finishes.",
                 "sync_paused": "Sync is paused. Resume it first.",
                 "sync_index_required": "A Firebase query index is missing. Create the required Firestore index.",
-                "sync_precondition_failed": "Firebase configuration rejected the sync request. Inspect the error details."
+                "sync_precondition_failed": "Firebase configuration rejected the sync request. Inspect the error details.",
+                "daily_quota_exceeded": "Daily cloud limit reached. Chats remain on this device; sync resumes after the reset.",
+                "public_cloud_paused": "Public cloud sync is paused. Local chats remain available.",
+                "cloud_migration_required": "This cloud account needs migration to the new system.",
+                "account_capacity_exceeded": "Cloud storage or connected device limit reached.",
+                "legacy_cleanup_admin_required": "An administrator must clean legacy cloud data in the new system.",
+                "public_quota_exceeded": "Public cloud capacity for today is exhausted. Chats remain on this device; sync resumes after the reset."
             }
         },
         "api": {
@@ -397,7 +403,8 @@
             "already_running": "Another response is already running. Stop it before starting a new one.",
             "invalid_request": "The response request was incomplete. Please retry.",
             "generation_failed": "The AI response could not be generated.",
-            "generation_start_failed": "The extension could not start the response. Please retry."
+            "generation_start_failed": "The extension could not start the response. Please retry.",
+            "model_not_selected": "This model is not selected. Choose models in Settings."
         },
         "connection_error": "The AI request failed. Check your API key and connection.",
         "cancelled": "Request cancelled",
@@ -470,5 +477,26 @@
         "crash_title": "Something went wrong",
         "crash_message": "An unexpected error occurred. Please try reloading the extension.",
         "reload": "Reload"
+    },
+    "models_panel": {
+        "title": "My models",
+        "description": "Fetch catalogs using your API keys and choose models for chat. Being listed does not guarantee access or free usage. Choices are saved in this browser.",
+        "refresh": "Fetch / refresh models",
+        "loading": "Fetching models…",
+        "search": "Search models or providers",
+        "refreshed": "Last refresh: {{date}}",
+        "refresh_error": "Some catalogs could not be refreshed: {{providers}}. Previous entries were retained.",
+        "save_error": "Could not load or save model settings.",
+        "keep_one": "Keep at least one model selected.",
+        "paid": "Paid",
+        "image": "Images"
+    },
+    "cloud_quota": {
+        "owner": "Account owner: exempt from user quotas.",
+        "usage": "Cloud syncs today: {{used}} / {{limit}}",
+        "storage": "Cloud data stored: {{used}} / {{limit}} MiB",
+        "resets": "Daily limits reset: {{date}}",
+        "private": "Private cloud connection: server user quotas are not active yet.",
+        "operations": "Daily operations: {{reads}} / {{readLimit}} reads, {{writes}} / {{writeLimit}} writes"
     }
 }

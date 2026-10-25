@@ -4,6 +4,8 @@ import {
   MODEL_CAPABILITIES,
   MODELS,
   getProviderForModel,
+  getModelDescriptor,
+  modelAllowsKey,
 } from './models.js'
 import { streamRemoteProvider, testOllamaKey, testOpenRouterKey } from './providerApi.js'
 import { classifyWithGemmaRouter as classifyWithGemmaRouterImpl, classifyNeedsWebSearch as classifyNeedsWebSearchImpl } from './autoRouter.js'
@@ -367,7 +369,7 @@ const GEMINI_NON_RETRYABLE_FAILURE = new Set([
 function resolveGeminiFallbackChain(modelId) {
   const chain = [modelId]
   for (const candidate of GEMINI_LITE_FALLBACK_MODELS) {
-    if (!chain.includes(candidate)) chain.push(candidate)
+    if (!chain.includes(candidate) && getModelDescriptor(candidate, 'gemini')) chain.push(candidate)
   }
   return chain
 }
@@ -377,10 +379,11 @@ async function* attemptGeminiModel(entries, createStreamRequest, createFallbackR
   let lastFailure = null
 
   for (const entry of entries) {
+    if (!modelAllowsKey(attemptModelId, 'gemini', entry.id)) continue
     let hasStartedStreaming = false
     let reportedSuccess = false
     let streamRequest = null
-    const genAI = createGeminiClient(entry.key.trim())
+    const genAI = createGeminiClient(entry.key.trim(), getModelDescriptor(attemptModelId, 'gemini')?.discovered ? 'v1beta' : GEMINI_API_VERSION)
     try {
       throwIfAborted(signal)
       streamRequest = await startGeminiRequest(
@@ -628,7 +631,7 @@ function remoteFallbackGeminiKeys(options) {
 
 async function* streamRemoteWithGeminiFallback(providerId, messages, options, providerKeys, signal, fallbackImage, modelId) {
   const fallbackKeys = remoteFallbackGeminiKeys(options)
-  if (fallbackKeys.length === 0) {
+  if (fallbackKeys.length === 0 || options.restrictModelSelection) {
     yield* streamRemoteProvider(providerId, messages, options, providerKeys, signal, fallbackImage, modelId)
     return
   }
@@ -866,7 +869,7 @@ function successfulUrlMetadata(metadata, expectedCount) {
 }
 
 async function tryGeminiUrlContext(messages, urls, options, geminiKeys, signal, modelId) {
-  const entries = validKeys(geminiKeys)
+  const entries = validKeys(geminiKeys).filter(entry => modelAllowsKey(modelId, 'gemini', entry.id))
   if (entries.length === 0) return { error: new Error('Gemini API key is missing.'), keyStatuses: [] }
   const keyStatuses = []
   let lastError = null
@@ -1004,7 +1007,7 @@ async function* streamUrlResearch(input, urls, providerKeys, tavilyKeys, signal,
   const messages = Array.isArray(input) ? input : [{ role: 'user', content: input }]
   const modelId = model || DEFAULT_MODEL
   const providerId = provider || getProviderForModel(modelId)
-  const primary = providerId !== 'gemini' || MODEL_CAPABILITIES[modelId]?.supportsUrlContext === false
+  const primary = providerId !== 'gemini' || getModelDescriptor(modelId, providerId)?.capabilities?.supportsUrlContext !== true
     ? { retrievalFailed: true, keyStatuses: [] }
     : await tryGeminiUrlContext(messages, urls, options, providerKeys, signal, modelId)
   for (const status of primary.keyStatuses || []) yield { event: 'key_status', data: status }

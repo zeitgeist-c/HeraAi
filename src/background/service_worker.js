@@ -1,6 +1,8 @@
 import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
 import {
-  MODEL_CATALOG,
+  configureModelCatalog,
+  getRuntimeModelCatalog,
+  getModelDescriptor,
   PROVIDERS,
   getProviderForModel,
 } from '../lib/models.js';
@@ -59,7 +61,7 @@ function compatibleAutoModels({ availableProviders, mimeTypes, mode, tavilyAvail
   const providers = new Set(availableProviders || []);
   const hasPdf = mimeTypes.includes('application/pdf');
   const hasImage = mimeTypes.some(mime => mime.startsWith('image/'));
-  return MODEL_CATALOG.filter(model => {
+  return getRuntimeModelCatalog().filter(model => {
     if (!providers.has(model.provider)) return false;
     if (hasPdf && model.capabilities?.supportsPdf !== true) return false;
     if (hasImage && model.capabilities?.supportsImage !== true) return false;
@@ -594,6 +596,8 @@ async function writeTerminalError(activeGeneration, errorCode, details = {}) {
 }
 
 async function handleGenerationStart(message) {
+  const modelSettings = await storageGet(['modelPreferences']);
+  configureModelCatalog(modelSettings.modelPreferences);
   if (
     !message.jobId
     || !message.sessionId
@@ -694,6 +698,10 @@ async function handleGenerationStart(message) {
   }
 
   let startMessage = message;
+  if (modelSettings.modelPreferences && message.selectionMode !== 'auto'
+    && !getModelDescriptor(message.model, message.provider)) {
+    return { ok: false, errorCode: 'model_not_selected' };
+  }
   if (message.selectionMode === 'auto') {
     const providerIds = [PROVIDERS.GEMINI, PROVIDERS.OPENROUTER, PROVIDERS.OLLAMA];
     const providerEntries = await Promise.all(providerIds.map(async providerId => ([
@@ -859,6 +867,7 @@ async function handleGenerationStart(message) {
       attachmentIds: Array.isArray(startMessage.attachmentIds) ? startMessage.attachmentIds : [],
       webContext: startMessage.webContext || { kind: 'none', urls: [] },
       provider,
+      modelPreferences: modelSettings.modelPreferences || null,
       providerKeys: providerResolution.keys || [],
       fallbackGeminiKeys: geminiFallbackResolution.keys || [],
       tavilyKeys: tavilyResolution.keys || [],

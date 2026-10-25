@@ -121,7 +121,13 @@
         "sync_busy": "Başka bir eşitleme hâlâ çalışıyor. Bu istek çalıştırılmadı; işlem bittikten sonra tekrar deneyin.",
         "sync_paused": "Eşitleme duraklatılmış. Önce devam ettirin.",
         "sync_index_required": "Firebase sorgusu için bir indeks eksik. Firestore indeksinin oluşturulması gerekiyor.",
-        "sync_precondition_failed": "Firebase yapılandırması eşitleme isteğini kabul etmiyor. Hata ayrıntısı incelenmeli."
+        "sync_precondition_failed": "Firebase yapılandırması eşitleme isteğini kabul etmiyor. Hata ayrıntısı incelenmeli.",
+        "daily_quota_exceeded": "Günlük bulut kullanım sınırına ulaştın. Sohbetlerin cihazında korunur; eşitleme sınır yenilenince devam eder.",
+        "public_cloud_paused": "Genel bulut eşitlemesi şu an duraklatılmış. Yerel sohbetlerini kullanabilirsin.",
+        "cloud_migration_required": "Bu hesabın bulut verilerinin yeni sisteme aktarılması gerekiyor.",
+        "account_capacity_exceeded": "Bulut depolama veya bağlı cihaz sınırına ulaştın.",
+        "legacy_cleanup_admin_required": "Eski bulut verileri yeni sistemde yönetici tarafından temizlenir.",
+        "public_quota_exceeded": "Genel bulutun bugünkü kapasitesi doldu. Sohbetlerin cihazında korunur; eşitleme kapasite yenilenince devam eder."
       }
     },
     "api": {
@@ -167,13 +173,13 @@
       "status_pending": "Bekliyor",
       "status_rate_limited": "Rate Limit",
       "status_quota_exceeded": "Kota Dolu",
-            "status_invalid": "Geçersiz",
-            "status_paused": "Duraklatıldı",
-            "pause": "Anahtarı duraklat",
-            "resume": "Anahtarı kullanıma aç",
-            "usage_mode_title": "API anahtarı kullanım biçimi",
-            "usage_mode_primary": "Ana anahtarları kullan",
-            "usage_mode_balanced": "Anahtarları sırayla kullan",
+      "status_invalid": "Geçersiz",
+      "status_paused": "Duraklatıldı",
+      "pause": "Anahtarı duraklat",
+      "resume": "Anahtarı kullanıma aç",
+      "usage_mode_title": "API anahtarı kullanım biçimi",
+      "usage_mode_primary": "Ana anahtarları kullan",
+      "usage_mode_balanced": "Anahtarları sırayla kullan",
       "last_error": "Son hata: {{minutes}} dk önce",
       "test_invalid": "Geçersiz anahtar",
       "test_quota": "Kota dolmuş olabilir",
@@ -397,7 +403,8 @@
       "already_running": "Başka bir yanıt hâlâ çalışıyor. Yeni bir yanıt başlatmadan önce onu durdurun.",
       "invalid_request": "Yanıt isteği eksik kaldı. Lütfen yeniden deneyin.",
       "generation_failed": "AI yanıtı oluşturulamadı.",
-      "generation_start_failed": "Yanıt uygulama içinde başlatılamadı. Lütfen yeniden deneyin."
+      "generation_start_failed": "Yanıt uygulama içinde başlatılamadı. Lütfen yeniden deneyin.",
+      "model_not_selected": "Bu model seçili değil. Ayarlar’dan kullanmak istediğin modelleri seç."
     },
     "connection_error": "AI istegi basarisiz oldu. API anahtarinizi ve baglantinizi kontrol edin.",
     "cancelled": "İstek iptal edildi",
@@ -470,5 +477,26 @@
     "crash_title": "Bir şeyler ters gitti",
     "crash_message": "Beklenmeyen bir hata oluştu. Lütfen uzantıyı yeniden yüklemeyi deneyin.",
     "reload": "Yeniden yükle"
+  },
+  "models_panel": {
+    "title": "Modellerim",
+    "description": "API anahtarlarının kataloglarını getir, sohbette kullanacaklarını seç. Listeye girmesi erişim veya ücretsiz kullanım garantisi değildir. Seçimler bu tarayıcıya kaydedilir.",
+    "refresh": "Modelleri getir / yenile",
+    "loading": "Modeller getiriliyor…",
+    "search": "Model veya sağlayıcı ara",
+    "refreshed": "Son yenileme: {{date}}",
+    "refresh_error": "Bazı kataloglar yenilenemedi: {{providers}}. Önceki liste korundu.",
+    "save_error": "Model ayarları okunamadı veya kaydedilemedi.",
+    "keep_one": "En az bir model seçili kalmalı.",
+    "paid": "Ücretli",
+    "image": "Görsel"
+  },
+  "cloud_quota": {
+    "owner": "Hesap sahibi: kullanıcı kotalarından muafsın.",
+    "usage": "Bugünkü bulut eşitlemesi: {{used}} / {{limit}}",
+    "storage": "Bulutta tutulan veri: {{used}} / {{limit}} MiB",
+    "resets": "Günlük sınırların yenilenmesi: {{date}}",
+    "private": "Özel bulut bağlantısı: kullanıcı kotası sunucuda henüz etkin değil.",
+    "operations": "Günlük işlemler: {{reads}} / {{readLimit}} okuma, {{writes}} / {{writeLimit}} yazma"
   }
 }

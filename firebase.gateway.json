@@ -1,0 +1,5 @@
+{
+  "functions": [{ "source": "functions", "codebase": "heraai-cloud" }],
+  "firestore": { "rules": "firestore.gateway.rules" },
+  "emulators": { "firestore": { "port": 8080 }, "functions": { "port": 5001 } }
+}

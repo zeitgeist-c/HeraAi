@@ -87,6 +87,8 @@ const CONTRACT = {
   syncPullCursor: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Son çekme imleci' },
   syncAutoIntervalMinutes: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Otomatik eşitleme aralığı; cihazın kendi tercihi' },
   syncUsage: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Günlük kota sayacı' },
+  modelPreferences: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Cihaz model katalog önbelleği ve seçimi; sır içermez' },
+  cloudQuota: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Sunucunun doğrulanmış hesap tüketimi; istemci yetkisi değildir' },
   composerMaxHeight: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Yazı alanı yükseklik tercihi; cihaza özel' },
   deviceCryptoKey: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Cihaza özel sarma anahtarı' },
 

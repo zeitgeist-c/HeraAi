@@ -132,8 +132,33 @@ export const MODEL_CAPABILITIES = Object.freeze(Object.fromEntries(
   MODEL_CATALOG.map(model => [model.modelId, Object.freeze({ ...model.capabilities })]),
 ))
 
+// Each extension context loads its own preferences before resolving requests.
+let runtimeCatalog = MODEL_CATALOG
+export function configureModelCatalog(preferences) {
+  if (!preferences || !Array.isArray(preferences.enabledKeys)) {
+    runtimeCatalog = MODEL_CATALOG
+    return runtimeCatalog
+  }
+  const entries = new Map(MODEL_CATALOG.map(model => [model.key, model]))
+  for (const model of preferences.models || []) {
+    if (!Object.values(PROVIDERS).includes(model?.provider)
+      || typeof model.modelId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]{0,199}$/.test(model.modelId)) continue
+    const key = `${model.provider}:${model.modelId}`
+    entries.set(key, { ...model, key })
+  }
+  runtimeCatalog = [...new Set(preferences.enabledKeys)].map(key => entries.get(key)).filter(Boolean)
+  return runtimeCatalog
+}
+
+export function getRuntimeModelCatalog() { return runtimeCatalog }
+
+export function modelAllowsKey(modelId, provider, keyId) {
+  const model = getModelDescriptor(modelId, provider)
+  return !model?.sourceKeyIds || model.sourceKeyIds.includes(keyId)
+}
+
 export function getModelDescriptor(modelId, provider = null) {
-  return MODEL_CATALOG.find(model => (
+  return runtimeCatalog.find(model => (
     model.modelId === modelId && (!provider || model.provider === provider)
   )) || null
 }
@@ -162,7 +187,7 @@ export function getAutoCandidateKeys({ mimeTypes = [], mode = 'chat' } = {}) {
   const normalizedMimes = Array.isArray(mimeTypes) ? mimeTypes : []
   const hasPdf = normalizedMimes.includes('application/pdf')
   const hasImage = normalizedMimes.some(mime => typeof mime === 'string' && mime.startsWith('image/'))
-  return MODEL_CATALOG
+  return runtimeCatalog
     .filter(model => {
       if (hasPdf && model.capabilities?.supportsPdf !== true) return false
       if (hasImage && model.capabilities?.supportsImage !== true) return false
@@ -173,7 +198,7 @@ export function getAutoCandidateKeys({ mimeTypes = [], mode = 'chat' } = {}) {
 }
 
 export function getOpenRouterFallbackModel(modelId, { hasImage = false } = {}) {
-  const candidates = MODEL_CATALOG
+  const candidates = runtimeCatalog
     .filter(model => model.provider === PROVIDERS.OPENROUTER)
     .filter(model => (hasImage ? model.capabilities?.supportsImage === true : true))
     .map(model => model.modelId)
@@ -185,11 +210,11 @@ export function getOpenRouterFallbackModel(modelId, { hasImage = false } = {}) {
 
 export function resolveModelSelection(provider, modelId) {
   if (provider === PROVIDERS.OLLAMA && isRetiredModelId(modelId)) {
-    return getModelDescriptor(DEFAULT_OLLAMA_MODEL, PROVIDERS.OLLAMA)
+    return getModelDescriptor(DEFAULT_OLLAMA_MODEL, PROVIDERS.OLLAMA) || runtimeCatalog[0] || null
   }
   const exact = getModelDescriptor(modelId, provider)
   if (exact) return exact
   const legacy = getModelDescriptor(modelId)
   if (legacy) return legacy
-  return getModelDescriptor(DEFAULT_MODEL, DEFAULT_PROVIDER)
+  return getModelDescriptor(DEFAULT_MODEL, DEFAULT_PROVIDER) || runtimeCatalog[0] || null
 }

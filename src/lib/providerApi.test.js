@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { OPENROUTER_MODEL_IDS } from './models.js'
+import { OPENROUTER_MODEL_IDS, configureModelCatalog } from './models.js'
 
 import {
   OLLAMA_CLOUD_MODEL,
@@ -46,6 +46,21 @@ async function collect(stream) {
 
 const keys = [{ id: 'primary', key: 'secret', isPrimary: true }]
 const messages = [{ role: 'user', content: 'Hello' }]
+
+describe('personal catalog request isolation', () => {
+  afterEach(() => { configureModelCatalog(null); vi.restoreAllMocks() })
+  it('falls back only to another selected model using its own discovered key', async () => {
+    const model = (id, keyId) => ({ key: `openrouter:${id}`, provider: 'openrouter', modelId: id, sourceKeyIds: [keyId], capabilities: {} })
+    configureModelCatalog({ models: [model('selected-a', 'a'), model('selected-b', 'b')], enabledKeys: ['openrouter:selected-a', 'openrouter:selected-b'] })
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ error: { message: 'Unavailable' } }, 503))
+      .mockResolvedValueOnce(streamResponse(['data: {"choices":[{"delta":{"content":"answer"}}]}\n\ndata: [DONE]\n\n']))
+    const events = await collect(streamRemoteProvider('openrouter', messages, {}, [{ id: 'a', key: 'secret-a' }, { id: 'b', key: 'secret-b' }], undefined, null, 'selected-a'))
+    expect(global.fetch.mock.calls.map(([, options]) => [JSON.parse(options.body).model, options.headers.Authorization])).toEqual([
+      ['selected-a', 'Bearer secret-a'], ['selected-b', 'Bearer secret-b'],
+    ])
+    expect(events).toContainEqual({ event: 'chunk', data: { text: 'answer' } })
+  })
+})
 
 describe('OpenRouter provider adapter', () => {
   beforeEach(() => { global.fetch = vi.fn() })

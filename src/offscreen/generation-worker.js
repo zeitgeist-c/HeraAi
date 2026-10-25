@@ -1,5 +1,6 @@
 import { prepareSharedResearch, streamChat, streamResearch, streamVision } from '../lib/api.js'
 import { blobToBase64, getAttachment } from '../lib/attachmentStore.js'
+import { configureModelCatalog } from '../lib/models.js'
 
 export const SNAPSHOT_THROTTLE_MS = 150
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -75,6 +76,7 @@ async function hydrateRequestMessages(payload) {
 }
 
 async function selectStream(payload, signal, engines) {
+  configureModelCatalog(payload.modelPreferences)
   const requestMessages = payload.requestMessagesHydrated === true
     ? payload.requestMessages
     : await hydrateRequestMessages(payload)
@@ -85,6 +87,7 @@ async function selectStream(payload, signal, engines) {
   const requestOptions = {
     systemInstruction: payload.systemInstruction || '',
     language: payload.language || 'tr',
+    ...(payload.modelPreferences ? { restrictModelSelection: true } : {}),
     fallbackGeminiKeys: Array.isArray(payload.fallbackGeminiKeys) ? payload.fallbackGeminiKeys : [],
   }
 

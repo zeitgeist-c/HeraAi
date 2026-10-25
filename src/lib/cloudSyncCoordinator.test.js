@@ -330,6 +330,21 @@ describe('cihaz kapatma ve ad verme', () => {
 })
 
 describe('otomatik eşitleme ayarı ve kota sayacı', () => {
+  it('hesap sahibi yerel tahmin yüksek olsa da yavaş moda girmez', async () => {
+    storage.cloudQuota = { uid: user.uid, exempt: true, usage: { reads: 999999, writes: 999999 }, limits: null }
+    try {
+      const settings = await getAutoSyncSettings()
+      expect(settings.slowMode).toBe(false)
+      expect(settings.ratio.reads).toBe(0)
+      expect(settings.cloudQuota.exempt).toBe(true)
+    } finally { delete storage.cloudQuota }
+  })
+
+  it('başka hesabın kota önbelleği gösterilmez', async () => {
+    storage.cloudQuota = { uid: 'another-user', exempt: true }
+    try { expect((await getAutoSyncSettings()).cloudQuota).toBeNull() }
+    finally { delete storage.cloudQuota }
+  })
   it('varsayılan aralık bir saat; kaydedilen aralık okunur, geçersiz değer varsayılana döner', async () => {
     delete storage.syncAutoIntervalMinutes
     expect((await getAutoSyncSettings()).intervalMinutes).toBe(60)

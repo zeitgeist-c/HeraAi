@@ -558,7 +558,17 @@ function SyncPanel() {
             )
           })}
         </div>
-        {autoSettings && (
+        {autoSettings?.cloudQuota ? (
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            {autoSettings.cloudQuota.exempt ? <p>{t('cloud_quota.owner')}</p> : <>
+              <p>{t('cloud_quota.usage', { used: autoSettings.cloudQuota.usage?.syncs || 0, limit: autoSettings.cloudQuota.limits?.syncs })}</p>
+              <p>{t('cloud_quota.storage', { used: (autoSettings.cloudQuota.storageBytes / 1048576).toFixed(1), limit: (autoSettings.cloudQuota.limits?.storageBytes / 1048576).toFixed(1) })}</p>
+              <p>{t('cloud_quota.operations', { reads: autoSettings.cloudQuota.usage?.reads || 0, readLimit: autoSettings.cloudQuota.limits?.reads, writes: autoSettings.cloudQuota.usage?.writes || 0, writeLimit: autoSettings.cloudQuota.limits?.writes })}</p>
+              <p>{t('cloud_quota.resets', { date: formatDate(autoSettings.cloudQuota.resetsAt) })}</p>
+            </>}
+          </div>
+        ) : <p className="mt-2 text-xs text-muted-foreground">{t('cloud_quota.private')}</p>}
+        {autoSettings && !autoSettings.cloudQuota && (
           <p className="mt-2 text-[10px] text-muted-foreground">
             {t('setup.sync.auto_sync_usage', {
               reads: Math.round((autoSettings.ratio?.reads || 0) * 100),

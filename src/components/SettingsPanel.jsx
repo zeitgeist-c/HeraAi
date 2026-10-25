@@ -23,6 +23,7 @@ import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
 import SyncPanel from './SyncPanel'
+import ModelManagement from './ModelManagement'
 
 const AVAILABLE_LANGUAGES = [
   { code: 'tr', name: 'Türkçe' },
@@ -563,6 +564,13 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('models')}
+            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'models' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <Sparkles className="h-3.5 w-3.5" /> {t('models_panel.title')}
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'settings' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
@@ -585,6 +593,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               </div>
             </div>
           )}
+
+          {activeTab === 'models' && <ModelManagement />}
 
           {activeTab === 'settings' && (
             <div className="hera-fade-in flex flex-col gap-5">
