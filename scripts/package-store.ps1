@@ -1,13 +1,14 @@
+param([switch]$AllowPrivateCloud)
 $ErrorActionPreference = 'Stop'
 
 # Mağaza (Chrome Web Store) paketi üretir: dist içindeki kopyadan `key`
 # alanını çıkarır, zip + sha256 yazar. Repodaki manifest.json'a dokunmaz —
 # yerel/zip kurulumlar aynı uzantı kimliğini korumaya devam eder.
-# Çıktı: release/HeraAi-<sürüm>-store.zip (+ .sha256)
+# Çıktı: release/store/HeraAi-<sürüm>.zip (+ .sha256)
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $repoRoot 'dist'
-$releaseDir = Join-Path $repoRoot 'release'
+$releaseDir = Join-Path $repoRoot 'release/store'
 $manifestPath = Join-Path $distDir 'manifest.json'
 
 if (-not (Test-Path -LiteralPath $manifestPath)) {
@@ -18,6 +19,14 @@ $manifestRaw = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $version = [string]$manifestRaw.version
 if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
   throw "Invalid extension version in ${manifestPath}: $version"
+}
+
+$cloudBuildPath = Join-Path $distDir 'cloud-build.json'
+if (-not (Test-Path -LiteralPath $cloudBuildPath)) { throw 'Cloud build metadata missing. Rebuild before packaging.' }
+$cloudBuild = Get-Content -LiteralPath $cloudBuildPath -Raw | ConvertFrom-Json
+if ($cloudBuild.version -ne $version) { throw 'Cloud build version mismatch.' }
+if ($cloudBuild.transport -ne 'gateway' -and -not $AllowPrivateCloud) {
+  throw 'Public packaging requires the cloud gateway. For an explicitly private/unlisted package use -AllowPrivateCloud.'
 }
 
 # key yalnızca mağazaya giden kopyadan çıkarılır (yeni mağaza kimliği + temiz kurulum).
@@ -34,7 +43,7 @@ if ($distManifest.PSObject.Properties.Name -contains 'key') {
 }
 try {
 
-$zipPath = Join-Path $releaseDir "HeraAi-$version-store.zip"
+$zipPath = Join-Path $releaseDir "HeraAi-$version.zip"
 
 $requiredFiles = @(
   (Join-Path $distDir 'manifest.json'),

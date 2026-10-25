@@ -1,4 +1,4 @@
-import { OPENROUTER_MODEL_IDS, getOpenRouterFallbackModel } from './models'
+import { OPENROUTER_MODEL_IDS, getOpenRouterFallbackModel, modelAllowsKey } from './models'
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 // Every OpenRouter request targets a model from the shared catalog. The
@@ -391,6 +391,7 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
   for (const [attemptIndex, attemptModel] of modelAttempts.entries()) {
     let attemptHadContent = false
     for (const entry of entries) {
+    if (!modelAllowsKey(attemptModel, provider, entry.id)) continue
     let hasContent = false
     let pendingModelEvent = null
     try {

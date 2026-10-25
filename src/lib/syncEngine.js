@@ -382,7 +382,7 @@ export function createSyncEngine({
         if (ilerlemeVarMi(imlec, yeni)) imlec = yeni
       }
 
-      if (belgeler.length < pullLimit) break
+      if (belgeler.length < (yanit.pageSize || pullLimit)) break
     }
 
     // Adım 9: imleç yalnızca ilerlediyse kaydedilir.

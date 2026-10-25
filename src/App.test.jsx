@@ -3646,6 +3646,21 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(currentStorage.modelSelectionMode).toBe('manual'));
   });
 
+  it('TC-MODELS-01 restores a personal API catalog and hides unselected models', async () => {
+    currentStorage.modelPreferences = {
+      models: [{ key: 'openrouter:personal/model', provider: 'openrouter', modelId: 'personal/model', label: 'Personal model', capabilities: {}, sourceKeyIds: ['key1'] }],
+      enabledKeys: ['openrouter:personal/model'],
+    };
+    currentStorage.selectedProvider = 'openrouter';
+    currentStorage.selectedModel = 'personal/model';
+    render(<App />);
+    const selector = await screen.findByTestId('model-selector');
+    await waitFor(() => expect(selector).toHaveTextContent('Personal model'));
+    fireEvent.click(selector);
+    expect(screen.getByRole('option', { name: 'Personal model' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Gemini 3.1/ })).not.toBeInTheDocument();
+  });
+
   it('restores a persisted manual model selection', async () => {
     currentStorage.selectedModel = 'gemini-3.7-flash';
     currentStorage.selectedProvider = 'gemini';

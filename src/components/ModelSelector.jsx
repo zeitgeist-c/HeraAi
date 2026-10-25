@@ -8,7 +8,7 @@ const PROVIDER_DOT = {
   ollama: 'bg-amber-500',
 }
 
-function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
+function ModelSelector({ selectedModel, selectedProvider: providerSelection, models, modelLabels, onModelChange }) {
   const { t } = useTranslation()
   const normalizedModels = (models || []).map(model => typeof model === 'string'
     ? { modelId: model, provider: 'gemini', label: modelLabels[model] || model }
@@ -22,7 +22,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
     .filter(group => group.models.length > 0)
 
   const [open, setOpen] = useState(false)
-  const selectedProvider = normalizedModels.find(model => model.modelId === selectedModel)?.provider
+  const selectedProvider = providerSelection || normalizedModels.find(model => model.modelId === selectedModel)?.provider
   const [userCollapsed, setUserCollapsed] = useState(() => (
     providerOrder.filter(provider => provider !== selectedProvider)
   ))
@@ -46,7 +46,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
     }
   }, [open ])
 
-  const selected = normalizedModels.find(model => model.modelId === selectedModel)
+  const selected = normalizedModels.find(model => model.modelId === selectedModel && model.provider === selectedProvider)
   const selectedLabel = selected?.label || modelLabels[selectedModel] || selectedModel
   const selectedDot = PROVIDER_DOT[selectedProvider] || 'bg-muted-foreground'
 
@@ -56,9 +56,9 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
       : [...current, provider])
   }
 
-  const chooseModel = (modelId) => {
+  const chooseModel = (modelId, provider) => {
     setOpen(false)
-    if (modelId !== selectedModel) onModelChange(modelId)
+    if (modelId !== selectedModel || provider !== selectedProvider) onModelChange(modelId, provider)
   }
 
   return (
@@ -106,7 +106,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                 {!collapsed && (
                   <div id={`${headingId}-models`} role="group" aria-labelledby={headingId} className="pb-0.5">
                     {group.models.map(model => {
-                      const isSelected = model.modelId === selectedModel
+                      const isSelected = model.modelId === selectedModel && model.provider === selectedProvider
                       const dot = PROVIDER_DOT[model.provider] || 'bg-muted-foreground'
                       return (
                         <button
@@ -115,7 +115,7 @@ function ModelSelector({ selectedModel, models, modelLabels, onModelChange }) {
                           role="option"
                           aria-selected={isSelected}
                           data-model-id={model.modelId}
-                          onClick={() => chooseModel(model.modelId)}
+                          onClick={() => chooseModel(model.modelId, model.provider)}
                           className={`flex min-h-8 w-full items-center justify-between gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60 ${isSelected ? 'font-semibold text-primary' : 'text-foreground'}`}
                         >
                           <span className="flex min-w-0 flex-1 items-center gap-1.5">

@@ -6,9 +6,9 @@
  * kez elle onay). Panelin kendi zamanlayıcısı izinsiz çalışır ve zaten doğru
  * davranışı verir: panel kapalıyken hiç koşmaz, yani boşuna kota harcamaz.
  *
- * Maliyet notu: boş bir koşu 1 okuma (cihaz durumu) + 1 yazma ("son görülme")
- * demektir; hiçbir şey değişmediyse çekme sorgusu 0 doküman okur. Asıl maliyet
- * periyot değil, cihazlar arası değişiklik trafiğidir.
+ * Maliyet notu: boş çekme sorgusu da en az bir okuma sayılır. Cihaz kontrolü,
+ * son görülme yazması ve yeni gateway sayaçları ayrıca işlem üretir. Yerel
+ * sayaç tahmindir; sunucunun hesap kotası veya Firebase faturalaması değildir.
  */
 import { isSyncedKey } from './syncContract'
 
