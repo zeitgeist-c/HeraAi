@@ -97,7 +97,7 @@ export function firstMergeSummary({ sessions = 0, settings = 0, apiKeys = 0 } = 
   }
 }
 
-/** Maskelenmiş hesap bilgisi: `mah***@gmail.com`. */
+/** Maskelenmiş hesap bilgisi: ilk üç karakter + `***` + alan adı (`exa***@gmail.com`). */
 export function maskAccount(email) {
   const ham = String(email || '').trim()
   if (!ham) return ''

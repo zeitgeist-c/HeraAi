@@ -17,6 +17,9 @@ describe('response duration', () => {
     expect(formatDurationMs(61_000)).toBe('1:01')
     expect(formatDurationMs(125_000)).toBe('2:05')
     expect(formatDurationMs(125_000, { live: true })).toBe('2:05.0')
+    // Yuvarlanmış saniye 60'a taşmamalı: 1:59.96 → 2:00.0
+    expect(formatDurationMs(119_960, { live: true })).toBe('2:00.0')
+    expect(formatDurationMs(3_599_960, { live: true })).toBe('60:00.0')
     expect(formatDurationMs(-5)).toBe('')
     expect(formatDurationMs(Number.NaN)).toBe('')
   })
