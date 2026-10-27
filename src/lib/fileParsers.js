@@ -301,10 +301,3 @@ export async function processAttachmentFile(file) {
     size: file.size, kind, ...(modelText ? { modelText } : {}),
   }
 }
-
-export const fileToBase64 = file => new Promise((resolve, reject) => {
-  const reader = new FileReader()
-  reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '')
-  reader.onerror = reject
-  reader.readAsDataURL(file)
-})

@@ -127,45 +127,6 @@ export function idbClear(db, store) {
   return calistir(db, store, 'readwrite', hedef => hedef.clear())
 }
 
-export function idbCount(db, store) {
-  return calistir(db, store, 'readonly', hedef => hedef.count())
-}
-
-/** Çoklu yazımı tek işlemde uygular (kuyruk boşaltma gibi toplu işler için). */
-export function idbPutMany(db, store, values) {
-  return new Promise((resolve, reject) => {
-    let tx
-    try {
-      tx = db.transaction(store, 'readwrite')
-    } catch (error) {
-      reject(error)
-      return
-    }
-    const hedef = tx.objectStore(store)
-    for (const value of values) hedef.put(value)
-    tx.oncomplete = () => resolve(values.length)
-    tx.onerror = () => reject(tx.error || new Error('idb_tx_failed'))
-    tx.onabort = () => reject(tx.error || new Error('idb_tx_aborted'))
-  })
-}
-
-export function idbDeleteMany(db, store, keys) {
-  return new Promise((resolve, reject) => {
-    let tx
-    try {
-      tx = db.transaction(store, 'readwrite')
-    } catch (error) {
-      reject(error)
-      return
-    }
-    const hedef = tx.objectStore(store)
-    for (const key of keys) hedef.delete(key)
-    tx.oncomplete = () => resolve(keys.length)
-    tx.onerror = () => reject(tx.error || new Error('idb_tx_failed'))
-    tx.onabort = () => reject(tx.error || new Error('idb_tx_aborted'))
-  })
-}
-
 /** Acknowledge only the snapshot sent; concurrent replacements must survive. */
 export function idbDeleteMatching(db, store, records) {
   return new Promise((resolve, reject) => {
