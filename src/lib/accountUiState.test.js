@@ -95,7 +95,7 @@ describe('ilk birleştirme özeti', () => {
 
 describe('hesap maskeleme', () => {
   it('e-postayı maskeler', () => {
-    expect(maskAccount('example@gmail.com')).toBe('mah***@gmail.com')
+    expect(maskAccount('example@gmail.com')).toBe('exa***@gmail.com')
     expect(maskAccount('saatsami@gmail.com')).toBe('saa***@gmail.com')
   })
 

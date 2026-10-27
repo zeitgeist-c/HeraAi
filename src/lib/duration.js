@@ -15,7 +15,11 @@ export function formatDurationMs(durationMs, { live = false } = {}) {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds - minutes * 60
   if (live) {
-    return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`
+    // Yuvarlama önce yapılır: 119.96 sn "1:60.0" değil "2:00.0" olmalı.
+    const tenths = Math.round(ms / 100)
+    const liveSeconds = Math.floor(tenths / 10)
+    const liveMinutes = Math.floor(liveSeconds / 60)
+    return `${liveMinutes}:${String(liveSeconds - liveMinutes * 60).padStart(2, '0')}.${tenths % 10}`
   }
   return `${minutes}:${String(Math.floor(seconds)).padStart(2, '0')}`
 }
