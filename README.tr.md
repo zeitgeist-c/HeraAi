@@ -1,73 +1,178 @@
-# HeraAi — Özel Chrome Yan Panel asistanı
+# HeraAi — Chrome Yan Panel'de özel yapay zekâ asistanı
 
 > English: [README.md](./README.md)
 
-Chrome Yan Panel'de yaşayan özel yapay zekâ asistanı. Gemini, OpenRouter Free ve Ollama Cloud ile sohbet, Tavily ile web araştırması, ekran kırpma, dosya eki ve sesli konuşma sunar. API anahtarları cihazda şifreli IndexedDB kasasında tutulur. İsteğe bağlı Google girişi, uçtan uca şifrelenmiş verileri Firebase/Firestore üzerinden eşitler.
+**Anahtarın olan bütün modeller, okuduğun sayfanın yanındaki panelde.**
 
-![HeraAi ekran görüntüleri](./docs/screenshots/)
+HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile sohbet eder, Tavily ile web araştırması yapar, ekrandan bir alan kırpar, dosya ekler ve cevaplarını sesli okur. API anahtarları cihazda şifreli bir IndexedDB kasasında tutulur. İsteğe bağlı Google girişi, uçtan uca şifrelenmiş verileri Firebase/Firestore üzerinden eşitler.
 
-> Ekran görüntüleri temiz kurulumdan ekleniyor (örnek veri yok). Yukarıdaki klasöre konacak.
+![HeraAi · Sohbet](./docs/screenshots/00-ana-sohbet.png)
+
+---
+
+## İçindekiler
+
+- [Ne yapar](#ne-yapar)
+- [Ekranlar, tek tek](#ekranlar-tek-tek)
+  - [1. Sohbet](#1-sohbet)
+  - [2. Kurulum — API anahtarları](#2-kurulum--api-anahtarları)
+  - [3. Ana ekran ve menü](#3-ana-ekran-ve-menü)
+  - [4. Model seçici](#4-model-seçici)
+  - [5. Modellerim](#5-modellerim)
+  - [6. Genel ayarlar](#6-genel-ayarlar)
+- [Kurulum](#kurulum)
+- [Sağlayıcılar ve modeller](#sağlayıcılar-ve-modeller)
+- [Anahtar yönetimi](#anahtar-yönetimi)
+- [Gizlilik ve isteğe bağlı bulut](#gizlilik-ve-isteğe-bağlı-bulut)
+- [Kaynaktan derleme](#kaynaktan-derleme)
+- [Bilinen sınırlar](#bilinen-sınırlar)
+- [Lisans](#lisans)
+
+---
+
+## Ne yapar
+
+| Yetenek | Ayrıntı |
+|---|---|
+| **Yan panel** | okuduğun sayfanın yanında açık kalır; sayfayı kapatmaz |
+| **Üç sağlayıcı** | Gemini (5 model), OpenRouter Free (2 model), Ollama Cloud (Nemotron 3 Ultra, GPT-OSS 120B) |
+| **Akan sohbet** | Gemini ve OpenRouter'da SSE, Ollama'da NDJSON |
+| **Görsel girdi** | görseller ve PDF sayfaları satır içi, ayrıca ekran alanı yakalama |
+| **URL Context** | herkese açık bir sayfayı kazımak yerine doğrudan okur |
+| **Tavily yedeği** | URL Context sayfaya ulaşamadığında web arama ve sayfa çıkarma |
+| **Anahtar rotasyonu** | ana anahtar veya dengeli rotasyon; otomatik geçiş, dinlenme ve yeniden deneme saati |
+| **Model kataloğu** | kendi anahtarlarının gördüğü modelleri getir, sohbet seçicisinde hangileri görünsün sen seç |
+| **Yerel kasa** | anahtarlar cihazda IndexedDB içinde şifreli |
+| **İsteğe bağlı eşitleme** | Google girişi, uçtan uca şifreli, Firebase/Firestore üzerinden |
+| **İki dilli arayüz** | Türkçe ve İngilizce, açık / koyu / sistem |
+
+---
+
+## Ekranlar, tek tek
+
+### 1. Sohbet
+
+![Sohbet](./docs/screenshots/00-ana-sohbet.png)
+
+Ana yüzey, yan panel boyutuna göre.
+
+- **Başlık** — oturum adı, yeniden adlandırma, sohbet içinde arama, Markdown olarak dışa aktarma, bütün sohbeti kopyalama, tam sayfada açma, yeni sohbet ve *daha fazla* menüsü.
+- **Karşılama** — `Merhaba, nasıl yardımcı olabilirim?` ve üç başlangıç kartı: **Web araştırması** (Tavily), **Ekrandan seç** (alan kırp ve sor), **Dosya ekle** (görsel, PDF, belge veya metin).
+- **Yazı alanı** — mesaj kutusu ve ekleme, sesli giriş, ekrandan alan seçme, ekli görselden OCR, seçileni çevirme ve gönderme araçları.
+- **Alt çubuk** — etkin model rozeti (`Gemini 3.1 Flash Lite`, `GEMINI` etiketiyle) ve yapay zekânın hata yapabileceği, önemli bilgilerin kontrol edilmesi gerektiği notu.
+
+Panel bilerek dar: tek sütun, tek yazı alanı, yer için yarışan yan çubuk yok.
+
+### 2. Kurulum — API anahtarları
+
+![Kurulum · API anahtarları](./docs/screenshots/01-kurulum-api.png)
+
+İlk açılış anahtar ister, sağlayıcı başına bir satır: **Gemini**, **OpenRouter**, **Ollama (görsel desteklemez)**, **Tavily arama**.
+
+Her satır kaç anahtar kayıtlı olduğunu gösterir (ekleyene kadar `0`) ve sağlayıcı başına birden çok anahtar kabul eder. `Kaydet ve Devam Et` kaydeder ve devam eder.
+
+Bu adım tamamlanmadan hiçbir şey çalışmaz — uygulama yanında anahtar taşımaz ve başkasının hesabı üzerinden aracılık yapmaz.
+
+### 3. Ana ekran ve menü
+
+![Ana ekran ve menü](./docs/screenshots/02-ana-ekran-menu.png)
+
+Başlıktan açılan *daha fazla* menüsü:
+
+| Öğe | Ne yapar |
+|---|---|
+| **Yeni Sohbet** | yeni oturum başlatır |
+| **Geçmiş** | sohbet geçmişi katmanı |
+| **İçe Aktar** / **Dışa Aktar** | sohbet alır veya verir |
+| **İstatistik** | kullanım istatistikleri |
+| **Yama Notları** | sürüm notları |
+| **Ayarlar** | ayar paneli |
+| **Temizle** | onaylı toplu silme |
+
+### 4. Model seçici
+
+![Model seçici](./docs/screenshots/03-model-secici.png)
+
+Alttaki rozet seçiciyi açar. Modeller sağlayıcıya göre gruplanır — önce `GEMINI`, sonra `OPENROUTER`, sonra `OLLAMA` — ve her giriş model adını ve görsel kabul edip etmediğini (kamera simgesi) gösterir.
+
+Model seçmek sonraki mesaj için etkin sağlayıcıyı değiştirir. Seçici yalnız *Modellerim*'de açtığın modelleri listeler, bu yüzden kısa kalır.
+
+### 5. Modellerim
+
+![Modellerim](./docs/screenshots/04-modellerim.png)
+
+Katalog görünümü, Kurulum içinde.
+
+`Modelleri getir / yenile` her sağlayıcıya anahtarlarının gerçekte ne gördüğünü sorar, sonra sonucu model başına bir onay kutusuyla listeler: ad, sağlayıcı ve API kimliği (`gemini-3.5-flash-lite`, `google/gemma-4-26b-a4b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`), ayrıca görsel destek için kamera işareti.
+
+Listenin üstündeki not dürüst: *"Listeye girmesi erişim veya ücretsiz kullanım garantisi değildir."* Katalogda görünmek, hesabın onu kullanabildiği veya ücretsiz kaldığı anlamına gelmez. Seçimler yalnız bu tarayıcıya kaydedilir.
+
+### 6. Genel ayarlar
+
+![Genel ayarlar](./docs/screenshots/05-genel-ayarlar.png)
+
+- **API anahtarı kullanım biçimi** — `Ana anahtarları kullan` veya `Anahtarları sırayla kullan`.
+- **Görünüm** — `Sistem Varsayılanı`, `Açık Tema`, `Koyu Tema`, ayrıca vurgu rengi seçici.
+- **Dil** — tüm arayüz için Türkçe veya İngilizce.
+- **Kaynakları göster** — araştırma cevabının kaynak kartlarını gösterip göstermeyeceği.
+- **Sistem komutu** — her konuşmayla gönderilen temel talimat (`Sen genel amaçlı bir yapay zekâ asistanısın…`). Düzenlemek asistanın senin hesabındaki varsayılan davranışını değiştirir, başkasınınkini değil.
+
+`Kaydet ve Devam Et` değişiklikleri uygular.
+
+---
 
 ## Sağlayıcılar ve modeller
 
-- **Gemini** (5 model) — akan sohbet + çoklu ortam, görsel/PDF satır içi, URL Context ile herkese açık sayfa okuma.
-- **OpenRouter Free** (2 model) — SSE akan sohbet + çoklu ortam.
-- **Ollama Cloud** — NDJSON akışla Nemotron 3 Ultra, GPT-OSS 120B.
-- **Tavily** — URL Context erişemediğinde web arama + sayfa çıkarma yedeği.
-- **Anahtar seçimi** — ana API veya dengeli rotasyon; otomatik geçiş, duraklatma, bekleme ve yeniden deneme saati.
+| Sağlayıcı | Modeller | Akış | Görsel |
+|---|---|---|---|
+| **Gemini** | 5 (3.1 Flash Lite → 3.8 Flash) | SSE | evet, görsel ve PDF sayfası |
+| **OpenRouter Free** | 2 | SSE | evet |
+| **Ollama Cloud** | Nemotron 3 Ultra, GPT-OSS 120B | NDJSON | hayır |
 
-## Özellikler
+Ayrıca **Tavily**: URL Context bir sayfaya ulaşamadığında web arama ve sayfa çıkarma.
 
-- **Web Araştırma** — her mesajda otomatik araştırma: önce Gemini URL Context, yedekte Tavily; Tavily yoksa sessizce atlanır.
-- **Ekran kırpma** — `captureVisibleTab` + canvas katmanı; kırpıntılar `heraai-attachments` IndexedDB'de (`chrome://` sayfalarında çalışmaz).
-- **Dosya eki** — görsel (Gemini/OpenRouter), PDF + ses yalnız Gemini, Office metin çıkarma.
-- **Sesli giriş** — yalnız Gemini dikte (konuşmayı yazıya çevirme).
-- **Oturumlar** — geçmiş katmanı, sohbet arama, içe/dışa aktarma.
-- **Şifreli bulut eşitleme** — ayarları, sohbetleri, istatistikleri, şifreli API anahtarlarını ve ek metadatasını tarayıcılar arasında taşır; ek dosyaları kaynak cihazda kalır ve sohbet bazında yalnız cihaz seçeneği vardır.
-- **Kurtarma ve yedek** — kurtarma koduyla cihaz bağlama, cihaz erişimini kaldırma ve şifreli tam yedek alma/geri yükleme.
-- **İki dil** — i18next ile TR/EN; açık/koyu/sistem teması; istatistik ve yanıt süresi.
-- **Arkaplan** — service worker + offscreen üretim worker'ı + sağ-tık menüleri.
+## Anahtar yönetimi
 
-## Kurulum
+- Anahtarlar cihazda **şifreli IndexedDB kasasında** durur.
+- Sağlayıcı başına birden çok anahtar desteklenir.
+- **Ana anahtar modu** her zaman ilkini kullanır. **Rotasyon modu** listeyi gezer, böylece bir anahtarın kotası oturumu tıkamaz.
+- Hata veren anahtar görünür bir geri sayımla dinlenmeye alınır; sıradaki devralır.
+- Bir kez başarısız olan istek sessizce ücretli bir yola tekrar gönderilmez.
 
-```bash
+## Gizlilik ve isteğe bağlı bulut
+
+- Anahtar ekleyene kadar hiçbir yere istek gitmez. Gömülü anahtar yok, aracı hesap yok.
+- Varsayılan kurulumda sohbetler ve anahtarlar cihazda kalır.
+- **Google girişi isteğe bağlıdır.** Açıldığında uçtan uca şifrelenmiş veri Firebase/Firestore üzerinden eşitlenir — sunucu şifreli metni saklar, düz sohbetlerini değil.
+- Ekran kırpmaları ve dosyalar yalnız o mesaj için seçtiğin sağlayıcıya gönderilir.
+
+## Kaynaktan derleme
+
+```powershell
 npm install
-npm run build
+npm run build          # dist/ altına üretim derlemesi
+npm run build:public   # herkese açık derleme (özel yapılandırma yok)
 ```
 
-`dist/` Chrome'a paketlenmemiş eklenti olarak yüklenir, Yan Panel açılır, Ayarlar'dan en az bir sağlayıcı anahtarı (+ Web Araştırma için Tavily) girilir.
+Sonra derlenen klasörü paketsiz uzantı olarak yükle:
 
-## Geliştirme
+1. `chrome://extensions` → **Geliştirici modu**nu aç.
+2. `Paketsiz yükle` → `dist/` (veya `.tools/public-build/`) klasörünü seç.
+3. Yan paneli araç çubuğundan aç.
 
-```bash
-npm install
-npm run dev      # HMR geliştirme sunucusu
-npm run preview  # üretim derlemesi önizleme
-npm run lint     # eslint — commit öncesi çalıştır
-npm run test     # vitest + jsdom (chrome API'leri taklit)
-npm run package  # release/HeraAi-<sürüm>.zip
+Testler:
+
+```powershell
+npx vitest run
 ```
 
-## Proje yapısı
+## Bilinen sınırlar
 
-```text
-manifest.json        MV3 (sidePanel, storage, identity, activeTab, scripting, contextMenus, offscreen)
-src/App.jsx          Yan Panel React uygulaması
-src/background/      service worker
-src/offscreen/       üretim worker'ı
-src/components/      Settings, ModelSelector, ChatMessage, History, Stats, ...
-src/lib/             providerApi, models, keyManager, fileParsers, voiceApi, autoRouter, ...
-src/locales/         en.json, tr.json
-```
-
-## Firebase kuralları
-
-Uyumlu [`firestore.rules`](./firestore.rules) dosyası depoda bulunur; eklenti paketlenirken bu kurallar canlı Firebase projesine yayımlanmaz. Bulut eşitlemeyi üretimde kullanmadan önce kuralları inceleyip Firebase projesine ayrıca dağıtın.
-
-## Katkı
-
-Yeni arayüz metinleri `en.json` + `tr.json` anahtarı ister; özellikler test senaryosuna bağlanır. Bkz. [.github/PULL_REQUEST_TEMPLATE.md](./.github/PULL_REQUEST_TEMPLATE.md).
+- **Ollama görsel desteklemez** — Kurulum'da böyle işaretlidir ve yazı alanının görsel araçları onun için sunulmaz.
+- Ücretsiz modeller hız sınırlıdır ve kullanılabilirlikleri değişir; katalog bir anlık görüntüdür, vaat değil.
+- İsteğe bağlı bulut canlı bir Firebase projesi ister; ücretsiz katmanın ötesi için faturalandırma gerekir. Yerel yol ikisini de istemez.
+- Eşitleme uçtan uca şifreli olduğu için kaybolan bir parola sunucu tarafından kurtarılamaz.
 
 ## Lisans
 
-Bkz. [LICENSE](./LICENSE) (bekliyor — teyit edilecek).
+MIT — bkz. [LICENSE](./LICENSE).
