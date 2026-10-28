@@ -944,7 +944,7 @@ describe('HeraAi App', () => {
   });
 
   it('applies the stored language once without restarting bootstrap', async () => {
-    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'tr';
+    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'en';
     await i18n.changeLanguage('tr');
     currentStorage = {
       theme: 'light',
@@ -968,8 +968,8 @@ describe('HeraAi App', () => {
     }
   });
 
-  it('renders the language choice as a segmented control and applies it', async () => {
-    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'tr';
+  it('renders the language choice as a 13-language select and applies it', async () => {
+    const previousLanguage = i18n.resolvedLanguage || i18n.language || 'en';
     await i18n.changeLanguage('tr');
     currentStorage = {
       theme: 'light',
@@ -983,19 +983,18 @@ describe('HeraAi App', () => {
       openSettingsPanel();
       fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
 
-      const group = screen.getByRole('radiogroup', { name: /Dil|Language/i });
-      const options = within(group).getAllByRole('radio');
-      expect(options).toHaveLength(2);
-      expect(options[0]).toHaveAttribute('aria-checked', 'true');
-      expect(options[1]).toHaveAttribute('aria-checked', 'false');
-      expect(within(group).getByRole('radio', { name: /TR/ })).toHaveTextContent('Türkçe');
-      expect(within(group).getByRole('radio', { name: /EN/ })).toHaveTextContent('English');
+      const selects = screen.getAllByRole('combobox', { name: /Dil|Language/i });
+      // Karşılama ekranındaki ilk açılış seçici + ayarlar panelindeki seçici.
+      const select = selects[selects.length - 1];
+      const options = within(select).getAllByRole('option');
+      expect(options).toHaveLength(13);
+      expect(select).toHaveValue('tr');
+      expect(within(select).getByRole('option', { name: 'Türkçe' })).toBeInTheDocument();
+      expect(within(select).getByRole('option', { name: 'English' })).toBeInTheDocument();
 
-      fireEvent.click(options[1]);
+      fireEvent.change(select, { target: { value: 'en' } });
 
       await waitFor(() => expect(i18n.resolvedLanguage).toBe('en'));
-      expect(options[1]).toHaveAttribute('aria-checked', 'true');
-      expect(options[0]).toHaveAttribute('aria-checked', 'false');
       // Seçim anında arayüz metni de değişmeli
       expect(await screen.findByRole('button', { name: /General Settings/ })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Genel Ayarlar/ })).toBeNull();
@@ -2306,7 +2305,10 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    expect(document.querySelectorAll('select')).toHaveLength(0);
+    // Karşılama ekranındaki tek select, ilk açılış dil seçimidir (13 dil).
+    const selects = document.querySelectorAll('select');
+    expect(selects).toHaveLength(1);
+    expect(within(selects[0]).getAllByRole('option')).toHaveLength(13);
     expect(document.querySelector('button[data-testid="model-selector"]')).toBeInTheDocument();
     expect(document.querySelector('svg.lucide-book-open')).not.toBeInTheDocument();
   });

@@ -393,7 +393,7 @@ function createQueuedGeneration(message, storedGeneration = null) {
     selectionMode: message.selectionMode ?? stored.selectionMode ?? 'manual',
     selectionReasonCode: message.selectionReasonCode ?? stored.selectionReasonCode ?? null,
     routerModel: message.routerModel ?? stored.routerModel ?? null,
-    language: message.language ?? stored.language ?? 'tr',
+    language: message.language ?? stored.language ?? 'en',
     status: 'queued',
     revision: normalizedRevision(stored.revision),
     content: typeof stored.content === 'string' ? stored.content : '',

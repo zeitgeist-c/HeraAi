@@ -135,6 +135,7 @@ describe('kurtarma kiti metni', () => {
       code: 'ABCDEFGH23456789ABCDEFGH23456789',
       email: 'saatsami@gmail.com',
       createdAt: Date.UTC(2026, 8, 22),
+      locale: 'tr',
     })
     expect(metin).toContain('HeraAi Kurtarma Kiti')
     expect(metin).toContain('ABCD-EFGH-2345-6789-ABCD-EFGH-2345-6789')

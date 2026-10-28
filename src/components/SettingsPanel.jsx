@@ -18,6 +18,7 @@ import {
   Cloud,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import LanguagePicker from './LanguagePicker'
 import { notifyError, notifySuccess } from '../lib/notify'
 import i18n from '../i18n'
 import { testKey } from '../lib/api'
@@ -25,10 +26,6 @@ import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } 
 import SyncPanel from './SyncPanel'
 import ModelManagement from './ModelManagement'
 
-const AVAILABLE_LANGUAGES = [
-  { code: 'tr', name: 'Türkçe' },
-  { code: 'en', name: 'English' },
-]
 
 const KEY_PROVIDERS = [
   { id: 'gemini', keyUrl: 'https://aistudio.google.com/api-keys' },
@@ -100,7 +97,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [customPrimaryColor, setCustomPrimaryColor] = useState(currentConfig?.customPrimaryColor || '#7c5cff')
 
   const [systemInstruction, setSystemInstruction] = useState(currentConfig?.systemInstruction || '')
-  const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'tr')
+  const [selectedLanguage, setSelectedLanguage] = useState(currentConfig?.language || 'en')
   const [showSources, setShowSources] = useState(currentConfig?.showSources === true)
   const [apiKeyUsageMode, setApiKeyUsageMode] = useState(
     currentConfig?.apiKeyUsageMode === 'balanced_rotation' ? 'balanced_rotation' : 'primary',
@@ -667,48 +664,10 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
-                <div className="min-w-0">
-                  <span className="block text-xs font-semibold text-foreground">
-                    {t('setup.general.language_title')}
-                  </span>
-                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
-                    {t('setup.general.language_description')}
-                  </span>
-                </div>
-                <div
-                  role="radiogroup"
-                  aria-label={t('setup.general.language_title')}
-                  className="grid shrink-0 grid-cols-2 gap-1.5"
-                >
-                  {AVAILABLE_LANGUAGES.map(lang => {
-                    const isActive = selectedLanguage === lang.code
-                    return (
-                      <button
-                        key={lang.code}
-                        type="button"
-                        role="radio"
-                        aria-checked={isActive}
-                        onClick={() => handleLanguageChange(lang.code)}
-                        className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border px-2 text-[11px] font-medium transition-all ${
-                          isActive
-                            ? 'border-primary/40 bg-primary/10 text-primary'
-                            : 'border-border/80 text-foreground hover:bg-secondary'
-                        }`}
-                      >
-                        <span
-                          className={`rounded px-1 py-px text-[9px] font-bold tracking-wide ${
-                            isActive ? 'bg-primary/20 text-primary' : 'bg-muted/70 text-muted-foreground'
-                          }`}
-                        >
-                          {lang.code.toUpperCase()}
-                        </span>
-                        {lang.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              <LanguagePicker
+                value={selectedLanguage}
+                onChange={handleLanguageChange}
+              />
 
               <div className="flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-secondary/35 p-3">
                 <div className="min-w-0">

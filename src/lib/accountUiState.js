@@ -125,7 +125,7 @@ export function formatRecoveryCode(code) {
  * Kurtarma kiti metni: kullanıcı `.txt` olarak indirir.
  * Kurtarma kodu tek başına hesabı açmaz; cihaz anahtarı da gerekir.
  */
-export function recoveryKitText({ code, email, createdAt = null, locale = 'tr' } = {}) {
+export function recoveryKitText({ code, email, createdAt = null, locale = 'en' } = {}) {
   const duzenli = formatRecoveryCode(code)
   const tarih = createdAt ? new Date(createdAt).toISOString().slice(0, 10) : ''
   const baslik = locale === 'tr' ? 'HeraAi Kurtarma Kiti' : 'HeraAi Recovery Kit'

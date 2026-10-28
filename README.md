@@ -151,7 +151,7 @@ Plus **Tavily** for web search and page extraction, used when URL context cannot
 ```powershell
 npm install
 npm run build          # production build into dist/
-npm run build:public   # public build (no private configuration)
+npm run package        # build + zip the extension for the store
 ```
 
 Then load the built folder as an unpacked extension:

@@ -151,7 +151,7 @@ Ayrıca **Tavily**: URL Context bir sayfaya ulaşamadığında web arama ve sayf
 ```powershell
 npm install
 npm run build          # dist/ altına üretim derlemesi
-npm run build:public   # herkese açık derleme (özel yapılandırma yok)
+npm run package        # derleme + mağaza için uzantı zip'i
 ```
 
 Sonra derlenen klasörü paketsiz uzantı olarak yükle:
