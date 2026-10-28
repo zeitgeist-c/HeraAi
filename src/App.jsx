@@ -2165,7 +2165,7 @@ function App() {
 
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage?.local) {
-      const translate = i18n.getFixedT(i18n.resolvedLanguage || i18n.language || 'tr')
+      const translate = i18n.getFixedT(i18n.resolvedLanguage || i18n.language || 'en')
       const id = Date.now().toString()
       const welcomeMessages = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: translate('chat.welcome') }]
       activeSessionIdRef.current = id
@@ -2280,7 +2280,7 @@ function App() {
         startupBehavior: result.startupBehavior || 'resume',
         systemInstruction: systemInstructionConfig.systemInstruction,
         customPrimaryColor: result.customPrimaryColor || '#7c5cff',
-        language: result.language || i18n.resolvedLanguage || i18n.language || 'tr',
+        language: result.language || i18n.resolvedLanguage || i18n.language || 'en',
         showSources: result.showSources === true,
         apiKeyUsageMode: result.apiKeyUsageMode === 'balanced_rotation' ? 'balanced_rotation' : 'primary',
       }
@@ -3826,7 +3826,7 @@ function App() {
       model: requestModel,
       provider: requestProvider,
       selectionMode: 'manual',
-      language: appConfig?.language || i18n.language || 'tr',
+      language: appConfig?.language || i18n.language || 'en',
       status: 'queued',
       revision: 0,
       content: '',
@@ -4732,6 +4732,15 @@ function App() {
               focusComposer()
             }}
             onAttach={() => fileInputRef.current?.click()}
+            language={appConfig?.language || i18n.language || 'en'}
+            onLanguageChange={(langCode) => {
+              i18n.changeLanguage(langCode)
+              try {
+                chrome.storage.local.set({ language: langCode })
+              } catch (error) {
+                console.error('Language persist failed', error)
+              }
+            }}
           />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-5 pb-8">

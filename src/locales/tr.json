@@ -493,7 +493,8 @@
     "save_error": "Model ayarları okunamadı veya kaydedilemedi.",
     "keep_one": "En az bir model seçili kalmalı.",
     "paid": "Ücretli",
-    "image": "Görsel"
+    "image": "Görsel",
+    "keep_other": "En az bir model seçili kalmalı."
   },
   "cloud_quota": {
     "owner": "Hesap sahibi: kullanıcı kotalarından muafsın.",

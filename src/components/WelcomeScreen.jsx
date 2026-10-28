@@ -1,7 +1,8 @@
 import { FileUp, Globe2, Scissors, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import LanguagePicker from './LanguagePicker'
 
-function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
+function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach, language = 'en', onLanguageChange }) {
   const { t } = useTranslation()
   const actions = [
     {
@@ -46,6 +47,12 @@ function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
         </p>
       </div>
 
+      {onLanguageChange && (
+        <div className="mb-4">
+          <LanguagePicker value={language} onChange={onLanguageChange} />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
         {actions.map(({ id, icon: Icon, title, description, action, active = false }) => (
           <button
@@ -63,8 +70,12 @@ function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
               <Icon className="h-4 w-4" />
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-xs font-semibold text-foreground">{title}</span>
-              <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">{description}</span>
+              {/* truncate clipped every translation longer than the English
+                  string, and German/Spanish/Russian are all longer than English.
+                  Two lines with a clamp keeps short languages on one line and
+                  lets long ones wrap instead of ending in an ellipsis. */}
+              <span className="block line-clamp-2 text-xs font-semibold leading-tight text-foreground">{title}</span>
+              <span className="mt-1 block line-clamp-2 text-[11px] leading-snug text-muted-foreground">{description}</span>
             </span>
           </button>
         ))}
