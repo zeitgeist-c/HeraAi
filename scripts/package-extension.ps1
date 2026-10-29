@@ -14,6 +14,13 @@ $version = [string]$manifest.version
 if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
   throw "Invalid extension version in ${manifestPath}: $version"
 }
+# Paket kapisi (AUD-HERAAI-002): kaynak package/manifest, build manifesti,
+# ZIP adi ve tag birlikte eslesmeli. Ayrismayi paketlemeden once yakala.
+$pkgVersion = (Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json).version
+$srcManifest = (Get-Content -LiteralPath (Join-Path $repoRoot 'manifest.json') -Raw | ConvertFrom-Json).version
+if ($version -ne $pkgVersion -or $version -ne $srcManifest) {
+  throw "Version mismatch: dist=$version package=$pkgVersion src-manifest=$srcManifest"
+}
 
 $zipPath = Join-Path $releaseDir "HeraAi-$version.zip"
 
