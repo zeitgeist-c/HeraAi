@@ -7,9 +7,22 @@
  * Dil seçen tüm kod bu yardımcıyı kullanmalı.
  */
 
-/** Dil kodunu temel dile indirger: 'tr', 'tr-TR', 'TR_tr' → 'tr'; diğerleri → 'en'. */
+/** Desteklenen 13 arayuz dili. */
+const SUPPORTED = new Set(['en', 'tr', 'de', 'es', 'fr', 'it', 'pt-BR', 'ru', 'pl', 'nl', 'zh-CN', 'ja', 'ko'])
+
+/** Dil kodunu normalize eder: bolge eki kirpilir ('pt-BR' korunur); desteklenmeyen -> 'en'. */
 export function baseLanguage(value) {
-  return String(value || '').toLowerCase().startsWith('tr') ? 'tr' : 'en'
+  const raw = String(value || '').replace('_', '-')
+  if (SUPPORTED.has(raw)) return raw
+  const lower = raw.toLowerCase()
+  for (const code of SUPPORTED) {
+    if (lower === code.toLowerCase() || lower.startsWith(code.toLowerCase() + '-')) return code
+  }
+  const short = lower.split('-')[0]
+  for (const code of SUPPORTED) {
+    if (code.toLowerCase().startsWith(short) || short.startsWith(code.toLowerCase())) return code
+  }
+  return 'en'
 }
 
 /** i18next'in yüklediği gerçek dil; bölge eki kırpılır. */
