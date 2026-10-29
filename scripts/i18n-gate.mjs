@@ -88,11 +88,19 @@ for (const code of locales) {
   const keys = new Set(Object.keys(messages));
 
   // Plural families are compared by stem, not by literal key: Chinese needs one
-  // form (keep) where English needs two (keep_one/keep_other), Polish three. A
-  // raw key-set diff would mark every such locale as missing and extra at once,
-  // so collapse each family to its stem and let the form count below decide.
+  // form where English needs two, Polish three. A raw key-set diff would mark
+  // every such locale as missing and extra at once, so collapse each family
+  // to its stem and let the form count below decide. Stem tolerance applies
+  // ONLY when English really carries 2+ forms of that stem; a lone _one key
+  // (e.g. keep_one without keep_other) is an ordinary key, not a family.
+  const stemForms = new Map();
+  for (const k of baseKeys) {
+    if (!PLURAL_SUFFIX.test(k)) continue;
+    const stem = k.replace(PLURAL_SUFFIX, '');
+    stemForms.set(stem, (stemForms.get(stem) || 0) + 1);
+  }
   const pluralStems = new Set(
-    [...baseKeys].filter((k) => PLURAL_SUFFIX.test(k)).map((k) => k.replace(PLURAL_SUFFIX, ''))
+    [...stemForms.entries()].filter(([, n]) => n >= 2).map(([stem]) => stem)
   );
   const normalise = (key) => {
     const stem = key.replace(PLURAL_SUFFIX, '');

@@ -4,6 +4,7 @@ import { Mic, ShieldCheck } from 'lucide-react'
 import { I18nextProvider, useTranslation } from 'react-i18next'
 
 import i18n from './i18n'
+import { baseLanguage } from './lib/language'
 import './index.css'
 
 export function MicPermissionPage() {
@@ -15,7 +16,7 @@ export function MicPermissionPage() {
     let disposed = false
     Promise.resolve(chrome.storage?.local?.get?.(['language']))
       .then(result => {
-        if (!disposed && ['en', 'tr'].includes(result?.language)) return i18n.changeLanguage(result.language)
+        if (!disposed && result?.language) return i18n.changeLanguage(baseLanguage(result.language))
         return undefined
       })
       .catch(() => undefined)

@@ -491,7 +491,7 @@
     "refreshed": "上次刷新：{{date}}",
     "refresh_error": "部分目录无法刷新：{{providers}}。已保留之前的条目。",
     "save_error": "无法加载或保存模型设置。",
-    "keep": "请至少保留一个选中的模型。",
+    "keep_one": "请至少保留一个选中的模型。",
     "paid": "付费",
     "image": "图片"
   },
