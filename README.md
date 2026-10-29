@@ -1,6 +1,6 @@
 # HeraAi — a private AI assistant in the Chrome Side Panel
 
-> Türkçe: [README.tr.md](./README.tr.md)
+> Turkish: [README.tr.md](./README.tr.md)
 
 **Every model you have keys for, in a panel beside the page you are reading.**
 
@@ -57,7 +57,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
 The main surface, sized for a side panel.
 
 - **Header** — session title, rename, search inside the chat, export as Markdown, copy the whole chat, open in a full page, new chat, and the *more* menu.
-- **Welcome state** — `Merhaba, nasıl yardımcı olabilirim?` with three starter cards: **Web araştırması** (Tavily research), **Ekrandan seç** (crop a region and ask about it), **Dosya ekle** (image, PDF, document or text).
+- **Welcome state** — `Hello, how can I help you?` with three starter cards: **Web research** (Tavily), **Select from screen** (crop a region and ask about it), **Attach file** (image, PDF, document or text).
 - **Composer** — the message box, plus tools for attach, voice input, screen-region capture, OCR from an attached image, translate the selection, and the send button.
 - **Footer** — the active model pill (`Gemini 3.1 Flash Lite` with a `GEMINI` tag), and the standing note that AI can be wrong and important facts should be checked.
 
@@ -69,7 +69,7 @@ The panel is deliberately narrow: one column, one composer, no sidebars competin
 
 First launch asks for keys, one row per provider: **Gemini**, **OpenRouter**, **Ollama (no vision support)**, **Tavily search**.
 
-Each row shows how many keys are registered (`0` until you add one) and accepts several keys per provider. `Kaydet ve Devam Et` saves and continues.
+Each row shows how many keys are registered (`0` until you add one) and accepts several keys per provider. `Save and continue` saves and continues.
 
 Nothing else works before this step — the app does not ship with a key and does not proxy through someone else's account.
 
@@ -81,13 +81,13 @@ The *more* menu, opened from the header:
 
 | Item | What it does |
 |---|---|
-| **Yeni Sohbet** | start a fresh session |
-| **Geçmiş** | the history overlay |
-| **İçe Aktar** / **Dışa Aktar** | import or export a chat |
-| **İstatistik** | usage statistics |
-| **Yama Notları** | changelog |
-| **Ayarlar** | the settings panel |
-| **Temizle** | bulk delete, with confirmation |
+| **New chat** | start a fresh session |
+| **History** | the history overlay |
+| **Import** / **Export** | import or export a chat |
+| **Statistics** | usage statistics |
+| **Release notes** | changelog |
+| **Settings** | the settings panel |
+| **Clear** | bulk delete, with confirmation |
 
 ### 4. Model picker
 
@@ -103,21 +103,21 @@ Choosing a model changes the active provider for the next message. The picker on
 
 The catalogue view, inside Setup.
 
-`Modelleri getir / yenile` asks each provider what your keys can actually see, then lists the result with a checkbox per model: name, provider and API identifier (`gemini-3.5-flash-lite`, `google/gemma-4-26b-a4b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`), plus a camera mark for vision.
+`Fetch / refresh models` asks each provider what your keys can actually see, then lists the result with a checkbox per model: name, provider and API identifier (`gemini-3.5-flash-lite`, `google/gemma-4-26b-a4b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`), plus a camera mark for vision.
 
-The note above the list is honest: *"Listeye girmesi erişim veya ücretsiz kullanım garantisi değildir."* Appearing in the catalogue does not mean the account can use it or that it stays free. Choices are saved to this browser only.
+The note above the list is honest: *"Being listed is not a guarantee of access or free use."* Appearing in the catalogue does not mean the account can use it or that it stays free. Choices are saved to this browser only.
 
 ### 6. General settings
 
 ![General settings](./docs/screenshots/05-genel-ayarlar.png)
 
-- **API key usage** — `Ana anahtarları kullan` (primary keys only) or `Anahtarları sırayla kullan` (rotate through all keys).
-- **Appearance** — `Sistem Varsayılanı`, `Açık Tema`, `Koyu Tema`, plus an accent colour picker.
+- **API key usage** — `Use primary keys` (primary keys only) or `Use keys in rotation` (rotate through all keys).
+- **Appearance** — `System default`, `Light theme`, `Dark theme`, plus an accent colour picker.
 - **Language** — Turkish or English for the whole interface.
 - **Show sources** — whether a research answer renders its source cards.
-- **System prompt** — the base instruction sent with every conversation (`Sen genel amaçlı bir yapay zekâ asistanısın…`). Editing it changes the assistant's default behaviour for your account, not for anyone else.
+- **System prompt** — the base instruction sent with every conversation (`You are a general-purpose AI assistant…`). Editing it changes the assistant's default behaviour for your account, not for anyone else.
 
-`Kaydet ve Devam Et` applies the changes.
+`Save and continue` applies the changes.
 
 ---
 
