@@ -2271,6 +2271,7 @@ function App() {
           'language',
           'showSources',
           'selectedText',
+          'pendingPageUrl',
           'selectedModel',
           'modelPreferences',
           'selectedProvider',

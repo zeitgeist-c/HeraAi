@@ -1988,6 +1988,24 @@ describe('HeraAi App', () => {
     expect(api.streamChat).not.toHaveBeenCalled();
   });
 
+  it('reads a pending page URL at bootstrap when the panel opens later', async () => {
+    currentStorage.pendingPageUrl = 'https://example.com/kapali-panel';
+    global.chrome.storage.local.get.mockImplementation((keys, callback) => {
+      const picked = {};
+      for (const k of (Array.isArray(keys) ? keys : [keys])) {
+        if (k in currentStorage) picked[k] = currentStorage[k];
+      }
+      if (typeof callback === 'function') callback(picked);
+      return Promise.resolve(picked);
+    });
+    render(<App />);
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const input = document.querySelector('textarea') || screen.getByRole('textbox');
+    await waitFor(() => expect(input.value).toBe('https://example.com/kapali-panel'));
+    expect(api.streamChat).not.toHaveBeenCalled();
+  });
+
   it('searches within the active chat from the header', async () => {
     render(<App />);
 
