@@ -4,8 +4,9 @@ export const DICTATION_PRIMARY_MODEL = 'gemini-3.1-flash-lite'
 export const DICTATION_FALLBACK_MODEL = 'gemini-3.5-flash-lite'
 export const DICTATION_TERTIARY_MODEL = 'gemini-3.6-flash'
 export const DICTATION_MODEL = DICTATION_PRIMARY_MODEL
-// Ucuncu model yalniz sunucu reddi (5xx) ve gecersiz istek (400) icin denenir;
-// kota/anahtar hatalarinda bosuna istek atilmaz.
+// The third model is tried only on server rejection (5xx) and invalid request
+// (400);
+// no pointless request is sent on quota/key errors.
 export const DICTATION_TERTIARY_CODES = new Set(['service_unavailable', 'invalid_request'])
 const REQUEST_TIMEOUT_MS = 200000
 

@@ -1,3 +1,10 @@
+---
+name: Bug report
+about: Something broken in the HeraAi side panel
+title: ''
+labels: bug
+---
+
 # Bug report
 
 ## What happened
@@ -9,6 +16,6 @@
 ## Expected
 
 ## Environment
-- WordArc version:
-- Windows version:
-- Install type (exe / source):
+- HeraAi version:
+- Chrome version:
+- Channel (store / unpacked):

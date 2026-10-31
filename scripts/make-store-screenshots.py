@@ -1,6 +1,6 @@
-# Mağaza ekran görüntüleri: dar yan-panel kırpıntılarını 1280x800 RGB PNG'ye çevirir.
-# Panel oranını korur (esneme yok), alfa yok, zemini panelin temasına uydurur (karışık set).
-# Kullanım: <venv-python> scripts/make-store-screenshots.py <girdi-klasörü> [çıktı-klasörü]
+# Store screenshots: converts narrow side-panel crops into 1280x800 RGB PNGs.
+# Keeps the panel aspect ratio (no stretching), no alpha, background matched to the panel theme (mixed set).
+# Usage: <venv-python> scripts/make-store-screenshots.py <input-dir> [output-dir]
 
 import glob
 import os
@@ -9,7 +9,7 @@ import sys
 from PIL import Image
 
 TARGET = (1280, 800)
-PANEL_H = 740  # panelin hedef yüksekliği (alt-üst pay bırakır)
+PANEL_H = 740  # target panel height (leaves a top/bottom margin)
 
 DARK_TOP, DARK_BOTTOM = (15, 23, 42), (49, 46, 129)
 LIGHT_TOP, LIGHT_BOTTOM = (248, 250, 252), (224, 231, 255)
@@ -41,7 +41,7 @@ def compose(src, dst):
     dark = is_dark(panel)
     bg = gradient(TARGET, *(DARK_TOP, DARK_BOTTOM) if dark else (LIGHT_TOP, LIGHT_BOTTOM))
     flat = Image.new('RGBA', panel.size, (0, 0, 0, 0))
-    # Alfa varsa zemine uygun düz renkle birleştir
+    # Flatten any alpha channel onto a solid colour that matches the background
     base = Image.new('RGB', panel.size, DARK_BOTTOM if dark else LIGHT_BOTTOM)
     base.paste(panel, (0, 0), panel)
     scale = PANEL_H / base.size[1]

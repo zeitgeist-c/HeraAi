@@ -186,8 +186,9 @@ function classifyGeminiError(err) {
   if (message.includes('rate_limit') || message.includes('rate limit') || message.includes('too many requests')) return 'cooldown'
   if (message.includes('resource_exhausted') || message.includes('quota') || message.includes('exhausted')) return 'quota_exceeded'
   if (status === 429) return 'cooldown'
-  // Ag tasima hatalari (CORS 'blocked by ...', failed to fetch) guvenlik
-  // filtresi degildir; anahtar denemesi ve lite fallback devam etmeli.
+  // Network transport errors (CORS 'blocked by ...', failed to fetch)
+  // are not the security
+  // filter; key retry and lite fallback must continue.
   if (
     err instanceof TypeError
     || message.includes('failed to fetch')
@@ -494,8 +495,9 @@ async function* attemptGeminiModel(entries, createStreamRequest, createFallbackR
     ok: false,
     classification: lastFailure?.classification || null,
     error: lastFailure?.error || null,
-    // Denetim notu: hiçbir çağıran okumuyor (ölü alan adayı) ama lib yüzeyleri
-    // kasıtlı olarak geniş tutuluyor — silinmedi, raporda.
+    // Audit note: no caller reads it (dead field candidate) but the lib
+    // surfaces are
+    // kept wide on purpose - not removed, see the report.
     retryKeysExhausted: true,
   }
 }
@@ -646,7 +648,8 @@ async function* streamRemoteWithGeminiFallback(providerId, messages, options, pr
     yield event
   }
   if (!terminalError) return
-  // Yarim cevap gosterildiyse Gemini'ye dusmeyiz: aksi halde kullanici hem
+  // If a partial answer was shown we do not fall back to Gemini: otherwise the user
+  // would see the partial answer and a full answer generated from scratch side by side.
   // yarim cevabi hem de bastan uretilen tam cevabi yan yana gorur.
   if (streamedContent || !REMOTE_GEMINI_FALLBACKABLE.has(terminalError?.code)) {
     yield { event: 'error', data: terminalError }
@@ -1201,8 +1204,9 @@ export async function* streamResearch(
   }
 
   if (!searchResult?.results?.length) {
-    // Tavily yok ya da erisilemedi: arastirma sessizce atlanir ve soru
-    // arastirma yapilmadan cevaplanir (kullaniciya hata gosterilmez).
+    // Tavily is missing or unreachable: research is skipped silently
+    // and the question is
+    // answered without research (no error is shown to the user).
     yield* streamChat(conversationMessages, options, providerKeys, signal, model, provider)
     return
   }

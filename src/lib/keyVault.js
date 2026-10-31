@@ -1,13 +1,13 @@
 /**
- * HeraAi 1.10.0 — şifreli API anahtarı kasası (Aşama 6).
+ * HeraAi 1.10.0 - encrypted API key vault (Stage 6).
  *
- * Anahtarlar artık `chrome.storage.local` içinde açık metin durmaz: her kayıt
- * cihaz yerel anahtarıyla (AES-256-GCM) şifrelenip IndexedDB'ye yazılır.
- * Cihaz anahtarı dışa aktarılamaz (`extractable: false`), bu yüzden kasa
- * dosyaları kopyalansa bile başka bir cihazda açılamaz.
+ * Keys no longer sit in plain text inside `chrome.storage.local`: every record is
+ * encrypted with the device's local key (AES-256-GCM) and written to IndexedDB. The
+ * device key cannot be exported (`extractable: false`), so even if the vault files
+ * are copied they cannot be opened on another device.
  *
- * Sağlayıcı havuzları kesin olarak ayrıdır: her sorgu `provider` ile
- * filtrelenir, bir sağlayıcının anahtarı diğerine asla sızmaz.
+ * Provider pools are strictly separate: every query is filtered by `provider`, a
+ * key from one provider never leaks into another.
  */
 
 import {
@@ -27,7 +27,7 @@ import { KEY_USAGE_MODE, orderKeysForRequest } from './keyRotation'
 
 export const PROVIDERS = Object.freeze(['gemini', 'tavily', 'openrouter', 'ollama'])
 
-/** Cihaz anahtarının meta store içindeki kimliği. */
+/** Id of the device key inside the meta store. */
 export const DEVICE_KEY_ID = 'deviceCryptoKey'
 
 export function maskKey(key) {
@@ -55,9 +55,9 @@ async function readUsageMode() {
 }
 
 /**
- * Metadata sıralaması: ana anahtar önce, kalanı createdAt artan. createdAt
- * eşitse id ile kararlı sıralanır; aksi halde IndexedDB'nin anahtar sırası
- * sonucu değiştirebilirdi.
+ * Metadata ordering: main key first, the rest by `createdAt` ascending. On equal
+ * `createdAt` it sorts stably by id; otherwise IndexedDB's key order could change
+ * the result.
  */
 export function sortKeyMetadata(entries) {
   return [...entries].sort((a, b) => {
@@ -82,16 +82,16 @@ export const KEY_METADATA_FIELDS = Object.freeze([
   'model',
 ])
 
-/** Kayıttan şifreli yükü çıkarır; dışarıya yalnızca açık metadata verilir. */
+/** Extracts the encrypted payload from a record; only plain metadata is exposed. */
 function metadataOf(kayit) {
   const { ciphertext: _ciphertext, ...acik } = kayit
   return acik
 }
 
 /**
- * Kasa örneği üretir. `db` açık bir IndexedDB, `deviceKey` ise AES-GCM
- * anahtarıdır; ikisi de enjekte edilebilir olduğu için testler gerçek
- * IndexedDB ve gerçek Web Crypto ile çalışır.
+ * Creates a vault instance. `db` is an open IndexedDB and `deviceKey` is the
+ * AES-GCM key; both are injectable, so the tests run against a real IndexedDB and
+ * real Web Crypto.
  */
 export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
   async function kayitlariGetir(provider) {
@@ -105,8 +105,8 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
   }
 
   /**
-   * Mükerrer kaydın kimliğini bulur; `addKey` ile aynı karşılaştırma kuralı:
-   * parmak izi verilmişse onunla, verilmemişse çözülerek karşılaştırılır.
+   * Finds the id of a duplicate record; the same comparison rule as `addKey`:
+   * by fingerprint when given, otherwise by decrypting and comparing.
    */
   async function mukerrerId(mevcut, { trimmed = '', fingerprint = null } = {}) {
     for (const kayit of mevcut) {
@@ -120,11 +120,11 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
   }
 
   /**
-   * Yeni anahtar ekler. Mükerrer anahtar reddedilir: parmak izi verilmişse
-   * onunla, verilmemişse çözülerek karşılaştırılır.
+   * Adds a new key. A duplicate key is rejected: compared by fingerprint when given,
+   * otherwise by decrypting.
    *
-   * `isPrimary` ve `createdAt` yalnızca göç sırasında verilir; böylece
-   * 1.9.4'teki ana anahtar seçimi ve sıralama aynen korunur.
+   * `isPrimary` and `createdAt` are supplied only during migration, so the 1.9.4 main
+   * key selection and ordering are preserved as they were.
    */
   async function anahtarEkle(provider, rawKey, { label = null, fingerprint = null, model = null, isPrimary = null, createdAt = null, id = null } = {}) {
     saglayiciDogrula(provider)
@@ -158,30 +158,30 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
   }
 
   return {
-    /** Maskeli metadata; ham anahtar asla dönmez. */
+    /** Masked metadata; the raw key is never returned. */
     async listKeys(provider) {
       saglayiciDogrula(provider)
       const kayitlar = await kayitlariGetir(provider)
       return sortKeyMetadata(kayitlar.map(metadataOf))
     },
 
-    /** Tek anahtarın ham değeri (istek anında çağrılır). */
+    /** Raw value of a single key (called at request time). */
     async getRawKey(provider, id) {
       saglayiciDogrula(provider)
       const kayit = (await kayitlariGetir(provider)).find(k => k.id === id)
       return kayit ? coz(kayit) : null
     },
 
-    /** Yeni anahtar ekler; mükerrer kontrolü ve kayıt şekli `anahtarEkle` içinde. */
+    /** Adds a new key; the duplicate check and the record shape live in `anahtarEkle`. */
     async addKey(provider, rawKey, secenekler = {}) {
       return anahtarEkle(provider, rawKey, secenekler)
     },
 
     /**
-     * Anahtarı ekler; aynı anahtar zaten farklı bir kimlikle kayıtlıysa hata
-     * yerine mevcut kaydın kimliğini döndürür (`created: false`). Eşitleme bu
-     * yüzden çakışmaz: aynı anahtarın iki cihazda ayrı kimliklerle eklenmiş
-     * olması tek kayda yakınsar. Elde kayıt yoksa orijinal hata geçer.
+     * Adds the key; if the same key is already registered under a different id it
+     * returns the existing record's id instead of an error (`created: false`). That is
+     * why sync does not conflict: the same key added under separate ids on two devices
+     * converges on a single record. If no record exists the original error passes through.
      */
     async ensureKey(provider, rawKey, secenekler = {}) {
       try {
@@ -247,7 +247,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       return degisti
     },
 
-    /** Sıralı ham anahtar listesi; ana anahtar önce, sonra createdAt artan. */
+    /** Ordered raw key list; main key first, then `createdAt` ascending. */
     async getAllKeysForRequest(provider) {
       saglayiciDogrula(provider)
       const kayitlar = sortKeyMetadata(await kayitlariGetir(provider))
@@ -258,7 +258,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       return keys
     },
 
-    /** Beklemede olmayan anahtarlar; hepsi beklemedeyse erken bitiş zamanı bildirilir. */
+    /** Keys that are not waiting; if all are waiting the early finish time is reported. */
     async resolveKeysForRequest(provider) {
       saglayiciDogrula(provider)
       const kayitlar = await kayitlariGetir(provider)
@@ -274,8 +274,9 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       if (hazir.length === 0) {
         return {
           keys: [],
-          // Yalnız gerçekten hepsi beklemedeyse "hız sınırı" denir; anahtarlar
-          // duraklatılmış/geçersizken kullanıcıyı boşuna beklemeye yönlendirmez.
+          // Only when truly all of them are waiting is it called a "rate limit";
+          // it does not
+          // send the user into a needless wait while keys are paused/invalid.
           allInCooldown: kayitlar.length > 0 && beklemede.length === kayitlar.length,
           earliestCooldownEnd: beklemede.length > 0
             ? Math.min(...beklemede.map(k => k.cooldownUntil))
@@ -296,7 +297,7 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
       return { keys, mode, allInCooldown: false, earliestCooldownEnd: null }
     },
 
-    /** Kasadaki toplam kayıt sayısı (sağlayıcı bazında). */
+    /** Total record count in the vault (per provider). */
     async countKeys() {
       const hepsi = await idbGetAll(db, store)
       const sayim = {}
@@ -308,14 +309,17 @@ export function createKeyVault({ db, deviceKey, store = VAULT_STORES.keys }) {
   }
 }
 
-/** Cihaz anahtarını meta store'dan okur; yoksa üretip saklar. */
+/** Reads the device key from the meta store; creates and stores one when absent. */
 export async function loadOrCreateDeviceKey(db, metaStore = VAULT_STORES.meta) {
   const mevcut = await idbGet(db, metaStore, DEVICE_KEY_ID)
   if (mevcut?.key) return mevcut.key
 
-  // Aday anahtar işlemden önce üretilir; oku-veya-yaz tek işlemde yapıldığı
-  // için iki bağlam (panel + service worker) yarışırsa yalnız biri yazılır ve
-  // ikisi de aynı anahtarı kullanır — aksi halde kayıtlar birbirini açamazdı.
+  // The candidate key is generated before the transaction; because
+  // read-or-write runs
+  // in a single transaction, if two contexts (panel + service worker) race
+  // only one
+  // writes and both use the same key - otherwise the records could not
+  // decrypt each other.
   const aday = await generateDeviceKey()
   const kayit = await idbGetOrPut(db, metaStore, DEVICE_KEY_ID, () => ({
     id: DEVICE_KEY_ID,
@@ -325,12 +329,7 @@ export async function loadOrCreateDeviceKey(db, metaStore = VAULT_STORES.meta) {
   return kayit?.key || aday
 }
 
-export async function hasDeviceKey(db, metaStore = VAULT_STORES.meta) {
-  const mevcut = await idbGet(db, metaStore, DEVICE_KEY_ID)
-  return Boolean(mevcut?.key)
-}
-
-/** Kasa veritabanını açar (eksik store'lar upgrade'de oluşturulur). */
+/** Opens the vault database (missing stores are created during the upgrade). */
 export function openVaultDatabase() {
   return openDatabase({
     name: DB_NAMES.vault,
@@ -344,16 +343,18 @@ let varsayilanDb = null
 let kasaSozu = null
 
 /**
- * Uygulama genelinde paylaşılan kasa (üretim yolu). Açılış tek bir söz
- * üzerinden yürür: eşzamanlı çağrılar aynı bağlantıyı ve aynı cihaz anahtarını
- * paylaşır, aksi halde iki farklı anahtar üretilip kayıtlar birbirini açamazdı.
+ * The vault shared across the app (production path). Opening runs through a single
+ * promise: concurrent calls share the same connection and the same device key,
+ * otherwise two different keys would be generated and the records could not decrypt each other.
  */
 export async function getDefaultVault() {
   if (varsayilanKasa) return varsayilanKasa
   if (!kasaSozu) {
     kasaSozu = (async () => {
-      // Yerel değişken şart: sıfırlama bu await'ler sırasında çalışırsa
-      // `varsayilanDb` null'a çekilir ve kasa null bağlantıyla kurulurdu.
+      // The local variable is essential: if a reset runs during these
+      // awaits
+      // `varsayilanDb` would be set to null and the vault would be built
+      // on a null connection.
       const db = await openVaultDatabase()
       const deviceKey = await loadOrCreateDeviceKey(db)
       varsayilanDb = db
@@ -370,14 +371,14 @@ export async function getDefaultVault() {
 }
 
 /**
- * Önbelleği bırakır ve veritabanı bağlantısını kapatır. Bağlantı açık kalsa
- * `deleteDatabase` bloklanır; testler ve hesap sıfırlama bu yolu kullanır.
+ * Drops the cache and closes the database connection. If the connection stayed open
+ * `deleteDatabase` would be blocked; tests and account reset use this path.
  */
 export function resetDefaultVault() {
   try {
     varsayilanDb?.close()
   } catch {
-    // Bağlantı zaten kapalıysa yoksayılır.
+    // Ignored when the connection is already closed.
   }
   varsayilanDb = null
   varsayilanKasa = null

@@ -4,7 +4,7 @@
 
 **Anahtarın olan bütün modeller, okuduğun sayfanın yanındaki panelde.**
 
-HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile sohbet eder, Tavily ile web araştırması yapar, ekrandan bir alan kırpar, dosya ekler ve cevaplarını sesli okur. API anahtarları cihazda şifreli bir IndexedDB kasasında tutulur. İsteğe bağlı Google girişi, uçtan uca şifrelenmiş verileri Firebase/Firestore üzerinden eşitler.
+HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile sohbet eder, Tavily ile web araştırması yapar, ekrandan bir alan kırpar, dosya ekler ve sesli girdi alır. API anahtarları cihazda şifreli bir IndexedDB kasasında tutulur. İsteğe bağlı Google girişi, uçtan uca şifrelenmiş verileri Firebase/Firestore üzerinden eşitler.
 
 ![HeraAi · Sohbet](./docs/screenshots/00-ana-sohbet.png)
 
@@ -20,7 +20,7 @@ HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile s
   - [4. Model seçici](#4-model-seçici)
   - [5. Modellerim](#5-modellerim)
   - [6. Genel ayarlar](#6-genel-ayarlar)
-- [Kurulum](#kurulum)
+- [Kurulum](#kaynaktan-derleme)
 - [Sağlayıcılar ve modeller](#sağlayıcılar-ve-modeller)
 - [Anahtar yönetimi](#anahtar-yönetimi)
 - [Gizlilik ve isteğe bağlı bulut](#gizlilik-ve-isteğe-bağlı-bulut)
@@ -35,7 +35,7 @@ HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile s
 | Yetenek | Ayrıntı |
 |---|---|
 | **Yan panel** | okuduğun sayfanın yanında açık kalır; sayfayı kapatmaz |
-| **Üç sağlayıcı** | Gemini (5 model), OpenRouter Free (2 model), Ollama Cloud (Nemotron 3 Ultra, GPT-OSS 120B) |
+| **Üç sağlayıcı** | Gemini (5 model), OpenRouter Free (3 model), Ollama Cloud (GPT-OSS 120B, Nemotron 3 Super, Gemma 4 31B) |
 | **Akan sohbet** | Gemini ve OpenRouter'da SSE, Ollama'da NDJSON |
 | **Görsel girdi** | görseller ve PDF sayfaları satır içi, ayrıca ekran alanı yakalama |
 | **URL Context** | herkese açık bir sayfayı kazımak yerine doğrudan okur |
@@ -44,7 +44,7 @@ HeraAi Chrome Yan Panel'de yaşar. Gemini, OpenRouter Free ve Ollama Cloud ile s
 | **Model kataloğu** | kendi anahtarlarının gördüğü modelleri getir, sohbet seçicisinde hangileri görünsün sen seç |
 | **Yerel kasa** | anahtarlar cihazda IndexedDB içinde şifreli |
 | **İsteğe bağlı eşitleme** | Google girişi, uçtan uca şifreli, Firebase/Firestore üzerinden |
-| **İki dilli arayüz** | Türkçe ve İngilizce, açık / koyu / sistem |
+| **Arayüz** | 13 dil, açık / koyu / sistem |
 
 ---
 
@@ -113,7 +113,7 @@ Listenin üstündeki not dürüst: *"Listeye girmesi erişim veya ücretsiz kull
 
 - **API anahtarı kullanım biçimi** — `Ana anahtarları kullan` veya `Anahtarları sırayla kullan`.
 - **Görünüm** — `Sistem Varsayılanı`, `Açık Tema`, `Koyu Tema`, ayrıca vurgu rengi seçici.
-- **Dil** — tüm arayüz için Türkçe veya İngilizce.
+- **Dil** — tüm arayüz için 13 dil.
 - **Kaynakları göster** — araştırma cevabının kaynak kartlarını gösterip göstermeyeceği.
 - **Sistem komutu** — her konuşmayla gönderilen temel talimat (`Sen genel amaçlı bir yapay zekâ asistanısın…`). Düzenlemek asistanın senin hesabındaki varsayılan davranışını değiştirir, başkasınınkini değil.
 
@@ -127,7 +127,7 @@ Listenin üstündeki not dürüst: *"Listeye girmesi erişim veya ücretsiz kull
 |---|---|---|---|
 | **Gemini** | 5 (3.1 Flash Lite → 3.8 Flash) | SSE | evet, görsel ve PDF sayfası |
 | **OpenRouter Free** | 2 | SSE | evet |
-| **Ollama Cloud** | Nemotron 3 Ultra, GPT-OSS 120B | NDJSON | hayır |
+| **Ollama Cloud** | GPT-OSS 120B, Nemotron 3 Super, Gemma 4 31B | NDJSON | hayır |
 
 Ayrıca **Tavily**: URL Context bir sayfaya ulaşamadığında web arama ve sayfa çıkarma.
 
@@ -157,7 +157,7 @@ npm run package        # derleme + mağaza için uzantı zip'i
 Sonra derlenen klasörü paketsiz uzantı olarak yükle:
 
 1. `chrome://extensions` → **Geliştirici modu**nu aç.
-2. `Paketsiz yükle` → `dist/` (veya `.tools/public-build/`) klasörünü seç.
+2. `Paketsiz yükle` → `dist/` klasörünü seç.
 3. Yan paneli araç çubuğundan aç.
 
 Testler:

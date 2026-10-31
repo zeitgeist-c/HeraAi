@@ -1,5 +1,6 @@
-// Yama notları veri dosyası. Yeni sürümde en üste { version, date, changes } ekle.
-// changes: { tr: [...], en: [...] } — kısa, öz madde listesi; tr/en sayısı eşit olmalı.
+// Patch notes data file. For a new version add { version, date, changes } at the top.
+// changes: { tr: [...], en: [...] } - a short, compact bullet list; the tr/en counts
+// must match.
 import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
@@ -1151,7 +1152,8 @@ export const CHANGELOG = Object.freeze([
   },
 ])
 
-// Başlıkta gösterilen sürüm tek kaynaktan gelir: manifest.json (release akışında
-// package.json ile eşitlenir). CHANGELOG yalnızca yama notu listesidir; bir sürümde
-// girdi atlanırsa bile başlık eski sürümü göstermez.
+// The version shown in the header comes from a single source: manifest.json (synced
+// with package.json in the release flow). CHANGELOG is only the patch note list;
+// even if an entry is skipped for a version, the header does not show the old
+// version.
 export const LATEST_VERSION = manifest.version ?? CHANGELOG[0]?.version ?? null

@@ -1,10 +1,10 @@
 param([switch]$AllowPrivateCloud)
 $ErrorActionPreference = 'Stop'
 
-# Mağaza (Chrome Web Store) paketi üretir: dist içindeki kopyadan `key`
-# alanını çıkarır, zip + sha256 yazar. Repodaki manifest.json'a dokunmaz —
-# yerel/zip kurulumlar aynı uzantı kimliğini korumaya devam eder.
-# Çıktı: release/store/HeraAi-<sürüm>.zip (+ .sha256)
+# Produces the Chrome Web Store package: strips the `key` field from the copy in
+# dist and writes the zip plus sha256. The repo manifest.json is left untouched, so
+# local/zip installs keep the same extension identity.
+# Output: release/store/HeraAi-<version>.zip (+ .sha256)
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $repoRoot 'dist'
@@ -29,12 +29,12 @@ if ($cloudBuild.transport -ne 'gateway' -and -not $AllowPrivateCloud) {
   throw 'Public packaging requires the cloud gateway. For an explicitly private/unlisted package use -AllowPrivateCloud.'
 }
 
-# key yalnızca mağazaya giden kopyadan çıkarılır (yeni mağaza kimliği + temiz kurulum).
+# key is stripped only from the copy that goes to the store (new store identity + clean install).
 $distManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $distManifestBackup = Get-Content -LiteralPath $manifestPath -Raw
 if ($distManifest.PSObject.Properties.Name -contains 'key') {
   $distManifest.PSObject.Properties.Remove('key')
-  # BOM'suz UTF-8 yaz (Set-Content -Encoding UTF8 BOM koyar, manifestte istemeyiz).
+  # Write UTF-8 without a BOM (Set-Content -Encoding UTF8 adds one, which we do not want in the manifest).
   $storeJson = $distManifest | ConvertTo-Json -Depth 20
   [System.IO.File]::WriteAllText($manifestPath, $storeJson, (New-Object System.Text.UTF8Encoding $false))
   Write-Host 'Removed key field from store manifest copy.'
@@ -98,7 +98,7 @@ $sidecarLine = "$hashValue  $([System.IO.Path]::GetFileName($zipPath))`n"
 [System.IO.File]::WriteAllText($sidecarPath, $sidecarLine, [System.Text.Encoding]::ASCII)
 Write-Host "Created $sidecarPath"
 } finally {
-  # dist olduğu gibi bırakılır: paketlenmemiş kurulumun kimliği değişmesin.
+  # dist is left as it is: the unpacked install must keep its identity.
   [System.IO.File]::WriteAllText($manifestPath, $distManifestBackup, (New-Object System.Text.UTF8Encoding $false))
   Write-Host 'Restored dist manifest with key.'
 }

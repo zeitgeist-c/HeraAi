@@ -1,10 +1,10 @@
 /**
- * Dil kodu yardımcıları.
+ * Language code helpers.
  *
- * Tarayıcı dili bölge ekli gelebilir (`tr-TR`); i18next çeviriyi `resolvedLanguage`
- * ile doğru yüklese de `i18n.language` bölge ekini taşır. Doğrudan `=== 'tr'`
- * karşılaştırması yapılırsa Türkçe arayüzde İngilizce metin/tarih çıkar.
- * Dil seçen tüm kod bu yardımcıyı kullanmalı.
+ * The browser language may come with a region (`tr-TR`); even though i18next loads the
+ * translation correctly via `resolvedLanguage`, `i18n.language` carries the region.
+ * A direct `=== 'tr'` comparison yields English text/dates in the Turkish UI.
+ * All code that selects a language must use this helper.
  */
 
 /** Desteklenen 13 arayuz dili. */
@@ -25,7 +25,7 @@ export function baseLanguage(value) {
   return 'en'
 }
 
-/** i18next'in yüklediği gerçek dil; bölge eki kırpılır. */
+/** The real language i18next loaded; the region suffix is trimmed. */
 export function currentLanguage(i18n) {
   return baseLanguage(i18n?.resolvedLanguage || i18n?.language)
 }

@@ -413,7 +413,7 @@ async function attemptRouterCall({ routerModel, apiKey, prompt, fetchImpl }) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${routerModel}:generateContent`
     const response = await fetchImpl(url, {
       method: 'POST',
-      // Guvenlik: API anahtari URL sorgusu yerine baslikta gonderilir (log/proxy sizintisi onlenir)
+      // Security: the API key is sent in a header instead of a URL query (prevents log/proxy leaks)
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -531,10 +531,13 @@ export function parseSearchGateResponse(rawText) {
   return null
 }
 
-// Anahtar kelime sezgisi sessiz kaldiginda modele sorulur: cevap
-// uretecek saglayicidan bagimsizdir, yalnizca Gemini anahtari ister.
-// Kararsiz kalinirsa (anahtar yok, hata, anlasilmaz cevap) null doner ve
-// cagiran taraf sezgiye geri duser; gonderim asla engellenmez.
+// When the keyword heuristic stays silent the model is asked: the answer
+// is
+// independent of the provider that will generate it, it only needs a
+// Gemini key.
+// When undecided (no key, error, unintelligible answer) it returns null
+// and the
+// caller falls back to the heuristic; the send is never blocked.
 export async function classifyNeedsWebSearch({
   text = '',
   geminiKeys = [],

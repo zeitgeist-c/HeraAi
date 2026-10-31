@@ -1,17 +1,17 @@
 /**
- * HeraAi 1.10.0 — Yedi günlük geri yükleme ve dışa aktarma (Aşama 12).
+ * HeraAi 1.10.0 - seven-day restore and export (Stage 12).
  *
- * İki çıktı ve bir geri dönüş mekanizması:
+ * Two outputs and one rollback mechanism:
  *
- * - **Hesap Kurtarma Kiti** (`heraai-recovery-kit.txt`): maskelenmiş hesap,
- *   kurtarma kodu, anahtar sürümü ve acil durum talimatları. API anahtarı ve
- *   sohbet içeriği **taşımaz**.
- * - **Şifreli Tam Veri Yedeği** (`.heraai-backup`): sohbetler, şifreli API
- *   kasası, ayarlar ve istatistiklerin `backupKey` ile AES-256-GCM şifrelenmiş
- *   JSON paketi. Sıkıştırma destekleniyorsa gzip uygulanır.
- * - **Geri dönüş noktaları**: son 7 gün için günde en fazla bir nokta; geri
- *   yükleme geçmiş `revisions` dokümanlarından istenen andaki durumu hesaplar
- *   ve yeni bir güncel sürüm olarak uygular.
+ * - **Account Recovery Kit** (`heraai-recovery-kit.txt`): masked account,
+ * recovery code, key version and emergency instructions. It does **not** carry the
+ * API key or chat content.
+ * - **Encrypted Full Data Backup** (`.heraai-backup`): a JSON package of chats, the
+ * encrypted API vault, settings and statistics, encrypted with `backupKey` using
+ * AES-256-GCM. gzip is applied when compression is supported.
+ * - **Restore points**: at most one point per day for the last 7 days; a restore
+ * computes the state at the requested time from past `revisions` documents and
+ * applies it as a new current version.
  */
 
 import {
@@ -25,16 +25,16 @@ import {
 import { bytesToBase64, decryptJson, encryptJson } from './syncCrypto'
 import { maskAccount } from './accountUiState'
 
-/** Yedek dosya uzantısı. */
+/** Backup file extension. */
 export const BACKUP_EXTENSION = '.heraai-backup'
 
-/** Yedek paket biçimi sürümü. */
+/** Backup package format version. */
 export const BACKUP_FORMAT_VERSION = 1
 
-/** Geri dönüş noktası saklama süresi (gün). */
+/** Restore point retention (days). */
 export const RESTORE_POINT_DAYS = 7
 
-/** Kurtarma kiti dosya adı. */
+/** Recovery kit file name. */
 export const RECOVERY_KIT_FILENAME = 'heraai-recovery-kit.txt'
 
 const GUN_MS = 24 * 60 * 60 * 1000
@@ -44,7 +44,7 @@ function sayi(deger) {
   return Number.isFinite(n) ? n : null
 }
 
-/** Yerel gün anahtarı (`YYYY-MM-DD`); bulut yollarıyla aynı biçim. */
+/** Local day key (`YYYY-MM-DD`); same format as the cloud paths. */
 export function dateKeyFor(value) {
   const d = value instanceof Date ? value : new Date(value)
   const pad = v => String(v).padStart(2, '0')
@@ -52,11 +52,12 @@ export function dateKeyFor(value) {
 }
 
 /**
- * Son `days` gün için geri dönüş noktası anahtarları (en yeni önce).
- * Günde en fazla bir nokta: aynı gün anahtarı tekrar üretilmez.
+ * Restore point keys for the last `days` days (newest first).
+ * At most one point per day: the same day key is not produced twice.
  */
 export function planRestorePoints({ now = Date.now(), days = RESTORE_POINT_DAYS } = {}) {
-  // `days: 0` açıkça verildiğinde varsayılana düşmemeli; en az bir nokta üretilir.
+  // When `days: 0` is given explicitly it must not fall back to the default; at
+  // least one point is produced.
   const ham = Number(days)
   const adet = Number.isFinite(ham) ? Math.max(1, Math.trunc(ham)) : RESTORE_POINT_DAYS
   const anahtarlar = []
@@ -70,7 +71,7 @@ export function planRestorePoints({ now = Date.now(), days = RESTORE_POINT_DAYS 
   return anahtarlar
 }
 
-/** Yedek paketini kurar; içerik açık metindir, şifreleme ayrı adımda yapılır. */
+/** Builds the backup package; the content is plain text, encryption is a separate step. */
 export function buildBackupPayload({
   sessions = [],
   apiKeys = {},
@@ -101,12 +102,12 @@ export function buildBackupPayload({
   }
 }
 
-/** Sıkıştırma destekleniyor mu? (`CompressionStream` tarayıcıda vardır.) */
+/** Is compression supported? (`CompressionStream` exists in the browser.) */
 export function compressionAvailable() {
   return typeof globalThis.CompressionStream === 'function'
 }
 
-/** Baytları gzip'ler; desteklenmiyorsa ham baytı döner. */
+/** gzip-compresses the bytes; returns the raw bytes when unsupported. */
 export async function compressBytes(bytes) {
   if (!compressionAvailable()) return { bytes, compressed: false }
   const akis = new globalThis.CompressionStream('gzip')
@@ -131,7 +132,7 @@ export async function compressBytes(bytes) {
   return { bytes: sonuc, compressed: true }
 }
 
-/** gzip'lenmiş baytları açar. */
+/** Decompresses gzip-compressed bytes. */
 export async function decompressBytes(bytes) {
   const akis = new globalThis.DecompressionStream('gzip')
   const yazici = akis.writable.getWriter()
@@ -164,9 +165,9 @@ function decoder() {
 }
 
 /**
- * Şifreli tam veri yedeği üretir: `.heraai-backup` içeriği.
- * Zarf açık alanlar (biçim, sürüm, tarih, sayaçlar) + `backupKey` ile
- * şifrelenmiş veri taşır; sohbet içeriği düz metin olarak dosyada görünmez.
+ * Produces the encrypted full data backup: the `.heraai-backup` content.
+ * The envelope carries plain fields (format, version, date, counters) plus data
+ * encrypted with `backupKey`; chat content is not visible as plain text in the file.
  */
 export async function encryptBackup({
   backupKey,
@@ -194,7 +195,7 @@ export async function encryptBackup({
   }
 }
 
-/** Şifreli yedeği çözer; bozuk/yanlış anahtar `backup_decrypt_failed` üretir. */
+/** Decrypts the encrypted backup; a corrupt/wrong key yields `backup_decrypt_failed`. */
 export async function decryptBackup({ backupKey, envelope } = {}) {
   if (!backupKey) throw new Error('backup_key_missing')
   if (!envelope?.ciphertext || !envelope?.nonce) throw new Error('backup_envelope_invalid')
@@ -248,15 +249,17 @@ function base64ToBytesSafe(value) {
 }
 
 /**
- * Geçmiş revizyonlardan istenen andaki durumu hesaplar.
+ * Computes the state at the requested moment from past revisions.
  *
- * Her varlık için `targetTimeMs` anından **sonra olmayan** en yeni sürüm
- * seçilir. Hiçbir sürüm uygun değilse varlık atlanır (o anda yoktu).
+ * For each entity the newest version that is **not after** `targetTimeMs` is
+ * chosen. If no version qualifies the entity is skipped (it did not exist then).
  *
  * @param {object} options
- * @param {Array} options.entities Güncel varlıklar (`{ opaqueEntityId, entityType, entityVersion, document }`).
- * @param {Array} options.revisions Geçmiş sürümler (`{ opaqueEntityId, entityType, revisionId, entityVersion, document }`).
- * @param {number} options.targetTimeMs Hedef an.
+ * @param {Array} options.entities Current entities (`{ opaqueEntityId, entityType, entityVersion,
+ * document }`).
+ * @param {Array} options.revisions Past versions (`{ opaqueEntityId, entityType, revisionId,
+ * entityVersion, document }`).
+ * @param {number} options.targetTimeMs Target moment.
  */
 export function restoreStateAt({ entities = [], revisions = [], targetTimeMs } = {}) {
   const hedef = sayi(targetTimeMs)
@@ -289,7 +292,8 @@ export function restoreStateAt({ entities = [], revisions = [], targetTimeMs } =
       document: en.document,
       deleted: en.document?.deleted === true,
       revisionId: en.revisionId || buildRevisionId(en.entityVersion),
-      // Güncel sürüm hedef andan yeniyse geri alma gerçekten bir şey değiştirir.
+      // If the current version is newer than the target moment the restore
+      // really changes something.
       changed: !guncel || compareEntityVersions(guncel.entityVersion, en.entityVersion) !== 0,
     })
   }
@@ -297,7 +301,7 @@ export function restoreStateAt({ entities = [], revisions = [], targetTimeMs } =
   return secilenler.sort((a, b) => (a.opaqueEntityId < b.opaqueEntityId ? -1 : 1))
 }
 
-/** Saklama süresi dolmuş revizyonları süzer (varsayılan 7 gün). */
+/** Filters out revisions past their retention (7 days by default). */
 export function pruneExpiredRevisions(revisions, { now = Date.now(), days = RESTORE_POINT_DAYS } = {}) {
   const kalanlar = []
   const atilanlar = []
@@ -314,8 +318,8 @@ export function pruneExpiredRevisions(revisions, { now = Date.now(), days = REST
 }
 
 /**
- * Hesap Kurtarma Kiti metni (`heraai-recovery-kit.txt`).
- * API anahtarı ve sohbet içeriği taşımaz.
+ * Account Recovery Kit text (`heraai-recovery-kit.txt`).
+ * It does not carry the API key or chat content.
  */
 export function recoveryKitDocument({
   code,
@@ -391,12 +395,12 @@ export function recoveryKitDocument({
   return satirlar.filter(s => s !== null).join('\n')
 }
 
-/** Yedek dosya adı: `heraai-yedek-2026-09-22.heraai-backup`. */
+/** Backup file name: `heraai-yedek-2026-09-22.heraai-backup`. */
 export function backupFileName({ now = Date.now(), prefix = 'heraai-yedek' } = {}) {
   return `${prefix}-${dateKeyFor(now)}${BACKUP_EXTENSION}`
 }
 
-/** Yedek zarfının özeti (arayüzde gösterilir). */
+/** Summary of the backup envelope (shown in the UI). */
 export function summarizeBackup(envelope) {
   if (!envelope) return null
   return {
@@ -408,7 +412,7 @@ export function summarizeBackup(envelope) {
   }
 }
 
-/** Katmanın tanıtımı (test ve dokümantasyon). */
+/** Introduction of the layer (tests and documentation). */
 export function describeBackupLayer() {
   return {
     extension: BACKUP_EXTENSION,

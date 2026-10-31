@@ -1,13 +1,12 @@
 /**
- * Beste alanındaki tekerlek olayının hangi kaydırıcıya gideceğine karar verir.
+ * Decides which scroller the wheel event in the composer goes to.
  *
- * Neden ayrı modül: `defaultPrevented` ile doğrulanamıyor — React tekerlek
- * dinleyicisini pasif bağladığı için `preventDefault()` gözlemlenebilir bir iz
- * bırakmaz. Karar saf bir fonksiyona çıkarılınca hem üretim yolu hem testler
- * aynı mantığı kullanır.
+ * Why a separate module: it cannot be verified through `defaultPrevented` - React binds the
+ * wheel listener passively, so `preventDefault()` leaves no observable trace. Once the decision
+ * is extracted into a pure function, both the production path and the tests use the same logic.
  *
- * Kural: iç kaydırıcı (yazı alanı) kendi içinde kayabiliyorsa tekerleği o
- * tüketir; başına veya sonuna geldiğinde devamı sohbete geçer (zincirleme).
+ * Rule: if the inner scroller (the composer field) can scroll on its own it consumes the wheel;
+ * when it reaches its top or end the rest goes on to the chat (chaining).
  */
 
 export const WHEEL_TARGET_CHAT = 'chat'
@@ -20,7 +19,8 @@ export function resolveWheelTarget(deltaY, innerScroller) {
   const clientHeight = Number(innerScroller.clientHeight) || 0
   const scrollTop = Number(innerScroller.scrollTop) || 0
 
-  // İç kaydırıcı gerçekten kayabiliyor mu? Kayamıyorsa tekerlek sohbete gider.
+  // Can the inner scroller really scroll? If it cannot, the wheel goes to the
+  // chat.
   if (scrollHeight <= clientHeight + 1) return WHEEL_TARGET_CHAT
 
   const atTop = scrollTop <= 0

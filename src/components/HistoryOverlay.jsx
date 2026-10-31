@@ -37,7 +37,7 @@ function HistoryOverlay({
   const cancelBulkDeleteRef = useRef(null)
   const bulkDeleteWasOpenRef = useRef(false)
 
-  // Geçmişte yalnız gerçekten başlamış sohbetler listelenir (en az bir kullanıcı mesajı).
+  // History lists only chats that have really started (at least one user message).
   const startedSessions = sessions.filter(session => (
     (session?.messages || []).some(message => message?.role === 'user')
   ))

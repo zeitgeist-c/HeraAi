@@ -1,6 +1,6 @@
-# Mağaza görselleri üretir: küçük tanıtım bloğu (440x280, koyu) + kayan yazı (1400x560, açık).
-# Çıktılar 24-bit RGB PNG (alfa yok) — Chrome Web Store şartına uygun.
-# Kullanım: <venv-python> scripts/make-store-graphics.py [çıktı-klasörü]
+# Generates store graphics: small promo tile (440x280, dark) + marquee (1400x560, light).
+# Outputs are 24-bit RGB PNGs (no alpha) — required by the Chrome Web Store.
+# Usage: <venv-python> scripts/make-store-graphics.py [output-dir]
 
 import os
 import sys
@@ -80,7 +80,7 @@ def main():
     small.save(p1)
     marquee.save(p2)
     for p, im in ((p1, small), (p2, marquee)):
-        print(p, im.size, im.mode, os.path.getsize(p), 'bayt')
+        print(p, im.size, im.mode, os.path.getsize(p), 'bytes')
 
 
 if __name__ == '__main__':

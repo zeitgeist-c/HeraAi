@@ -79,9 +79,10 @@ function appendToInputValue(current, text) {
   return `${safeCurrent}${separator}${safeText}`
 }
 
-// Arama kapisi: sezgi sessiz kaldiginda Gemini'ye sorulur. Cevap uretecek
-// saglayicidan bagimsiz calisir; kararsizlikta null doner ve gonderim
-// sezgiye geri duser. 8 sn tavan, asla gonderimi bekletmez.
+// Search gate: when the heuristic stays silent, Gemini is asked. Runs
+// independently of the answer provider; returns null when undecided and
+// the send falls back to the heuristic. 8 s ceiling, never delays the
+// send.
 const SEARCH_GATE_TIMEOUT_MS = 8_000
 
 async function resolveSearchGate(userText) {
@@ -108,7 +109,7 @@ const BOOTSTRAP_STATE_TIMEOUT_MS = 5_000
 const BOOTSTRAP_STATE_RETRY_DELAYS_MS = [250, 750, 1500]
 const FINALIZATION_RETRY_DELAYS_MS = [250, 750, 1500]
 const SESSION_TITLE_MAX_LENGTH = 80
-// Yazı alanı: yazdıkça büyür (min 66px) ve kullanıcının seçtiği tavana kadar uzar.
+// Composer field: grows as you type (min 66px) up to the ceiling the user picks.
 const COMPOSER_MIN_HEIGHT_PX = 66
 const COMPOSER_DEFAULT_MAX_HEIGHT_PX = 192
 const COMPOSER_HEIGHT_STEP_PX = 16
@@ -593,8 +594,8 @@ function App() {
     }
   }, [])
 
-  // Otomatik eşitleme (panel içi zamanlayıcı): ek izin gerekmez ve panel
-  // kapalıyken hiç çalışmaz, böylece boşuna kota harcanmaz.
+  // Automatic sync (in-panel timer): needs no extra permission and never
+  // runs while the panel is closed, so no quota is wasted.
   const autoSyncSchedulerRef = useRef(null)
   const autoSyncIntervalRef = useRef(undefined)
   const autoSyncUsageRef = useRef(undefined)
@@ -623,7 +624,7 @@ function App() {
           },
         )
       } catch {
-        // Depolama yoksa varsayılan aralık kullanılır.
+        // Without storage the default interval is used.
       }
     }
     readAutoSettings()
@@ -639,7 +640,8 @@ function App() {
       try {
         chrome.storage?.onChanged?.removeListener?.(listener)
       } catch {
-        // Dinleyici kaldırılamazsa sorun değil; efekt zaten kapanıyor.
+        // If the listener cannot be removed it does not matter; the
+        // effect is closing anyway.
       }
     }
   }, [])
@@ -656,9 +658,11 @@ function App() {
       }
     })
     const scheduler = createAutoSyncScheduler({
-      // Periyodik tur: aralık eşiğine takılan "uyandır" yolu.
+      // Periodic round: the "wake" path that is subject to the
+      // interval threshold.
       requestSync: () => sendSyncMessage('SYNC_WAKE'),
-      // Yerel değişiklik: eşiğe takılmayan yol, değişiklik hemen gitsin.
+      // Local change: the path not subject to the threshold, so the
+      // change goes out at once.
       requestSyncAfterChange: () => sendSyncMessage('SYNC_NOW'),
       isHidden: () => document.visibilityState === 'hidden',
       getLastActivityAt: () => lastActivityAtRef.current,
@@ -680,7 +684,7 @@ function App() {
     try {
       chrome.runtime?.sendMessage?.({ type: 'SYNC_WAKE' }, () => void chrome.runtime?.lastError)
     } catch {
-      // Senkron özelliği bulunmayan test/tarayıcı bağlamında uygulama açılmaya devam eder.
+      // In a test/browser context without the sync feature the app keeps opening.
     }
   }, [])
   useEffect(() => {
@@ -881,10 +885,10 @@ function App() {
   }, [generateTitle])
 
   const storageWriteFailureNotifiedRef = useRef(false)
-  // Depolama yazımı (kota/izin) sessizce kaybolursa sohbet yeniden açılışta
-  // kaybolur; kullanıcıya bir kez görünür uyarı göster. i18n.t kullanılıyor
-  // çünkü `t` bağımlılığı bu callback'i ve onu taşıyan bootstrap efektini
-  // kararsız yapardı.
+  // If the storage write (quota/permission) is lost silently the chat is
+  // lost on reopen; show the user a visible warning once. i18n.t is used
+  // because a `t` dependency would make this callback and the bootstrap
+  // effect that carries it unstable.
   const reportStorageWriteFailure = useCallback((context, error) => {
     console.error(context, error)
     if (storageWriteFailureNotifiedRef.current) return
@@ -909,7 +913,8 @@ function App() {
       if (writeEpoch !== storageWriteEpochRef.current) return false
       await setChromeStorage(values)
       if (touchesSyncedKeys(values)) {
-        // Yerel bir değişiklik buluta gidecek: kısa gecikmeyle otomatik eşitleme.
+        // A local change is going to the cloud: automatic sync with a short
+        // delay.
         autoSyncSchedulerRef.current?.noteLocalChange()
       }
       if (Array.isArray(values?.sessions)) {
@@ -1231,9 +1236,9 @@ function App() {
       sessionsRef.current,
       msgIdCounter,
       authoritativeGeneration,
-      // i18n.t: `t` kullanılırsa dil değişiminde kimliği değişir, bu callback'i ve
-      // onu bağımlılık olarak taşıyan bootstrap efektini yeniden çalıştırırdı.
-      // i18n her çağrıda güncel dili kullanır.
+      // i18n.t: with `t` the identity would change on a language switch, which
+      // would re-run this callback and the bootstrap effect carrying it as a
+      // dependency. i18n uses the current language on every call.
       i18n.t('chat.new_chat'),
     )
     if (!repaired.changed) return Promise.resolve(false)
@@ -1961,8 +1966,9 @@ function App() {
     if (!tab) return null;
 
     const dataUrl = await new Promise((resolve, reject) => {
-      // captureVisibleTab normalde hemen sonuçlanır; yanıt gelmezse kırpma
-      // akışı sessizce kilitlenmesin diye zamanaşımıyla reddedilir.
+      // captureVisibleTab normally resolves at once; if no answer arrives
+      // it is rejected with a timeout so the crop flow does not lock up
+      // silently.
       const timeoutId = setTimeout(
         () => reject(new Error('screenshot_capture_timeout')),
         SCREENSHOT_CAPTURE_TIMEOUT_MS,
@@ -1980,8 +1986,9 @@ function App() {
     });
     const img = new Image();
     img.src = dataUrl;
-    // Çözülemeyen görüntüde söz hiç sonuçlanmazsa kırpma akışı kilitli kalırdı
-    // (cropProcessingRef true, besteci "üretiyor" durumunda).
+    // If the promise never settles on an unresolvable image the crop flow
+    // would stay locked (cropProcessingRef true, composer in the "generating"
+    // state).
     await new Promise((resolve, reject) => {
       const timeoutId = setTimeout(
         () => reject(new Error('screenshot_decode_timeout')),
@@ -2047,7 +2054,7 @@ function App() {
       if (msg.type === 'HERAAI_CROP_DONE') {
         if (!clearCropSelectionState(msg.requestId || null)) return false
         // Hizli art arda kirpintilar siraya girer; "mesgul" hatasi cikmaz.
-        // Asiri yigilmada yeni istek uyariyla dusurulur.
+        // Under heavy stacking a new request is dropped with a warning.
         if (cropQueueRef.current.length >= CROP_QUEUE_LIMIT) {
           notifyError(t('chat.crop_busy'))
           return false
@@ -2074,7 +2081,8 @@ function App() {
         const processCropDone = async () => {
           setGenerating(true);
           const file = await captureScreenshot(request.coords)
-          // Zamanaşımı sonrası geç gelen sonuç uygulanmaz (çift kayıt olmasın).
+          // A result arriving late after the timeout is not applied (no double
+          // save).
           if (runId !== cropRunIdRef.current) return
           if (file) {
             const ref = await putAttachment({
@@ -2112,8 +2120,8 @@ function App() {
           }
         let watchdogId = null
         const watchdog = new Promise((_, reject) => {
-          // Kayıt katmanı yanıt vermezse akış sonsuza kadar kilitli kalırdı;
-          // zamanaşımında bayrak sıfırlanır, yeniden deneme açılır.
+          // If the storage layer does not respond the flow would stay locked
+          // forever; the flag is reset on timeout and retry opens up.
           watchdogId = setTimeout(
             () => reject(new Error('crop_process_timeout')),
             CROP_PROCESS_TIMEOUT_MS,
@@ -2296,10 +2304,11 @@ function App() {
         if (disposed) return
       }
       const currentLanguage = i18n.resolvedLanguage || i18n.language
-      // Depodaki dil yalnız ilk bootstrap'ta uygulanır. Bu efekt, kimliği dile
-      // bağlı bir callback (persistAuthoritativeSessionRepair → t) yüzünden
-      // yeniden koşabiliyor; koruma olmadan depodaki eski dili geri yazıp
-      // kullanıcının yeni seçimini siliyordu.
+      // The stored language is applied only in the first bootstrap. This
+      // effect can run again because of a callback whose identity depends on
+      // the language (persistAuthoritativeSessionRepair -> t); without the
+      // guard it wrote the old stored language back and erased the user's new
+      // choice.
       if (!languageAppliedRef.current && currentLanguage !== config.language) {
         try {
           await i18n.changeLanguage(config.language)
@@ -2318,8 +2327,8 @@ function App() {
       const resolvedSelectedModel = resolvedSelection.modelId
       setSelectedModel(resolvedSelectedModel)
       setSelectedProvider(resolvedSelection.provider)
-      // Otomatik model seçimi 24.09.2026'da kaldırıldı. Depoda 'auto' kalmışsa
-      // aşağıdaki karşılaştırma onu 'manual'e göç ettirir.
+      // Automatic model selection was removed on 2026-09-24. If 'auto' is left
+      // in storage the comparison below migrates it to 'manual'.
       const resolvedSelectionMode = 'manual'
       if (
         result.selectedModel !== resolvedSelectedModel
@@ -2571,8 +2580,8 @@ function App() {
         }
         return
       }
-      // Dil panelden Kaydet beklemeden de değiştirilebiliyor; appConfig'i tazele ki
-      // üretim istekleri doğru dil ipucunu göndersin.
+      // The language can change from the panel without waiting for Save; refresh
+      // appConfig so generation requests send the right language hint.
       if (changes.language?.newValue) {
         setAppConfig(previous => (
           previous && previous.language !== changes.language.newValue
@@ -2614,10 +2623,11 @@ function App() {
           }
         })
         const knownIds = new Set(metadataSyncedSessions.map(session => session?.id))
-        // Başka cihazdan eşitlenen yeni sohbetler belleğe eklenir; yoksa geçmiş
-        // listesinde panel yeniden açılana kadar görünmezler. Aynı değişiklikte
-        // `activeGeneration` varsa o sohbeti aşağıdaki canlı üretim dalı devralır
-        // (mesajları da o dal yazar), burada ikinci kez eklenmez.
+        // New chats synced from another device are added to memory; otherwise
+        // they stay invisible in the history list until the panel is reopened. If
+        // `activeGeneration` exists in the same change the live generation branch
+        // below takes over that chat (it writes the messages too), so it is not
+        // added here a second time.
         const claimedByGeneration = changes.activeGeneration?.newValue?.sessionId || null
         const incomingSessions = changes.sessions.newValue
           .filter(session => (
@@ -2920,8 +2930,8 @@ function App() {
 
     const id = Date.now().toString()
     const welcomeMsg = [{ id: createUniqueMessageId(msgIdCounter), role: 'model', content: t('chat.welcome') }]
-    // Yeni sohbet kaydı, ilk kullanıcı mesajı gönderilene kadar geçmişte görünmez:
-    // mesajsız (yalnız karşılama içeren) eski oturumlar burada düşürülür.
+    // A new chat record is not visible in history until the first user message is
+    // sent: sessions without messages (welcome only) are dropped here.
     const nextSessions = [
       ...sessionsRef.current.filter(session => (
         session?.isStarred === true || (session?.messages || []).some(message => message?.role === 'user')
@@ -3126,8 +3136,9 @@ function App() {
         let nextActiveSessionId = null
         let nextMessages = messagesRef.current
         {
-          // Temizlikten sonra yildizli sohbete atlanmaz: yildizlilar listede
-          // kalir, kullanici isterse kendisi acar. Aktif sohbet yeni sohbet olur.
+          // After cleanup the app does not jump to a starred chat: starred chats
+          // stay in the list and the user opens one if they want. The active chat
+          // becomes a new chat.
           const nextSessionId = Date.now().toString()
           const welcomeMessages = [{
             id: createUniqueMessageId(msgIdCounter),
@@ -3253,7 +3264,7 @@ function App() {
         return
       }
     } catch {
-      // Uzantı bağlamı dışında sessizce yoksay.
+      // Ignored silently outside the extension context.
     }
   }, [])
 
@@ -3396,7 +3407,8 @@ function App() {
   const stopDictationRecording = useCallback((shouldTranscribe = true) => {
     const recorder = dictationRecorderRef.current
     if (!recorder || recorder.state === 'inactive') {
-      // Durdurulacak kayit yoksa onstop hic gelmez; arayuzu kayitta takili birakma.
+      // If there is no recording to stop, onstop never fires; do not leave the UI
+      // stuck in the recording state.
       if (dictationPhaseRef.current !== 'idle') resetDictation()
       return
     }
@@ -3444,8 +3456,9 @@ function App() {
         cleanup()
         resolve(granted)
       }
-      // Pencere yanit vermezse akis kilitlenmesin: 'unknown' doner ve panel
-      // dogrudan getUserMedia dener; izin gercekten verilmisse dikte calisir.
+      // If the window does not answer the flow must not lock: 'unknown' is
+      // returned and the panel tries getUserMedia directly; if permission is
+      // really granted, dictation works.
       const permissionTimeoutId = window.setTimeout(() => finish('unknown'), MIC_PERMISSION_WAIT_MS)
       const handleMessage = (message) => {
         if (message?.type !== 'HERAAI_MIC_PERMISSION_RESULT' || message.requestId !== requestId) return false
@@ -3523,8 +3536,9 @@ function App() {
           void processDictation(blob)
           return
         }
-        // Kayit durdu ama kodlayici ses verisi uretmediyse sessizce sonme:
-        // kullanici kendisi iptal etmediyse anlasilir bir uyari goster.
+        // Recording stopped but the encoder produced no audio: do not fade
+        // out silently; show a clear warning unless the user cancelled it
+        // themselves.
         if (shouldTranscribe) {
           console.warn('Dictation ended without audio data; nothing to transcribe.')
           notifyError(t('chat.voice_empty'))
@@ -3630,8 +3644,8 @@ function App() {
     let mode = supportedModes.has(actionOptions?.modeOverride)
       ? actionOptions.modeOverride
       : (supportedModes.has(retryUserMessage?.mode) ? retryUserMessage.mode : automaticMode)
-    // Arama kapisi erken baslatilir (beklenmez): boya sirasini degistirmez,
-    // START gonderilmeden hemen once sonucu alinir.
+    // The search gate is started early (not awaited): it does not change
+    // paint order, the result is taken just before START is sent.
     const searchGatePromise = !retryUserMessage
       && mode === 'chat'
       && !actionOptions?.modeOverride
@@ -3864,9 +3878,9 @@ function App() {
       }
     })
 
-    // Boyadan sonra: kapi "ara" dediyse ve mod hâlâ sohbetse arastirmaya
-    // yükseltilir. URL yokluğunda bağlam yeniden hesaplanmaz; yalnız mod ve
-    // arama bağlamı güncellenir.
+    // After paint: if the gate said "search" and the mode is still chat it
+    // is upgraded to research. When there is no URL the context is not
+    // recomputed; only the mode and the search context are updated.
     if (searchGatePromise && mode === 'chat') {
       const gateVerdict = await searchGatePromise
       if (gateVerdict === true) {
@@ -4142,8 +4156,8 @@ function App() {
     setIsCropActive(true)
 
     try {
-      // Kırpma katmanı, ekran görüntüsünü alan pencereyle (currentWindow) aynı olmalı;
-      // ilk 'normal' pencereyi seçmek çok pencereli durumda koordinat kayması yaratıyordu.
+      // The crop overlay must be in the same window as the screenshot (currentWindow);
+      // picking the first 'normal' window caused coordinate drift with multiple windows.
       const targetWindow = await chrome.windows.getCurrent()
       if (
         cropOperation.cancelRequested
@@ -4458,7 +4472,8 @@ function App() {
     pauseAutoScroll()
   }, [pauseAutoScroll])
 
-  // Yazı alanı yüksekliği: yazdıkça büyür, kullanıcı tavanını tutamaktan ayarlar.
+  // Composer height: grows as you type, the user adjusts it up to the ceiling
+  // they keep.
   useEffect(() => {
     let cancelled = false
     const loadComposerHeight = async () => {
@@ -4508,7 +4523,8 @@ function App() {
     if (!session) return
     const currentY = Number(event.clientY)
     if (!Number.isFinite(currentY)) return
-    // Yukarı çekmek büyütür: imleç yukarı gittikçe yükseklik artar.
+    // Dragging up enlarges: the height grows as the cursor moves
+    // up.
     setComposerMaxHeight(clampComposerHeight(session.startHeight + (session.startY - currentY), session.allowedMax))
   }, [])
 
@@ -4537,8 +4553,8 @@ function App() {
   const handleComposerWheel = useCallback((event) => {
     const container = scrollRef.current
     if (!container || !event.deltaY) return
-    // Yazı alanı (veya başka bir iç kaydırıcı) kendi içinde kayabiliyorsa tekerleği
-    // önce o tüketir; başına/sonuna gelince devamı sohbete geçer.
+    // If the composer field (or another inner scroller) can scroll on its own it
+    // consumes the wheel first; at its top/end the rest goes on to the chat.
     const innerScroller = event.target?.closest?.('[data-composer-scroll]')
     if (resolveWheelTarget(event.deltaY, innerScroller) === WHEEL_TARGET_INNER) return
     const canScroll = container.scrollHeight > container.clientHeight
@@ -4583,7 +4599,7 @@ function App() {
             setAppConfig(newConfig)
             applyTheme(newConfig.theme, newConfig.customPrimaryColor)
             setShowSettings(false)
-            // Ayar kaydı eşitlenen anahtarlara dokunur: kısa gecikmeyle otomatik eşitleme.
+            // The settings write touches synced keys: automatic sync with a short delay.
             autoSyncSchedulerRef.current?.noteLocalChange()
           }}
         />
@@ -4644,8 +4660,9 @@ function App() {
     setSelectedModel(nextModel)
     setSelectedProvider(nextProvider)
     if (chrome && chrome.storage) {
-      // Ortak yazım kuyruğu kullanılır: hata sessizce yutulmaz ve bildirim
-      // yalnız bir kez gösterilir (önceki hâlde reddedilen yazım kayboluyordu).
+      // The shared write queue is used: the error is not swallowed silently and
+      // the notification is shown only once (previously a rejected write was
+      // lost).
       void enqueueStorageWrite({ selectedModel: nextModel, selectedProvider: nextProvider, modelSelectionMode: 'manual' })
     }
   }
@@ -4709,7 +4726,7 @@ function App() {
               setAppConfig(newConfig)
               applyTheme(newConfig.theme, newConfig.customPrimaryColor)
               setShowSettings(false)
-              // Ayar kaydı eşitlenen anahtarlara dokunur: kısa gecikmeyle otomatik eşitleme.
+              // The settings write touches synced keys: automatic sync with a short delay.
               autoSyncSchedulerRef.current?.noteLocalChange()
             }}
           />

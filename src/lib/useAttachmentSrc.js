@@ -9,8 +9,8 @@ function resolveInlineSrc(attachment) {
 }
 
 /**
- * Ekin görüntü adresini çözer: satır içi veri varsa anında, yalnız kimlik
- * varsa IndexedDB'den okuyup nesne adresi üretir.
+ * Resolves the attachment's image source: inline data instantly, an id only means it
+ * is read from IndexedDB and an object URL is produced.
  */
 export function useAttachmentSrc(attachment) {
   const [state, setState] = useState({ url: null, missing: false })

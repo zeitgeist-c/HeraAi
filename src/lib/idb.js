@@ -1,12 +1,12 @@
 /**
- * HeraAi 1.10.0 — IndexedDB altyapısı (Aşama 6).
+ * HeraAi 1.10.0 - IndexedDB infrastructure (Stage 6).
  *
- * Yerel-öncelikli çalışmanın taşıyıcısı: şifreli API kasası, sohbet deposu,
- * ekler ve çevrimdışı eşitleme kuyruğu burada tutulur. Tüm işlemler Promise
- * tabanlıdır; hiçbir çağrı yarı yolda bırakılmaz.
+ * Carrier of local-first work: the encrypted API vault, chat store, attachments and
+ * the offline sync queue live here. All operations are Promise based; no call is left
+ * half done.
  *
- * `chrome.storage.local` yalnızca hızlı bayraklar için kullanılır; asıl veri
- * burada yaşar, böylece tarayıcı kapanışında kayıp yaşanmaz.
+ * `chrome.storage.local` is used only for quick flags; the real data lives here, so
+ * nothing is lost when the browser closes.
  */
 
 export const DB_NAMES = Object.freeze({
@@ -15,7 +15,7 @@ export const DB_NAMES = Object.freeze({
   attachments: 'heraai-attachments',
 })
 
-/** Kasa veritabanı sürümü — store eklendiğinde artırılır. */
+/** Vault database version - bumped when a store is added. */
 export const VAULT_VERSION = 1
 
 export const VAULT_STORES = Object.freeze({
@@ -24,14 +24,16 @@ export const VAULT_STORES = Object.freeze({
   syncQueue: 'syncQueue',
 })
 
-/** Eşitleme kilidinin varsayılan ömrü: service worker çökerse kilit kendiliğinden açılır. */
+/**
+ * Default lifetime of the sync lock: if the service worker crashes the lock releases by itself.
+ */
 export const LEASE_TTL_MS = 60000
 
 export function idbAvailable() {
   return typeof globalThis.indexedDB !== 'undefined'
 }
 
-/** Veritabanını açar; eksik store'lar upgrade sırasında oluşturulur. */
+/** Opens the database; missing stores are created during the upgrade. */
 export function openDatabase({ name, version = 1, stores = [] }) {
   return new Promise((resolve, reject) => {
     if (!idbAvailable()) {
@@ -89,9 +91,10 @@ export function idbPut(db, store, value) {
 }
 
 /**
- * Tek işlemde "varsa oku, yoksa üret ve yaz". Okuma ile yazma aynı işlemde
- * olduğundan iki bağlam (panel + service worker) aynı anda çağırsa bile tek
- * kayıt oluşur; kaybeden taraf ürettiği adayı atar.
+ * Read-if-present, otherwise create-and-write in a single transaction. Because the
+ * read and the write are in the same transaction only one record is created even
+ * when two contexts (panel + service worker) call at the same time; the losing side
+ * discards the candidate it produced.
  */
 export function idbGetOrPut(db, store, key, uret) {
   return new Promise((resolve, reject) => {
@@ -149,34 +152,13 @@ export function idbDeleteMatching(db, store, records) {
 }
 
 /**
- * Tarayıcıdan kalıcı depolama izni ister. Düşük disk durumunda IndexedDB'nin
- * sessizce silinmesini engeller; desteklenmiyorsa sessizce devam edilir.
+ * Asks the browser for persistent storage. Prevents IndexedDB from being evicted
+ * silently on a low disk; when unsupported it silently continues.
  */
-export async function requestPersistentStorage() {
-  try {
-    const storage = globalThis.navigator?.storage
-    if (!storage?.persist) return { supported: false, persisted: false }
-    const persisted = await storage.persist()
-    return { supported: true, persisted: Boolean(persisted) }
-  } catch {
-    return { supported: false, persisted: false }
-  }
-}
-
-export async function isStoragePersisted() {
-  try {
-    const storage = globalThis.navigator?.storage
-    if (!storage?.persisted) return false
-    return Boolean(await storage.persisted())
-  } catch {
-    return false
-  }
-}
-
 /**
- * Süreli kiralama kilidi. Okuma ve yazma aynı işlem içinde yapıldığı için iki
- * sekme aynı anda kilidi alamaz. Service worker beklenmedik şekilde sonlanırsa
- * kilit TTL dolunca kendiliğinden serbest kalır.
+ * Time-limited lease lock. Because the read and the write happen in the same
+ * transaction two tabs cannot take the lock at the same time. If the service worker
+ * terminates unexpectedly the lock frees itself when the TTL expires.
  */
 export function acquireLease(db, metaStore, name, { owner, now = Date.now(), ttlMs = LEASE_TTL_MS } = {}) {
   return new Promise((resolve, reject) => {
@@ -209,7 +191,7 @@ export function acquireLease(db, metaStore, name, { owner, now = Date.now(), ttl
   })
 }
 
-/** Kilidi bırakır; sahibi farklıysa dokunmaz. */
+/** Releases the lock; does nothing if the owner is different. */
 export async function releaseLease(db, metaStore, name, owner) {
   const anahtar = `lease:${name}`
   const mevcut = await idbGet(db, metaStore, anahtar)

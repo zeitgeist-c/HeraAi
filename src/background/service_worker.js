@@ -530,8 +530,8 @@ async function markGenerationInterrupted(activeGeneration, reason) {
     updatedAt: now,
   };
   await setActiveGeneration(interruptedGeneration);
-  // Diğer terminal yollar gibi yayın yapılır: aksi halde başka penceredeki panel
-  // ölü iş için canlı akış göstermeye devam ederdi.
+  // Broadcast like the other terminal paths: otherwise the panel in another
+  // window would keep showing a live stream for a dead job.
   await broadcastRuntimeMessage({
     type: 'DONE',
     forwardedBy: 'service_worker',
@@ -791,10 +791,10 @@ async function handleGenerationStart(message) {
           ? (existingSession?.activeWebUrls || [])
           : (Array.isArray(startMessage.webContext?.urls) ? startMessage.webContext.urls : (existingSession?.activeWebUrls || []))),
   };
-  // Yazımdan hemen önce taze listeyi oku: bu noktaya kadar (auto yönlendirme ağ
-  // çağrısı dahil) panel veya eşitleme başka oturumları değiştirmiş olabilir;
-  // bayat anlık görüntüyle yazmak o değişiklikleri ezer, silinen sohbeti geri
-  // getirirdi.
+  // Read the fresh list right before writing: up to this point (including the
+  // auto routing network call) the panel or sync may have changed other
+  // sessions; writing a stale snapshot would overwrite those changes and bring
+  // a deleted chat back.
   const tazeState = await storageGet(['sessions'])
   const nextSessions = [
     ...(Array.isArray(tazeState?.sessions) ? tazeState.sessions : storedSessions)
@@ -1376,14 +1376,15 @@ const SYNC_REQUEST_TYPES = new Set([
 ]);
 
 /**
- * Kimlik dogrulama istekleri generation kuyruguna girmez; dogrudan yanitlanir.
- * Hata kodlari yalnizca authService'in tanimladigi sinirli kume ile disari cikar.
+ * Authentication requests do not enter the generation queue; they are answered directly. Error
+ * codes leave only as the limited set authService defines.
  */
 async function handleAuthRequest(message) {
   try {
     if (message.type === 'AUTH_GET_STATE') {
-      // Servis yeni uyanmis olabilir: oturum IndexedDB'den geri yuklenmeden
-      // okunursa giris yapilmis olsa bile null doner, panel bunu yanlis yorumlar.
+      // The service may have just woken up: if the session is read before it is
+      // restored from IndexedDB it returns null even when signed in, and the
+      // panel misreads that.
       return { ok: true, user: await waitForCurrentAuthUser() };
     }
     if (message.type === 'AUTH_SIGN_IN') {
@@ -1560,7 +1561,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Guvenlik: yalnizca bu eklentinin kendi baglamlarindan gelen mesajlar islenir
+  // Security: only messages coming from this extension's own contexts are handled.
   if (!sender || sender.id !== chrome.runtime.id) return;
 
   if (message?.type === 'HERAAI_CROP_DONE' || message?.type === 'HERAAI_CROP_CANCELLED') {
@@ -1571,8 +1572,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message?.type || message.forwardedBy === 'service_worker') return false;
 
   if (AUTH_REQUEST_TYPES.has(message.type)) {
-    // Google girisi kullaniciyi bekletir: servis bu sure boyunca uyanik tutulur,
-    // aksi halde Chrome servisi kapatir ve panelin kanali kopar.
+    // Google sign-in makes the user wait: the service is kept awake meanwhile,
+    // otherwise Chrome shuts the service down and the panel's channel drops.
     const stopKeepAlive = startServiceKeepAlive();
     handleAuthRequest(message)
       .then(

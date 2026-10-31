@@ -2907,7 +2907,6 @@ describe('HeraAi App', () => {
         global.Image = OriginalImage;
       }
       expect(toastError).not.toHaveBeenCalledWith(expect.stringMatching(/still being prepared/i), expect.anything());
-      await act(async () => {});
       expect(screen.getByTitle(/screenshot-/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();

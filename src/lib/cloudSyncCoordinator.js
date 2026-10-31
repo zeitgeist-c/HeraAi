@@ -48,9 +48,9 @@ const SYNC_PAUSED_KEY = 'syncPaused'
 const LAST_SYNC_KEY = 'syncLastSuccessAt'
 const LAST_ERROR_KEY = 'syncLastError'
 /**
- * Teşhis kaydı: jenerik koda inen hatanın gerçek mesajı. Arayüzde gösterilmez,
- * yalnız destek sırasında okunur — `sync_failed` tek başına kök nedeni
- * göstermiyordu.
+ * Diagnostic record: the real message of the error that was reduced to a generic
+ * code. Not shown in the UI, read only during support - `sync_failed` alone did not
+ * show the root cause.
  */
 const LAST_ERROR_DETAIL_KEY = 'syncLastErrorDetail'
 const BLOCKED_UNTIL_KEY = 'syncBlockedUntil'
@@ -59,15 +59,15 @@ const ATTACHMENT_POLICY_MIGRATION_KEY = 'attachmentCloudPolicyV2MigratedAt'
 const KEY_CHANGE_MARKER = 'syncVaultUpdatedAt'
 const KEY_TOMBSTONES = 'syncKeyTombstones'
 const AUTO_SYNC_INTERVAL_MS = 15 * 60 * 1000
-/** Panel ayarı: otomatik eşitleme aralığı (dakika; 0 = kapalı). Cihaza özel. */
+/** Panel setting: automatic sync interval (minutes; 0 = off). Device specific. */
 const AUTO_SYNC_SETTING_KEY = AUTO_SYNC_INTERVAL_KEY
-/** Eşitleme kilidi: aynı anda iki koşu olmaz. Bayat kilit devralınır. */
+/** Sync lock: there are never two runs at once. A stale lock is taken over. */
 const SYNC_LEASE_KEY = 'syncLease'
 
 let runtimePromise = null
 let cachedSubkeys = null
 let listenerInstalled = false
-/** Aynı anda tek eşitleme koşusu (bellek kilidi). */
+/** A single sync run at a time (in-memory lock). */
 let activeRun = null
 let pendingStorageChanges = Promise.resolve()
 let lastVersionTime = 0
@@ -168,8 +168,8 @@ export function cloudSyncWakeReason(status, now = Date.now()) {
 }
 
 /**
- * Kota Pasifik gece yarısında sıfırlandığı için sayaç da o güne göre tutulur;
- * gün değişince önceki günün sayacı kendiliğinden sıfırlanır.
+ * Because the quota resets at Pacific midnight the counter is kept by that day as
+ * well; when the day changes the previous day's counter resets by itself.
  */
 export function pacificDayKey(now = Date.now()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -180,7 +180,7 @@ export function pacificDayKey(now = Date.now()) {
   }).format(new Date(now))
 }
 
-/** Bugünün kota sayacı (farklı günden kalan değer sıfır sayılır). */
+/** Today's quota counter (a value left from a different day counts as zero). */
 export function currentUsage(storedUsage, now = Date.now()) {
   const dayKey = pacificDayKey(now)
   const value = storedUsage?.dayKey === dayKey ? storedUsage : null
@@ -192,10 +192,10 @@ export function currentUsage(storedUsage, now = Date.now()) {
 }
 
 /**
- * Koşu başına işlem sayacı (tahmini). Panel bu değeri gösterir ve yavaş mod
- * kararını verir. Tahmin: koşu başına 1 okuma (cihaz durumu) + 1 yazma
- * ("son görülme"); gönderilen kayıt başına 1 işlem okuması + 2 yazma
- * (kayıt + parça); çekilen kayıt başına 2 okuma (meta + parça).
+ * Per-run operation counter (estimated). The panel shows this value and makes the
+ * slow mode decision. Estimate: 1 read (device status) + 1 write ("last seen") per
+ * run; 1 operation read + 2 writes (record + chunk) per sent record; 2 reads
+ * (meta + chunk) per pulled record.
  */
 async function recordSyncUsage(result) {
   const stored = await storageGet([AUTO_SYNC_USAGE_KEY])
@@ -211,7 +211,7 @@ async function recordSyncUsage(result) {
   })
 }
 
-/** Panel ayarı + bugünkü kota kullanımı. */
+/** Panel setting + today's quota usage. */
 export async function getAutoSyncSettings() {
   const stored = await storageGet([AUTO_SYNC_SETTING_KEY, AUTO_SYNC_USAGE_KEY, 'cloudQuota'])
   const user = getCurrentAuthUser()
@@ -230,7 +230,7 @@ export async function getAutoSyncSettings() {
   }
 }
 
-/** Otomatik eşitleme aralığını kaydeder (cihaza özel; eşitlenmez). */
+/** Saves the automatic sync interval (device specific; not synced). */
 export async function setAutoSyncInterval(minutes) {
   const value = normalizeAutoSyncMinutes(minutes)
   await storageSet({ [AUTO_SYNC_SETTING_KEY]: value })
@@ -343,9 +343,11 @@ async function createRuntime() {
           model: payload.metadata?.model,
         })
         if (!kayit.created) {
-          // Aynı anahtar bu cihazda başka bir kimlikle kayıtlı (iki cihazda iki
-          // kez eklenmiş). Buluttaki kopyayı yerel kimliğe çek: tüm cihazlar
-          // tek kayda yakınsar ve bu belge bir daha çakışma üretmez.
+          // The same key is registered on this device under another id (added
+          // twice on two
+          // devices). Pull the cloud copy onto the local id: all devices
+          // converge on a single
+          // record and this document produces no further conflict.
           await engine.enqueue({
             storageKey,
             logicalId: kayit.id,
@@ -424,9 +426,9 @@ async function cacheMasterSecret(masterBytes) {
 }
 
 /**
- * Kendi cihaz belgesini bir kez okur; "kullanılabilir" (eşitlemeye hazır) ile
- * "kapatılmış" durumunu ayırır. Kapalı cihaz kurtarma ekranına düşmemeli ama
- * eşitleme de yapmamalı — ayrım bu yüzden ayrı alanlarla raporlanır.
+ * Reads its own device document once; separates "usable" (ready to sync) from
+ * "disabled". A disabled device must not land on the recovery screen but must not
+ * sync either - the distinction is therefore reported through separate fields.
  */
 async function loadLinkedDeviceState(runtime, user) {
   const device = await runtime.transport.getDevice(user.uid, runtime.deviceId)
@@ -485,8 +487,8 @@ async function enqueueAllKeys(runtime) {
 }
 
 /**
- * Yerel sohbetleri kuyruğa alır (yerel-only hariç). Hesaba ilk bağlanmada
- * çağrılır: bağlanmadan önce oluşmuş sohbetler yoksa hiçbir cihaza gitmez.
+ * Queues the local chats (except local-only). Called on the first link to the
+ * account: chats created before linking would otherwise never reach any device.
  */
 async function enqueueLocalSessions(runtime) {
   const stored = await storageGet(['sessions'])
@@ -568,7 +570,7 @@ export async function linkCloudSyncDevice(recoveryCode) {
   const masterBytes = await openMasterSecretFromRecovery(account.recoveryEnvelope, recoveryCode)
   const deviceEnvelope = await wrapMasterSecretForDevice(runtime.deviceKey, masterBytes)
   const now = Date.now()
-  // Başka bir cihazdan verilmiş ad varsa korunur; yeniden bağlanma adı sıfırlamaz.
+  // A name given by another device is kept; re-linking does not reset the name.
   const existingDevice = await runtime.transport.getDevice(user.uid, runtime.deviceId)
   await runtime.transport.setDevice(user.uid, runtime.deviceId, buildDeviceDocument({
     deviceId: runtime.deviceId,
@@ -581,9 +583,12 @@ export async function linkCloudSyncDevice(recoveryCode) {
   }))
   await cacheMasterSecret(masterBytes)
   await storageSet({ [SYNC_ENABLED_KEY]: true, [SYNC_PAUSED_KEY]: false })
-  // Bağlanmadan önce bu cihazda oluşmuş sohbetler hesaba taşınır; yoksa geçmiş
-  // yalnız bu cihazda kalır ve diğer cihazlarda hiç görünmez. Ayarlar bilinçli
-  // olarak gönderilmez: yeni cihazın varsayılanları hesabınkini ezmemeli.
+  // Chats created on this device before linking are carried into the account;
+  // otherwise
+  // the history stays on this device only and never appears on the other
+  // devices.
+  // Settings are deliberately not sent: a new device's defaults must not
+  // overwrite the account's.
   await enqueueLocalSessions(runtime)
   await runCloudSync()
   return { linked: true }
@@ -712,8 +717,10 @@ async function performCloudSyncRun() {
     if (deviceState.disabled) return { skipped: 'device_disabled' }
     if (!deviceState.linked) throw new Error('sync_recovery_required')
     const result = await runtime.engine.drain()
-    // Atlanan tur (lease/kilit/oturum) basarili sayilmaz: aksi halde panel
-    // "yeni eslendi" gosterir ve bekleyen anahtar silme isaretleri kaybolur.
+    // A skipped round (lease/lock/session) does not count as successful:
+    // otherwise the
+    // panel would show "synced just now" and pending key deletion markers
+    // would be lost.
     if (result?.skipped) return result
     const now = Date.now()
     await runtime.transport.setDevice(user.uid, runtime.deviceId, {
@@ -728,8 +735,9 @@ async function performCloudSyncRun() {
     const errorCode = mapCloudSyncError(error)
     const update = {
       [LAST_ERROR_KEY]: errorCode,
-      // `sync_failed` gibi jenerik kodların arkasındaki gerçek mesaj saklanır;
-      // aksi halde kök neden hiçbir yerde görünmüyordu.
+      // The real message behind generic codes such as `sync_failed` is stored;
+      // otherwise
+      // the root cause was not visible anywhere.
       [LAST_ERROR_DETAIL_KEY]: {
         code: errorCode,
         message: String(error?.message || error || '').slice(0, 300),
@@ -745,9 +753,9 @@ async function performCloudSyncRun() {
 }
 
 /**
- * Eşitlemeyi çalıştırır. Aynı anda iki koşu olmaz:
- * Eşzamanlı çağrılar aynı Promise'i bekler. Önceki service worker'dan kalan
- * depolama işareti canlı kilit değildir; yeni worker güvenle devralır.
+ * Runs the sync. There are never two runs at once:
+ * concurrent calls await the same Promise. A storage marker left by a previous
+ * service worker is not a live lock; the new worker takes over safely.
  */
 export function runCloudSync() {
   if (activeRun) return activeRun
@@ -779,8 +787,9 @@ export async function listCloudSyncDevices() {
   if (!user) throw new Error('sync_signed_out')
   const runtime = await getRuntime()
   const devices = await runtime.transport.listDevices(user.uid)
-  // Erişimi kaldırılmış cihaz arayüzde listelenmez: belge yalnız o cihazın
-  // kendiliğinden geri bağlanmasını engelleyen kayıt olarak durur.
+  // A device whose access was removed is not listed in the UI: the
+  // document stays only
+  // as the record that prevents that device from reconnecting by itself.
   return devices.filter(device => !device.revokedAt)
 }
 
@@ -797,8 +806,9 @@ export async function revokeCloudSyncDevice(deviceId) {
 }
 
 /**
- * Cihazı hesap düzeyinde kapatır/açar. Kapatılan cihaz kendi belgesini okuyup
- * eşitlemeyi atlar; kayıt ve anahtar zarfı silinmez, yeniden açılabilir.
+ * Disables/enables the device at account level. A disabled device reads its own
+ * document and skips the sync; the record and key envelope are not deleted and it can be
+ * re-enabled.
  */
 export async function setCloudSyncDeviceEnabled(deviceId, enabled) {
   const user = await waitForCurrentAuthUser()
@@ -810,7 +820,7 @@ export async function setCloudSyncDeviceEnabled(deviceId, enabled) {
   return { deviceId, enabled: enabled === true }
 }
 
-/** Cihaz adını yazar; boş ad reddedilir, uzunluk kırpılır. */
+/** Writes the device name; an empty name is rejected, the length is trimmed. */
 export async function renameCloudSyncDevice(deviceId, label) {
   const user = await waitForCurrentAuthUser()
   if (!user) throw new Error('sync_signed_out')
@@ -938,8 +948,9 @@ async function enqueueStorageChange(changes) {
       const after = new Map((change.newValue || []).map(item => [String(item.id), item]))
       for (const [id, session] of after) {
         if (session?.syncPolicy === 'local_only') {
-          // "Yalnız bu cihazda"ya çevrilen sohbetin bulut kopyası silinmeli;
-          // aksi halde kurtarma koduyla bağlanan yeni cihaz onu geri getirir.
+          // The cloud copy of a chat switched to "this device only" must be
+          // deleted; otherwise
+          // a new device linking with the recovery code would bring it back.
           const onceki = before.get(id)
           if (onceki && onceki.syncPolicy !== 'local_only') {
             await runtime.engine.enqueue({

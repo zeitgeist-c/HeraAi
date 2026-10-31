@@ -155,8 +155,9 @@ function attachmentText(attachment) {
   return `--- BEGIN FILE: ${name} ---\n${attachment.modelText.trim()}\n--- END FILE: ${name} ---`
 }
 
-// Tarih gecmisi ref'leri (data'siz) istegi bloklamamali; yalniz gercekten
-// gonderilen yuk (data/modelText) saglayici kisitini tetikler.
+// Date-history refs (without data) must not block the request; only the
+// payload that is really sent (data/modelText) triggers the provider
+// restriction.
 function attachmentCarriesPayload(attachment) {
   return Boolean(attachment?.data || attachment?.modelText)
 }

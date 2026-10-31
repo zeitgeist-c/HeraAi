@@ -1,8 +1,8 @@
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000]
 
-// Sonsuz yeniden deneme, teslim edilemeyen terminal iletiyi kalıcı kilit olarak
-// bırakıp yeni işleri bloke eder (startJob `already_running`); sınırlı denemeden
-// sonra vazgeçilir.
+// Endless retry leaves an undeliverable terminal message as a permanent lock and
+// blocks new jobs (startJob `already_running`); it gives up after a limited
+// number of attempts.
 const FORWARD_MAX_ATTEMPTS = 8
 
 const createDefaultWorker = () => new Worker(
@@ -269,7 +269,7 @@ export function createOffscreenBridge({
   }
 
   const runtimeListener = (message, sender, sendResponse) => {
-    // Guvenlik: yalnizca bu eklentinin kendi baglamlarindan gelen mesajlar islenir
+    // Security: only messages coming from this extension's own contexts are handled.
     if (!sender || sender.id !== runtime.id) return false
     const response = handleRuntimeMessage(message)
     if (response == null) return false

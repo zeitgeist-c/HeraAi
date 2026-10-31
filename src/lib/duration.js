@@ -15,7 +15,7 @@ export function formatDurationMs(durationMs, { live = false } = {}) {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds - minutes * 60
   if (live) {
-    // Yuvarlama önce yapılır: 119.96 sn "1:60.0" değil "2:00.0" olmalı.
+    // Rounding happens first: 119.96 s must be "2:00.0", not "1:60.0".
     const tenths = Math.round(ms / 100)
     const liveSeconds = Math.floor(tenths / 10)
     const liveMinutes = Math.floor(liveSeconds / 60)

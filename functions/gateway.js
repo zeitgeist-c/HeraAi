@@ -115,7 +115,6 @@ export function createCloudGateway({ db, Timestamp, serverTimestamp = () => Time
         }
         case 'pullEntities': {
           const limit = 1 // Bound response bytes even for maximum-sized sessions.
-          if (!Number.isInteger(limit)) fail('invalid_request')
           let query = db.collection(`${root}/entities`).orderBy('serverUpdatedAt').orderBy('__name__').limit(limit)
           if (args.cursor) {
             const cursor = args.cursor

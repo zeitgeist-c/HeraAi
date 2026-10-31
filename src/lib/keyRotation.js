@@ -1,28 +1,28 @@
 /**
- * HeraAi 1.10.0 — Sağlıklı API anahtarı rotasyonu ve dengeli kullanım (Aşama 9).
+ * HeraAi 1.10.0 - healthy API key rotation and balanced usage (Stage 9).
  *
- * Amaç: bir sağlayıcıdaki tek anahtarın kotasını tüketmek yerine istekleri o
- * sağlayıcının sağlıklı anahtarları arasında dağıtmak.
+ * Goal: instead of draining the quota of a single key at a provider, spread the
+ * requests across that provider's healthy keys.
  *
- * Değişmezler:
- * - Havuzlar mutlak izole: her çağrı yalnız kendi sağlayıcısının listesiyle
- *   çalışır; başka sağlayıcının anahtarı listeye karışamaz.
- * - İstek ortasında anahtar değişmez: akış başladıktan sonra kullanılan anahtar
- *   sabit kalır (Tavily zinciri).
- * - `primary` modunda ana anahtar önce gelir; `balanced_rotation` modunda en
- *   uzun süredir kullanılmayan anahtar öne geçer.
+ * Invariants:
+ * - Pools are strictly isolated: every call works only with its own provider's list;
+ * another provider's key cannot leak into it.
+ * - The key does not change mid-request: once the stream has started the key in use
+ * stays fixed (Tavily chain).
+ * - In `primary` mode the main key comes first; in `balanced_rotation` mode the key
+ * unused for the longest time moves ahead.
  */
 
 import { API_KEY_USAGE_MODES, normalizeApiKeyUsageMode } from './syncContract'
 
 export const KEY_USAGE_MODE = Object.freeze({
-  /** Ana anahtarlar önce; mevcut davranış korunur. */
+  /** Main keys first; the existing behaviour is preserved. */
   PRIMARY: 'primary',
-  /** Anahtarlar sırayla; kota dengeli dağıtılır. */
+  /** Keys in turn; the quota is spread evenly. */
   BALANCED_ROTATION: 'balanced_rotation',
 })
 
-/** Mod etiketleri (arayüz). */
+/** Mode labels (UI). */
 export const KEY_USAGE_MODE_LABELS = Object.freeze({
   [KEY_USAGE_MODE.PRIMARY]: 'Ana anahtarları kullan',
   [KEY_USAGE_MODE.BALANCED_ROTATION]: 'Anahtarları sırayla kullan',
@@ -33,7 +33,7 @@ function sayi(deger) {
   return Number.isFinite(n) ? n : null
 }
 
-/** Hiç kullanılmamış anahtar her zaman en eskidir. */
+/** A key that was never used is always the oldest. */
 function kullanimZamani(kayit) {
   const t = sayi(kayit?.lastUsedAt)
   return t === null ? -1 : t
@@ -44,8 +44,8 @@ function kimlik(kayit) {
 }
 
 /**
- * `primary` sırası: ana anahtar önce, sonra `createdAt` artan, eşitlikte `id`.
- * Bu, 1.9.4'teki davranışla aynıdır.
+ * `primary` order: main key first, then `createdAt` ascending, `id` on ties.
+ * This is the same as the 1.9.4 behaviour.
  */
 export function orderByPrimary(keys) {
   return [...(keys || [])].sort((a, b) => {
@@ -63,8 +63,8 @@ export function orderByPrimary(keys) {
 }
 
 /**
- * Rotasyon sırası: en uzun süredir kullanılmayan anahtar önce.
- * Eşitlikte sabit `id` sırası kullanılır ki tüm cihazlar aynı sırayı görsün.
+ * Rotation order: the key unused for the longest time first.
+ * On ties a fixed `id` order is used so every device sees the same order.
  */
 export function orderByRotation(keys) {
   return [...(keys || [])].sort((a, b) => {
@@ -75,7 +75,7 @@ export function orderByRotation(keys) {
   })
 }
 
-/** Moda göre sıralama; bilinmeyen mod `primary` sayılır. */
+/** Ordering by mode; an unknown mode counts as `primary`. */
 export function orderKeysForRequest(keys, mode) {
   return normalizeApiKeyUsageMode(mode) === KEY_USAGE_MODE.BALANCED_ROTATION
     ? orderByRotation(keys)
@@ -83,14 +83,14 @@ export function orderKeysForRequest(keys, mode) {
 }
 
 /**
- * İstek için sıralı aday listesi üretir.
+ * Produces the ordered candidate list for the request.
  *
  * @param {object} options
- * @param {Array} options.keys Sağlayıcının çözülmüş anahtarları.
+ * @param {Array} options.keys The provider's resolved keys.
  * @param {string} [options.mode] `primary` | `balanced_rotation`.
- * @param {string[]} [options.excludeIds] Bu istekte kullanılmayacak kimlikler.
- * @param {string[]} [options.reservedIds] Rezerve edilmiş kimlikler; varsa
- *   önce onlar denenir (akış ortasında anahtar değişmemesi için).
+ * @param {string[]} [options.excludeIds] Ids not to be used in this request.
+ * @param {string[]} [options.reservedIds] Reserved ids; if present they are tried
+ * first (so the key does not change mid-stream).
  */
 export function selectCandidates({ keys, mode, excludeIds = [], reservedIds = [] } = {}) {
   const disarida = new Set((excludeIds || []).map(String))
@@ -104,10 +104,10 @@ export function selectCandidates({ keys, mode, excludeIds = [], reservedIds = []
 }
 
 /**
- * İstek başına anahtar rezervasyonu.
+ * Per-request key reservation.
  *
- * Akış başladıktan sonra anahtar değişmez: `current()` her çağrıda aynı kaydı
- * döndürür, `advance()` yalnız istek yeniden başlatılırken çağrılır.
+ * The key does not change after the stream starts: `current()` returns the same
+ * record on every call, `advance()` is called only when the request is restarted.
  */
 export function createKeyLease({ keys, mode, excludeIds = [], count = 1 } = {}) {
   const adaylar = selectCandidates({ keys, mode, excludeIds })
@@ -120,9 +120,9 @@ export function createKeyLease({ keys, mode, excludeIds = [], count = 1 } = {}) 
   return {
     keys: rezerve,
     exhausted: false,
-    /** Akış boyunca sabit kalan anahtar. */
+    /** The key that stays fixed for the whole stream. */
     current: () => rezerve[sira] || rezerve[0],
-    /** Sıradaki anahtara geçer (yalnız istek yeniden denendiğinde). */
+    /** Moves to the next key (only when the request is retried). */
     advance: () => {
       if (sira < rezerve.length - 1) {
         sira += 1
@@ -134,7 +134,7 @@ export function createKeyLease({ keys, mode, excludeIds = [], count = 1 } = {}) 
   }
 }
 
-/** Kullanım sonrası güncellenecek metadata (kasa `updateKeyMetadata` ile yazar). */
+/** Metadata to be updated after use (the vault writes it via `updateKeyMetadata`). */
 export function usageMetadata({ now = Date.now(), success = true, errorType = null, cooldownMs = 0 } = {}) {
   const meta = { lastUsedAt: now }
   if (success) {
@@ -153,17 +153,17 @@ export function usageMetadata({ now = Date.now(), success = true, errorType = nu
   return meta
 }
 
-/** Kullanım modunun geçerliliğini denetler. */
+/** Validates the usage mode. */
 export function isValidUsageMode(mode) {
   return API_KEY_USAGE_MODES.includes(mode)
 }
 
-/** Mod etiketi (arayüz için). */
+/** Mode label (for the UI). */
 export function usageModeLabel(mode) {
   return KEY_USAGE_MODE_LABELS[normalizeApiKeyUsageMode(mode)]
 }
 
-/** Rotasyon katmanının tanıtımı (test ve dokümantasyon). */
+/** Introduction of the rotation layer (tests and documentation). */
 export function describeKeyRotation() {
   return {
     modes: Object.values(KEY_USAGE_MODE),

@@ -51,7 +51,7 @@ export const MODEL_CATALOG = Object.freeze([
     speed: 'medium',
     routing: { quality: 4, coding: 4 },
     capabilities: {
-      // OpenRouter listesi bu modeli yalniz metin girisli gosteriyor.
+      // The OpenRouter list shows this model as text-input only.
       supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
@@ -65,7 +65,7 @@ export const MODEL_CATALOG = Object.freeze([
     speed: 'fast',
     routing: { quality: 3, coding: 3 },
     capabilities: {
-      // OpenRouter listesi bu modeli yalniz metin girisli gosteriyor.
+      // The OpenRouter list shows this model as text-input only.
       supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
@@ -107,9 +107,11 @@ export const MODEL_CATALOG = Object.freeze([
     speed: 'slow',
     routing: { quality: 5, coding: 5 },
     capabilities: {
-      // Ollama yolu görsel eki kabul etmiyor (providerApi: image_not_supported);
-      // katalog da bunu yansıtır ki seçicide 📷 rozeti çıkmasın ve otomatik
-      // yönlendirici görselli isteklerde bu modeli seçmesin.
+      // The Ollama path does not accept image attachments (providerApi:
+      // image_not_supported);
+      // the catalog reflects that so the picker shows no camera badge and the
+      // automatic
+      // router does not pick this model for image requests.
       supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,

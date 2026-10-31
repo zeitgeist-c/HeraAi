@@ -1,12 +1,13 @@
 import { getApps, initializeApp } from 'firebase/app'
 import { getAuth, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth/web-extension'
-// MV3 service worker ortaminda XMLHttpRequest yoktur. Firestore Lite REST/fetch
-// kullanir ve bu nedenle arka plan servis calisaniyla uyumludur.
+// There is no XMLHttpRequest in the MV3 service worker environment. Firestore
+// Lite uses REST/fetch and is therefore compatible with the background service
+// worker.
 import { getFirestore } from 'firebase/firestore/lite'
 
 /**
- * Firebase web konfigurasyonu derleme sirasinda (.env.local uzerinden) gomulur.
- * Firebase web config'i istemciye acik olmak uzere tasarlanmistir; gizli anahtar degildir.
+ * The Firebase web configuration is embedded at build time (via .env.local). The Firebase web
+ * config is designed to be public in the client; it is not a secret key.
  */
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
@@ -27,10 +28,6 @@ export function getGoogleOAuthClientId() {
   return googleOAuthClientId
 }
 
-export function getFirebaseWebConfig() {
-  return { ...firebaseConfig }
-}
-
 let cachedAuth = null
 let cachedFirestore = null
 
@@ -40,9 +37,9 @@ export function getFirebaseApp() {
 }
 
 /**
- * Service worker ve uzanti sayfalari icin Firebase Auth ornegi dondurur.
- * Service worker ortaminda desteklenen tek yerel kalicilik
- * indexedDBLocalPersistence'tir; popup/redirect cozucu tanimlanmaz.
+ * Returns the Firebase Auth instance for the service worker and extension pages. The only local
+ * persistence supported in the service worker environment is indexedDBLocalPersistence; no
+ * popup/redirect resolver is defined.
  */
 export function getFirebaseAuth() {
   if (!isFirebaseConfigured()) throw new Error('firebase_not_configured')
@@ -51,7 +48,8 @@ export function getFirebaseAuth() {
   try {
     cachedAuth = initializeAuth(app, { persistence: indexedDBLocalPersistence })
   } catch {
-    // Auth ayni uygulama orneginde daha once kurulmussa mevcut ornege donulur.
+    // If Auth was already set up on the same app instance the existing
+    // instance is returned.
     cachedAuth = getAuth(app)
   }
   return cachedAuth

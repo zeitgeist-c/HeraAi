@@ -1,27 +1,26 @@
 /**
- * HeraAi 1.10.0 — "Hesap ve Eşitleme" arayüzünün durum modeli (Aşama 11).
+ * HeraAi 1.10.0 - state model of the "Account and Sync" UI (Stage 11).
  *
- * Arayüz bileşeni bu saf fonksiyonları kullanır: hangi ekranın gösterileceği,
- * eşitleme rozetinin metni, ilk birleştirme özeti, kurtarma kiti metni ve
- * yerel sohbet politikası. Böylece kararlar test edilebilir kalır, bileşen
- * yalnızca çizim yapar.
+ * The UI component uses these pure functions: which screen to show, the sync badge text, the
+ * first merge summary, the recovery kit text and the local chat policy. That keeps the
+ * decisions testable and leaves the component with drawing only.
  */
 
 import { SESSION_SYNC_POLICIES, normalizeSessionSyncPolicy } from './syncContract'
 import { SYNC_STATE } from './syncEngine'
 import { RECOVERY_CODE_GROUPS, RECOVERY_CODE_GROUP_SIZE } from './syncCrypto'
 
-/** Hesap ekranının üç hâli. */
+/** The three states of the account screen. */
 export const ACCOUNT_STATE = Object.freeze({
-  /** Giriş yapılmamış. */
+  /** Not signed in. */
   DISCONNECTED: 'disconnected',
-  /** Giriş yapıldı ama kurtarma kodu onaylanmadı. */
+  /** Signed in but the recovery code has not been confirmed. */
   ONBOARDING: 'onboarding',
   /** Tam kurulum. */
   CONNECTED: 'connected',
 })
 
-/** Eşitleme durumu rozeti. */
+/** Sync status badge. */
 export const SYNC_BADGE = Object.freeze({
   UP_TO_DATE: 'up_to_date',
   SYNCING: 'syncing',
@@ -38,13 +37,7 @@ export const SYNC_BADGE_LABELS = Object.freeze({
   [SYNC_BADGE.PAUSED]: 'Duraklatıldı',
 })
 
-export const ACCOUNT_STATE_LABELS = Object.freeze({
-  [ACCOUNT_STATE.DISCONNECTED]: 'Bağlı değil',
-  [ACCOUNT_STATE.ONBOARDING]: 'İlk kurulum',
-  [ACCOUNT_STATE.CONNECTED]: 'Bağlı',
-})
-
-/** Yerel sohbet politikası etiketleri. */
+/** Local chat policy labels. */
 export const SESSION_POLICY_LABELS = Object.freeze({
   synced: 'Bu sohbeti eşitle',
   local_only: 'Yalnız bu cihazda tut',
@@ -56,9 +49,9 @@ function sayi(deger) {
 }
 
 /**
- * Hangi ekran gösterilecek?
- * Giriş yoksa `disconnected`; giriş var ama kurtarma kodu onaylanmadıysa
- * `onboarding`; aksi halde `connected`.
+ * Which screen to show?
+ * If there is no sign-in `disconnected`; if signed in but the recovery code is not confirmed
+ * `onboarding`; otherwise `connected`.
  */
 export function resolveAccountState({ signedIn, recoveryAcknowledged } = {}) {
   if (!signedIn) return ACCOUNT_STATE.DISCONNECTED
@@ -66,8 +59,8 @@ export function resolveAccountState({ signedIn, recoveryAcknowledged } = {}) {
 }
 
 /**
- * Rozet: eşitleme duraklatıldıysa, çevrimdışıysa ya da hata varsa bunlar
- * "eşitleniyor" bilgisinden önce gelir; kullanıcı önce engeli görmeli.
+ * Badge: if sync is paused, offline or failing those come before the "syncing" information; the
+ * user must see the blocker first.
  */
 export function syncBadgeFor({ syncState, online = true, paused = false } = {}) {
   if (paused) return SYNC_BADGE.PAUSED
@@ -82,7 +75,7 @@ export function syncBadgeLabel(badge) {
   return SYNC_BADGE_LABELS[badge] || SYNC_BADGE_LABELS[SYNC_BADGE.UP_TO_DATE]
 }
 
-/** İlk birleştirme özeti: ne kadar veri taşınacak? */
+/** First merge summary: how much data will be carried over? */
 export function firstMergeSummary({ sessions = 0, settings = 0, apiKeys = 0 } = {}) {
   const sohbet = sayi(sessions)
   const ayar = sayi(settings)
@@ -97,7 +90,7 @@ export function firstMergeSummary({ sessions = 0, settings = 0, apiKeys = 0 } = 
   }
 }
 
-/** Maskelenmiş hesap bilgisi: ilk üç karakter + `***` + alan adı (`exa***@gmail.com`). */
+/** Masked account info: first three characters + `***` + domain (`exa***@gmail.com`). */
 export function maskAccount(email) {
   const ham = String(email || '').trim()
   if (!ham) return ''
@@ -109,7 +102,7 @@ export function maskAccount(email) {
   return `${kullanici.slice(0, 3)}***${alan}`
 }
 
-/** Kurtarma kodunu okunaklı gruplara ayırır. */
+/** Splits the recovery code into readable groups. */
 export function formatRecoveryCode(code) {
   const temiz = String(code || '')
     .toUpperCase()
@@ -122,8 +115,8 @@ export function formatRecoveryCode(code) {
 }
 
 /**
- * Kurtarma kiti metni: kullanıcı `.txt` olarak indirir.
- * Kurtarma kodu tek başına hesabı açmaz; cihaz anahtarı da gerekir.
+ * Recovery kit text: the user downloads it as `.txt`.
+ * The recovery code alone does not open the account; the device key is required too.
  */
 export function recoveryKitText({ code, email, createdAt = null, locale = 'en' } = {}) {
   const duzenli = formatRecoveryCode(code)
@@ -153,7 +146,7 @@ export function recoveryKitText({ code, email, createdAt = null, locale = 'en' }
   return satirlar.filter(s => s !== null).join('\n')
 }
 
-/** Kurtarma kodunun gruplu gösterimi doğru mu? */
+/** Is the grouped display of the recovery code correct? */
 export function recoveryCodeGroups(code) {
   const temiz = String(code || '').replace(/[^A-Za-z0-9]/g, '')
   return {
@@ -164,17 +157,17 @@ export function recoveryCodeGroups(code) {
   }
 }
 
-/** Yerel sohbet politikası etiketi. */
+/** Local chat policy label. */
 export function sessionPolicyLabel(policy) {
   return SESSION_POLICY_LABELS[normalizeSessionSyncPolicy(policy)]
 }
 
-/** Sohbet yalnız bu cihazda mı tutuluyor? */
+/** Is the chat kept on this device only? */
 export function isLocalOnlySession(policy) {
   return normalizeSessionSyncPolicy(policy) === 'local_only'
 }
 
-/** Politikayı değiştirmek için menü seçenekleri. */
+/** Menu options for changing the policy. */
 export function sessionPolicyOptions() {
   return SESSION_SYNC_POLICIES.map(deger => ({
     value: deger,
@@ -183,8 +176,8 @@ export function sessionPolicyOptions() {
 }
 
 /**
- * "Cihazları yönet" listesi için satır modeli.
- * Kendi cihazımız işaretlenir; iptal edilmiş cihaz ayrı gösterilir.
+ * Row model for the "Manage devices" list.
+ * Our own device is marked; a revoked device is shown separately.
  */
 export function deviceRow({ device, currentDeviceId } = {}) {
   if (!device?.deviceId) return null
@@ -203,7 +196,7 @@ export function deviceRow({ device, currentDeviceId } = {}) {
   }
 }
 
-/** Onay gerektiren yıkıcı işlemler. */
+/** Destructive actions that need confirmation. */
 export const DESTRUCTIVE_ACTIONS = Object.freeze({
   DISCONNECT_DEVICE: 'disconnect_device',
   DELETE_ALL_CLOUD_DATA: 'delete_all_cloud_data',
@@ -228,12 +221,12 @@ export const DESTRUCTIVE_CONFIRMATIONS = Object.freeze({
   },
 })
 
-/** Onay metni; bilinmeyen işlem `null` döner. */
+/** Confirmation text; an unknown action returns `null`. */
 export function confirmationFor(action) {
   return DESTRUCTIVE_CONFIRMATIONS[action] || null
 }
 
-/** Arayüz katmanının tanıtımı (test ve dokümantasyon). */
+/** Introduction of the UI layer (tests and documentation). */
 export function describeAccountUi() {
   return {
     states: Object.values(ACCOUNT_STATE),

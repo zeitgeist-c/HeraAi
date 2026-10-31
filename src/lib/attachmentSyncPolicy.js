@@ -1,6 +1,6 @@
 /**
- * Bulut eşitlemesinde eklerin yalnızca güvenli metadatasını bırakır.
- * İkili içerik her zaman yerel IndexedDB'de kalır.
+ * Keeps only the safe metadata of attachments in cloud sync.
+ * Binary content always stays in the local IndexedDB.
  */
 export async function normalizeSessionAttachmentMetadata(session, hasLocalAttachment) {
   const lookup = typeof hasLocalAttachment === 'function'

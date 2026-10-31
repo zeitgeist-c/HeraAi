@@ -1,16 +1,15 @@
 /**
- * HeraAi 1.10.0 — 1.9.4 açık anahtar göçü (Aşama 6).
+ * HeraAi 1.10.0 - 1.9.4 plaintext key migration (Stage 6).
  *
- * Sıra önemlidir: geçici geri dönüş kopyası yazılır, şifreli kasa doldurulur,
- * her kaydın gerçekten çözülebildiği doğrulanır ve ancak bundan sonra açık
- * anahtarlarla geçici kopya birlikte silinir. Herhangi bir adım başarısızsa
- * açık kaynak alanları yerinde kalır; başarılı göçten sonra kalıcı depolamada
- * şifrelenmemiş anahtar bırakılmaz.
+ * Order matters: a temporary rollback copy is written, the encrypted vault is filled,
+ * every record is verified to decrypt, and only then are the plaintext keys and the
+ * temporary copy deleted together. If any step fails the plaintext source fields stay
+ * in place; after a successful migration no unencrypted key is left in persistent storage.
  */
 
 import { PROVIDERS } from './keyVault'
 
-/** 1.9.4'te anahtarların tutulduğu `chrome.storage.local` alanları. */
+/** `chrome.storage.local` fields where 1.9.4 kept the keys. */
 export const LEGACY_STORAGE_KEYS = Object.freeze({
   gemini: 'geminiApiKeys',
   tavily: 'tavilyApiKeys',
@@ -18,10 +17,10 @@ export const LEGACY_STORAGE_KEYS = Object.freeze({
   ollama: 'ollamaApiKeys',
 })
 
-/** Geri dönüş emniyeti: açık anahtarların silinmeden önceki kopyası. */
+/** Rollback safety: a copy of the plaintext keys before they are deleted. */
 export const BACKUP_STORAGE_KEY = 'apiKeys_v194_backup'
 
-/** Göç tamamlandı damgası (tekrar göçü engeller). */
+/** Migration completed stamp (prevents a second migration). */
 export const MIGRATION_FLAG = 'vaultMigrationCompletedAt'
 
 export function createStorageAdapter(area) {
@@ -52,7 +51,7 @@ function dizi(deger) {
   return Array.isArray(deger) ? deger : []
 }
 
-/** `chrome.storage.local` içindeki açık anahtarları sağlayıcı bazında okur. */
+/** Reads the plaintext keys in `chrome.storage.local` per provider. */
 export async function readLegacyKeys(storage) {
   const alanlar = Object.values(LEGACY_STORAGE_KEYS)
   const ham = await storage.get(alanlar)
@@ -65,8 +64,8 @@ export async function readLegacyKeys(storage) {
 }
 
 /**
- * Göç edilecek kayıtları düzleştirir. Saf fonksiyondur: aynı girdi her zaman
- * aynı planı üretir, bu yüzden doğrulama adımı plana karşı yapılabilir.
+ * Flattens the records to be migrated. It is a pure function: the same input always
+ * produces the same plan, so the verification step can run against the plan.
  */
 export function buildMigrationPlan(legacy) {
   const kayitlar = []
@@ -104,13 +103,13 @@ export async function readBackup(storage) {
 }
 
 /**
- * Açık anahtarları şifreli kasaya taşır.
+ * Moves the plaintext keys into the encrypted vault.
  *
  * @returns {{migrated:number, skipped:number, backupWritten:boolean, verified:number, reason?:string}}
  */
 export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
   if (await hasCompletedMigration(storage)) {
-    // 1.10.0'ın bıraktığı açık geri dönüş kopyasını 1.10.1 temizler.
+    // 1.10.1 clears the plaintext rollback copy 1.10.0 left behind.
     await storage.remove([BACKUP_STORAGE_KEY])
     return { migrated: 0, skipped: 0, backupWritten: false, verified: 0, reason: 'already_migrated' }
   }
@@ -122,7 +121,7 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
     return { migrated: 0, skipped: 0, backupWritten: false, verified: 0, reason: 'nothing_to_migrate' }
   }
 
-  // 1) Geri dönüş emniyeti: açık anahtarlar silinmeden önce kopyalanır.
+  // 1) Rollback safety: the plaintext keys are copied before deletion.
   const mevcutYedek = await readBackup(storage)
   if (!mevcutYedek) {
     await storage.set({
@@ -134,7 +133,8 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
     })
   }
 
-  // 2) Şifreli kasaya yaz (ana anahtar ve sıralama korunur).
+  // 2) Write to the encrypted vault (main key and ordering
+  // preserved).
   let migrated = 0
   let skipped = 0
   const yazilanlar = []
@@ -156,13 +156,14 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
     }
   }
 
-  // 3) Doğrulama: yazılan her kayıt gerçekten çözülebiliyor mu?
+  // 3) Verification: can every written record really be
+  // decrypted?
   for (const kayit of yazilanlar) {
     const ham = await vault.getRawKey(kayit.provider, kayit.yeniId)
     if (ham !== kayit.key) throw new Error('migration_verification_failed')
   }
 
-  // 4) Kullanım geçmişi taşınır (cooldown, hata sayaçları).
+  // 4) Usage history is carried over (cooldown, error counters).
   for (const kayit of yazilanlar) {
     await vault.updateKeyMetadata(kayit.provider, kayit.yeniId, {
       lastUsedAt: kayit.lastUsedAt,
@@ -174,8 +175,9 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
     })
   }
 
-  // 5) Doğrulama geçti: açık alanlar ve geçici geri dönüş kopyası temizlenir.
-  // Şifrelenmemiş API anahtarı kalıcı depolamada bırakılmaz.
+  // 5) Verification passed: the plaintext fields and the temporary rollback
+  // copy are
+  // cleared. No unencrypted API key is left in persistent storage.
   await storage.remove([...Object.values(LEGACY_STORAGE_KEYS), BACKUP_STORAGE_KEY])
   await storage.set({ [MIGRATION_FLAG]: now })
 
@@ -183,7 +185,7 @@ export async function migrateLegacyKeys({ storage, vault, now = Date.now() }) {
 }
 
 /**
- * Yalnız yarım kalmış eski bir göçten kalan geçici kopyayı geri yükler.
+ * Restores only the temporary copy left by a half-finished older migration.
  */
 export async function restoreLegacyKeysFromBackup({ storage }) {
   const yedek = await readBackup(storage)
@@ -205,7 +207,7 @@ export async function restoreLegacyKeysFromBackup({ storage }) {
   return { restored, savedAt: yedek.savedAt ?? null }
 }
 
-/** Yedekte saklanan ham anahtar sayısı (arayüzde uyarı için). */
+/** Number of raw keys kept in the backup (for the UI warning). */
 export function countBackupKeys(yedek) {
   if (!yedek?.keys) return 0
   let toplam = 0
