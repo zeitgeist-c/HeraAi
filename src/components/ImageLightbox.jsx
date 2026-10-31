@@ -156,8 +156,8 @@ function StripItem({ attachment, draftIndex, imagePosition, removeLabel, onOpenI
 }
 
 /**
- * Taslak şeridi: görseller kare küçük resim (isimsiz), tıklayınca ok tuşlu
- * galeri; diğer dosyalar isim çipleri. Kaldırma üstten gelir.
+ * Draft strip: images are square thumbnails (unnamed) that open the arrow-key gallery on click;
+ * other files are name chips. Removal comes from the top.
  */
 export function AttachmentGallery({ attachments, onRemove }) {
   const { t } = useTranslation()

@@ -199,7 +199,7 @@ async function ensureV2() {
 }
 
 /** Record one user prompt: lifetime + today prompt counters and lastActive. */
-/** Aynı storage anahtarına yazan işlemleri sıraya alır (eşzamanlı okuma-yazma kaybını önler). */
+/** Queues operations writing to the same storage key (prevents concurrent read-write loss). */
 let statsWriteChain = Promise.resolve()
 function serializeStatsWrite(task) {
   const result = statsWriteChain.then(task, task)

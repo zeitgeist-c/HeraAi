@@ -119,8 +119,8 @@ export function createFirestoreTransport({ db = getFirebaseFirestore() } = {}) {
     async deleteStaleEntityChunks(uid, opaqueEntityId, keepRevision = null) {
       let revision = keepRevision
       if (!revision) {
-        // Revizyon verilmediyse belgenin guncel revizyonunu koru: araya giren
-        // baska bir cihazin parcali surumunu silmek belgeyi bozar.
+        // When no revision was given, keep the document's current revision: deleting
+        // another device's partial version would corrupt the document.
         const snapshot = await getDoc(doc(db, cloudPaths.entity(uid, opaqueEntityId)))
         revision = snapshot.exists() ? snapshot.data()?.chunkRevision || null : null
       }

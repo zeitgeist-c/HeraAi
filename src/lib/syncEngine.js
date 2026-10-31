@@ -1,26 +1,26 @@
 /**
- * HeraAi 1.10.0 — Eşitleme motoru ve çevrimdışı kuyruk (Aşama 7).
+ * HeraAi 1.10.0 - sync engine and offline queue (Stage 7).
  *
- * Yerel değişiklikleri kaybetmeden gönderen, uzak değişiklikleri güvenle alan
- * merkezi motor. Service Worker yaşam döngüsüne uyumludur: kilit (lease)
- * IndexedDB'de tutulur, worker sonlanırsa TTL dolunca işlem kendiliğinden
- * devam eder.
+ * Central engine that sends local changes without losing them and receives remote
+ * changes safely. It is compatible with the Service Worker lifecycle: the lease is
+ * kept in IndexedDB, so if the worker terminates the operation continues by itself
+ * when the TTL expires.
  *
- * Motor veri modelinden bağımsızdır: yükü nereden okuyacağı (`readPayload`),
- * yerel sürümü nasıl bulacağı (`readLocalVersion`) ve uzak değişikliği nasıl
- * uygulayacağı (`applyRemote`) dışarıdan verilir. Böylece aynı motor hem
- * ayarlar hem kasa hem sohbetler için çalışır.
+ * The engine is independent of the data model: where to read the payload from
+ * (`readPayload`), how to find the local version (`readLocalVersion`) and how to
+ * apply the remote change (`applyRemote`) are supplied from outside. That way the
+ * same engine serves settings, the vault and chats.
  *
- * Çevrim adımları (plan §11):
- *  1. İnternet ve oturum durumu denetlenir.
- *  2. Cihaz anahtarı ile ana sır çözülür, alt anahtarlar belleğe alınır.
- *  3. Kuyruk okunur, aynı varlığa ait ardışık işlemler birleştirilir.
- *  4. Değişiklikler şifrelenir ve 500'lük batch'ler halinde gönderilir.
- *  5. Gönderilen kayıtlar kuyruktan temizlenir.
- *  6. Sunucu imlecinden sonraki yeni değişiklikler çekilir.
- *  7. İndirilen kayıtlar AAD doğrulaması ile çözülür.
- *  8. Deterministik sürüm karşılaştırması yapılarak yerel depoya uygulanır.
- *  9. Yeni imleç kaydedilir ve arayüze `SYNC_IDLE` bildirilir.
+ * Cycle steps (plan section 11):
+ * 1. Network and session status are checked.
+ * 2. The master secret is unwrapped with the device key, subkeys are loaded into memory.
+ * 3. The queue is read, consecutive operations on the same entity are coalesced.
+ * 4. Changes are encrypted and sent in batches of 500.
+ * 5. Sent records are cleared from the queue.
+ * 6. New changes after the server cursor are pulled.
+ * 7. Downloaded records are decrypted with AAD verification.
+ * 8. A deterministic version comparison is applied to the local store.
+ * 9. The new cursor is saved and `SYNC_IDLE` is reported to the UI.
  */
 
 import {
@@ -44,13 +44,13 @@ import {
 } from './syncModel'
 import { buildAad, decryptBytes, decryptJson, encryptBytes, encryptJson } from './syncCrypto'
 
-/** Kilit adı; tek eşitleme çevrimi aynı anda yalnız bir bağlamda çalışır. */
+/** Lock name; a single sync cycle runs in only one context at a time. */
 export const SYNC_LEASE_NAME = 'sync'
 
-/** Firestore batch sınırı. */
+/** Firestore batch limit. */
 export const SYNC_BATCH_SIZE = 500
 
-/** Tek çekimde alınacak en fazla belge. */
+/** Maximum number of documents taken in a single pull. */
 export const SYNC_PULL_LIMIT = 200
 
 export const SESSION_DOC_SAFE_BYTES = 700 * 1024
@@ -67,10 +67,10 @@ function chunkAad(base, revision, index) {
   return result
 }
 
-/** Kuyruk kaydı türleri. */
+/** Queue record types. */
 export const QUEUE_OP = Object.freeze({ PUT: 'put', DELETE: 'delete' })
 
-/** Arayüze bildirilen eşitleme durumları. */
+/** Sync states reported to the UI. */
 export const SYNC_STATE = Object.freeze({
   IDLE: 'idle',
   SYNCING: 'syncing',
@@ -80,7 +80,7 @@ export const SYNC_STATE = Object.freeze({
   ERROR: 'error',
 })
 
-/** Çevrim sonucu atlama nedenleri. */
+/** Reasons a cycle result was skipped. */
 export const SYNC_SKIP = Object.freeze({
   SIGNED_OUT: 'signed_out',
   LEASE_HELD: 'lease_held',
@@ -88,15 +88,15 @@ export const SYNC_SKIP = Object.freeze({
   OFFLINE: 'offline',
 })
 
-/** Kuyruk kaydının deterministik kimliği: aynı varlık tek satırda birleşir. */
+/** Deterministic id of a queue record: the same entity merges into a single row. */
 export function queueId(storageKey, logicalId) {
   return `${storageKey}::${logicalId}`
 }
 
 /**
- * Kuyruğu birleştirir: aynı varlık için yalnız en yeni işlem kalır.
- * Silme her zaman kazanır çünkü sürüm karşılaştırması silmeyi de kapsar;
- * eşit sürümde son yazılan kayıt geçerlidir.
+ * Coalesces the queue: only the newest operation per entity remains. A delete always
+ * wins because the version comparison also covers deletion; on equal versions the
+ * last written record applies.
  */
 export function coalesceQueue(records) {
   const sonuc = new Map()
@@ -117,7 +117,7 @@ export function coalesceQueue(records) {
   return [...sonuc.values()]
 }
 
-/** İmleç: sunucudaki son görülen belgenin sıralama anahtarı. */
+/** Cursor: the sort key of the last seen document on the server. */
 function normalizeCursor(raw) {
   if (!raw) return null
   const serverUpdatedAt = Number(raw.serverUpdatedAt)
@@ -151,18 +151,20 @@ function ilerlemeVarMi(mevcut, yeni) {
 }
 
 /**
- * Eşitleme motorunu kurar.
+ * Sets up the sync engine.
  *
  * @param {object} options
- * @param {IDBDatabase} options.db Kasa veritabanı.
- * @param {() => string|null} options.getUid Oturum sahibi; yoksa `null`.
- * @param {() => Promise<object>} options.getSubkeys Alt anahtarlar (dataEncryptionKey, hmacIdKey...).
- * @param {(storageKey: string, logicalId: string) => Promise<any>} options.readPayload Gönderilecek yük.
- * @param {(change: object) => Promise<boolean>} options.applyRemote Uzak değişikliği uygular.
- * @param {(entityType: string, opaqueEntityId: string) => Promise<object|null>} options.readLocalVersion Yerel sürüm.
- * @param {object} options.transport `pushEntities` ve `pullEntities`.
- * @param {() => boolean} [options.isOnline] Ağ durumu.
- * @param {(state: string, detail: object) => void} [options.onState] Durum bildirimi.
+ * @param {IDBDatabase} options.db Vault database.
+ * @param {() => string|null} options.getUid Session owner; `null` when absent.
+ * @param {() => Promise<object>} options.getSubkeys Subkeys (dataEncryptionKey, hmacIdKey...).
+ * @param {(storageKey: string, logicalId: string) => Promise<any>} options.readPayload Payload to
+ * send.
+ * @param {(change: object) => Promise<boolean>} options.applyRemote Applies the remote change.
+ * @param {(entityType: string, opaqueEntityId: string) => Promise<object|null>}
+ * options.readLocalVersion Local version.
+ * @param {object} options.transport `pushEntities` and `pullEntities`.
+ * @param {() => boolean} [options.isOnline] Network status.
+ * @param {(state: string, detail: object) => void} [options.onState] State notification.
  */
 export function createSyncEngine({
   db,
@@ -201,7 +203,8 @@ export function createSyncEngine({
     try {
       onState(yeni, detay)
     } catch (dinleyiciHatasi) {
-      // Durum dinleyicisi hata verirse eşitleme durmamalı; tanı için kaydedilir.
+      // If the state listener throws the sync must not stop; it is logged for
+      // diagnostics.
       console.error('Sync state listener failed', dinleyiciHatasi)
     }
   }
@@ -210,7 +213,7 @@ export function createSyncEngine({
     return { state: durum, running: calisiyor, lastRun: sonCevrim }
   }
 
-  /** Kuyruğa değişiklik ekler; aynı varlık için önceki kayıt güncellenir. */
+  /** Adds a change to the queue; the previous record for the same entity is updated. */
   async function enqueue({ storageKey, logicalId, op = QUEUE_OP.PUT, entityVersion, entityType }) {
     const tip = entityType || entityTypeForStorageKey(storageKey)
     if (!tip) throw new Error('sync_entity_type_unknown')
@@ -230,7 +233,7 @@ export function createSyncEngine({
     return kayit
   }
 
-  /** Bekleyen kayıt sayısı (birleştirme sonrası). */
+  /** Number of pending records (after coalescing). */
   async function pendingCount() {
     const ham = await idbGetAll(db, queueStore)
     return coalesceQueue(ham).length
@@ -246,7 +249,7 @@ export function createSyncEngine({
     await idbPut(db, metaStore, { id: 'syncPullCursor', ...cursor, savedAt: now() })
   }
 
-  /** Tek kuyruk kaydını şifreli bulut belgesine çevirir. */
+  /** Turns a single queue record into an encrypted cloud document. */
   async function kaydiHazirla(uid, subkeys, kayit) {
     const opaqueEntityId = await deriveOpaqueId(subkeys.hmacIdKey, kayit.entityType, kayit.logicalId)
     const aad = buildAad({ ownerUid: uid, opaqueEntityId, entityType: kayit.entityType })
@@ -255,7 +258,8 @@ export function createSyncEngine({
     let yuk = null
     if (!silme) {
       yuk = await readPayload(kayit.storageKey, kayit.logicalId)
-      // Kayıt artık yoksa (bu arada silinmişse) gönderim atlanır.
+      // If the record no longer exists (deleted meanwhile) the send
+      // is skipped.
       if (yuk === null || yuk === undefined) return { opaqueEntityId, skipped: true }
     }
 
@@ -309,7 +313,7 @@ export function createSyncEngine({
     return { opaqueEntityId, document: belge, chunks, chunkRevision }
   }
 
-  /** Adım 3-5: kuyruğu boşaltır. */
+  /** Steps 3-5: drains the queue. */
   async function gonderBekleyenler(uid, subkeys) {
     const ham = await idbGetAll(db, queueStore)
     const kayitlar = coalesceQueue(ham)
@@ -355,13 +359,13 @@ export function createSyncEngine({
         toplam += belgeler.length
         parti += 1
       }
-      // Adım 5: gönderilen kayıtlar kuyruktan düşer.
+      // Step 5: sent records drop out of the queue.
       if (temizlenecek.length > 0) await idbDeleteMatching(db, queueStore, temizlenecek)
     }
     return { pushed: toplam, batches: parti }
   }
 
-  /** Adım 6-8: uzak değişiklikleri çeker ve uygular. */
+  /** Steps 6-8: pulls remote changes and applies them. */
   async function cekUzakDegisiklikler(uid, subkeys) {
     const baslangic = await readCursor()
     let imlec = baslangic
@@ -375,7 +379,8 @@ export function createSyncEngine({
       cekilen += belgeler.length
 
       for (const uzak of belgeler) {
-        // Okunamayan belge sessizce atlanmaz; tekrar denemek için imleç korunur.
+        // An unreadable document is not skipped silently; the cursor is kept so
+        // it can be retried.
         const sonuc = await uzakUygula(uid, subkeys, uzak)
         if (sonuc) uygulanan += 1
         const yeni = cursorFromDocument(uzak)
@@ -385,12 +390,12 @@ export function createSyncEngine({
       if (belgeler.length < (yanit.pageSize || pullLimit)) break
     }
 
-    // Adım 9: imleç yalnızca ilerlediyse kaydedilir.
+    // Step 9: the cursor is saved only if it moved forward.
     if (ilerlemeVarMi(baslangic, imlec)) await writeCursor(imlec)
     return { pulled: cekilen, applied: uygulanan, quarantined: 0 }
   }
 
-  /** Adım 7-8: AAD doğrulaması, sürüm karşılaştırması, yerel uygulama. */
+  /** Steps 7-8: AAD verification, version comparison, local application. */
   async function uzakUygula(uid, subkeys, uzak) {
     if (!uzak?.opaqueEntityId) return false
     if (Number(uzak.schemaVersion) !== CLOUD_SCHEMA_VERSION) {
@@ -456,12 +461,12 @@ export function createSyncEngine({
     return uygulandi !== false
   }
 
-  /** Adım 1-9: tek eşitleme çevrimi. */
+  /** Steps 1-9: a single sync cycle. */
   async function runOnce() {
     if (calisiyor) return { skipped: SYNC_SKIP.IN_PROGRESS }
     calisiyor = true
     try {
-      // Adım 1: oturum ve ağ denetimi.
+      // Step 1: session and network check.
       const uid = getUid()
       if (!uid) {
         bildir(SYNC_STATE.SIGNED_OUT)
@@ -485,7 +490,7 @@ export function createSyncEngine({
 
       bildir(SYNC_STATE.SYNCING)
       try {
-        // Adım 2: alt anahtarlar.
+        // Step 2: subkeys.
         const subkeys = await getSubkeys()
         if (!subkeys?.dataEncryptionKey || !subkeys?.hmacIdKey) {
           throw new Error('sync_subkeys_invalid')
@@ -515,7 +520,7 @@ export function createSyncEngine({
     }
   }
 
-  /** Kuyruk boşalana kadar çevrimi yineler. */
+  /** Repeats the cycle until the queue is empty. */
   async function drain({ maxRounds = 20 } = {}) {
     let toplam = { pushed: 0, pulled: 0, applied: 0, rounds: 0 }
     for (let tur = 0; tur < maxRounds; tur += 1) {
@@ -544,7 +549,7 @@ export function createSyncEngine({
   }
 }
 
-/** Eşitleme motorunun tanıtımı (test ve dokümantasyon). */
+/** Introduction of the sync engine (tests and documentation). */
 export function describeSyncEngine() {
   return {
     leaseName: SYNC_LEASE_NAME,

@@ -1,47 +1,47 @@
 /**
- * HeraAi 1.10.0 — API anahtarı tam güvenli yönetim paketi (Aşama 10).
+ * HeraAi 1.10.0 - full secure API key management package (Stage 10).
  *
- * Üç parça:
- *  1. Anahtar sağlık durumları (`ready`, `untested`, `paused`, `cooldown`,
- *     `invalid`, `incompatible`, `transient_error`).
- *  2. Hata sınıflandırması ve artan bekleme politikası (401 → kalıcı geçersiz,
- *     429 → `Retry-After` ya da 1dk/5dk/15dk/1saat merdiveni).
- *  3. Gizli parmak izi ile mükerrer anahtar engelleme: açık anahtar veya
- *     standart hash yerine `HMAC-SHA-256(fingerprintKey, rawKey)`.
+ * Three parts:
+ * 1. Key health states (`ready`, `untested`, `paused`, `cooldown`,
+ * `invalid`, `incompatible`, `transient_error`).
+ * 2. Error classification and backoff policy (401 -> permanently invalid,
+ * 429 -> `Retry-After` or the 1m/5m/15m/1h ladder).
+ * 3. Duplicate key prevention with a secret fingerprint: instead of the plain key or
+ * a standard hash, `HMAC-SHA-256(fingerprintKey, rawKey)`.
  *
- * Kural: yerel internet kesintisi ya da ağ zaman aşımı anahtarı "bozuk"
- * saymaz; bu tür hatalar diğer cihazlara küresel arıza olarak yansımaz.
+ * Rule: a local internet outage or a network timeout does not count as a "broken"
+ * key; such errors are not propagated to other devices as a global failure.
  */
 
 import { computeKeyFingerprint } from './syncCrypto'
 
 export const KEY_HEALTH = Object.freeze({
-  /** Sağlıklı; rotasyona girer. */
+  /** Healthy; takes part in rotation. */
   READY: 'ready',
-  /** Hiç denenmedi; rotasyona girer. */
+  /** Never tested; takes part in rotation. */
   UNTESTED: 'untested',
-  /** Kullanıcı duraklattı; rotasyona girmez. */
+  /** Paused by the user; does not take part in rotation. */
   PAUSED: 'paused',
-  /** Geçici hız sınırı; süre dolunca kendiliğinden döner. */
+  /** Temporary rate limit; returns by itself when the period expires. */
   COOLDOWN: 'cooldown',
-  /** 401: kalıcı geçersiz; rotasyondan çıkar. */
+  /** 401: permanently invalid; removed from rotation. */
   INVALID: 'invalid',
-  /** Anahtar sağlam ama ilgili modele yetkisi yok. */
+  /** The key is fine but has no permission for the model in question. */
   INCOMPATIBLE: 'incompatible',
-  /** 5xx veya ağ hatası; geçici. */
+  /** 5xx or a network error; temporary. */
   TRANSIENT_ERROR: 'transient_error',
 })
 
 /** Rotasyona girebilen durumlar. */
 export const USABLE_HEALTH = Object.freeze([KEY_HEALTH.READY, KEY_HEALTH.UNTESTED])
 
-/** Kalıcı olarak dışlanan durumlar (kullanıcı müdahalesi gerekir). */
+/** States excluded permanently (user action required). */
 export const PERMANENT_HEALTH = Object.freeze([KEY_HEALTH.INVALID, KEY_HEALTH.PAUSED])
 
-/** Artan bekleme merdiveni (plan §14.2). */
+/** Growing backoff ladder (plan section 14.2). */
 export const COOLDOWN_LADDER_MS = Object.freeze([60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000])
 
-/** Ağ kaynaklı hatalar: anahtar sağlığını kalıcı bozmaz. */
+/** Network-borne errors: do not damage the key health permanently. */
 export const NETWORK_ERROR_TYPES = Object.freeze([
   'network_error',
   'timeout',
@@ -54,14 +54,14 @@ function sayi(deger) {
   return Number.isFinite(n) ? n : null
 }
 
-/** Ardışık hata sayısına karşılık gelen bekleme süresi. */
+/** The backoff period that corresponds to the number of consecutive failures. */
 export function cooldownForAttempt(failCount) {
   const n = Math.max(1, Math.trunc(Number(failCount) || 1))
   const index = Math.min(n - 1, COOLDOWN_LADDER_MS.length - 1)
   return COOLDOWN_LADDER_MS[index]
 }
 
-/** `Retry-After` başlığını milisaniyeye çevirir (saniye ya da HTTP tarihi). */
+/** Converts the `Retry-After` header to milliseconds (seconds or an HTTP date). */
 export function parseRetryAfter(value, { now = Date.now() } = {}) {
   if (value === null || value === undefined || value === '') return null
   const saniye = Number(value)
@@ -75,15 +75,15 @@ export function parseRetryAfter(value, { now = Date.now() } = {}) {
 }
 
 /**
- * Hatayı sınıflandırır.
+ * Classifies the error.
  *
  * @param {object} hata
- * @param {number} [hata.status] HTTP durum kodu.
- * @param {string} [hata.errorType] Sağlayıcıdan gelen tip (`quota_exceeded`...).
- * @param {string} [hata.message] Ham mesaj (sınıflandırma yedeği).
- * @param {string|number} [hata.retryAfter] `Retry-After` başlığı.
- * @param {number} [hata.failCount] Bu anahtarın ardışık hata sayısı.
- * @param {boolean} [hata.modelScoped] Hatanın yalnız bir model için geçerli olduğu bilgisi.
+ * @param {number} [hata.status] HTTP status code.
+ * @param {string} [hata.errorType] Type coming from the provider (`quota_exceeded`...).
+ * @param {string} [hata.message] Raw message (classification fallback).
+ * @param {string|number} [hata.retryAfter] `Retry-After` header.
+ * @param {number} [hata.failCount] Consecutive failure count of this key.
+ * @param {boolean} [hata.modelScoped] Whether the error applies to only one model.
  */
 export function classifyKeyError({
   status,
@@ -98,8 +98,10 @@ export function classifyKeyError({
   const mesaj = String(message || '').toLowerCase()
   const kod = sayi(status)
 
-  // Ağ kaynaklı: anahtar suçlu değil, diğer cihazlara yansıtılmaz.
-  // `failed_to_fetch` / `Failed to fetch` gibi yazım farkları normalize edilir.
+  // Network-borne: the key is not at fault and it is not propagated to other
+  // devices.
+  // Spelling differences such as `failed_to_fetch` / `Failed to fetch` are
+  // normalized.
   const mesajNorm = mesaj.replace(/[\s_-]+/g, '')
   const agHatasi = NETWORK_ERROR_TYPES.some(
     t => tip === t || mesajNorm.includes(t.replace(/[_-]/g, '')),
@@ -114,7 +116,7 @@ export function classifyKeyError({
     }
   }
 
-  // 401: kalıcı geçersiz.
+  // 401: permanently invalid.
   if (kod === 401 || tip === 'unauthorized' || mesaj.includes('unauthorized')) {
     return {
       health: KEY_HEALTH.INVALID,
@@ -125,7 +127,7 @@ export function classifyKeyError({
     }
   }
 
-  // 403 + model kapsamı: anahtar sağlam, yetki yok.
+  // 403 + model scope: the key is fine, there is no permission.
   if (kod === 403 || tip === 'forbidden' || mesaj.includes('forbidden')) {
     const uyumsuz = modelScoped || mesaj.includes('model') || mesaj.includes('permission')
     return {
@@ -137,7 +139,7 @@ export function classifyKeyError({
     }
   }
 
-  // 429: bekleme; `Retry-After` varsa o, yoksa artan merdiven.
+  // 429: wait; use `Retry-After` when present, otherwise the growing ladder.
   if (kod === 429 || tip === 'rate_limit' || tip === 'quota_exceeded' || mesaj.includes('rate limit')) {
     const baslik = parseRetryAfter(retryAfter, { now })
     return {
@@ -149,7 +151,7 @@ export function classifyKeyError({
     }
   }
 
-  // 5xx ve sağlayıcı kaynaklı geçici hatalar.
+  // 5xx and provider-borne temporary errors.
   if ((kod && kod >= 500) || tip === 'server_error' || tip === 'unavailable') {
     return {
       health: KEY_HEALTH.TRANSIENT_ERROR,
@@ -160,7 +162,7 @@ export function classifyKeyError({
     }
   }
 
-  // İstek hatası: anahtar sağlıklı kalır.
+  // Request error: the key stays healthy.
   if (kod === 400 || tip === 'invalid_request') {
     return {
       health: KEY_HEALTH.READY,
@@ -171,7 +173,7 @@ export function classifyKeyError({
     }
   }
 
-  // Bilinmeyen: temkinli davran, kısa bekleme.
+  // Unknown: act cautiously, short backoff.
   return {
     health: KEY_HEALTH.TRANSIENT_ERROR,
     cooldownMs: cooldownForAttempt(1),
@@ -181,7 +183,7 @@ export function classifyKeyError({
   }
 }
 
-/** Anahtar şu anda kullanılabilir mi? */
+/** Is the key usable right now? */
 export function isKeyUsable(meta, { now = Date.now() } = {}) {
   if (!meta) return false
   const durum = meta.status || KEY_HEALTH.UNTESTED
@@ -189,7 +191,7 @@ export function isKeyUsable(meta, { now = Date.now() } = {}) {
   if (durum === KEY_HEALTH.COOLDOWN) {
     const bitis = sayi(meta.cooldownUntil)
     if (bitis !== null && bitis > now) return false
-    // Bekleme doldu: yeniden denenebilir.
+    // The wait expired: it can be retried.
     return true
   }
   if (durum === KEY_HEALTH.TRANSIENT_ERROR) {
@@ -201,8 +203,8 @@ export function isKeyUsable(meta, { now = Date.now() } = {}) {
 }
 
 /**
- * Sonucu anahtar metadata'sına uygular. Başarılı istek sayaç ve beklemeyi
- * sıfırlar; kalıcı hatalar rotasyondan çıkarır.
+ * Applies the result to the key metadata. A successful request resets the counter and
+ * the backoff; permanent errors remove the key from rotation.
  */
 export function applyKeyOutcome(
   meta = {},
@@ -231,17 +233,17 @@ export function applyKeyOutcome(
     lastErrorType: errorType || sinif.reason,
     cooldownUntil: sinif.cooldownMs > 0 ? now + sinif.cooldownMs : null,
     failCount: yeniFail,
-    // Ağ hatası anahtarın kimliğini lekelemez.
+    // A network error does not taint the key's identity.
     ...(sinif.global ? {} : { lastErrorScope: 'local' }),
   }
 }
 
-/** Kullanıcı anahtarı duraklatır (rotasyondan çıkar). */
+/** The user pauses the key (removed from rotation). */
 export function pauseKey(meta = {}, { now = Date.now() } = {}) {
   return { ...meta, status: KEY_HEALTH.PAUSED, pausedAt: now }
 }
 
-/** Duraklatmayı kaldırır; anahtar yeniden rotasyona girer. */
+/** Clears the pause; the key re-enters rotation. */
 export function resumeKey(meta = {}, { now = Date.now() } = {}) {
   return {
     ...meta,
@@ -253,8 +255,8 @@ export function resumeKey(meta = {}, { now = Date.now() } = {}) {
 }
 
 /**
- * Gizli parmak izi: aynı ham anahtar iki cihazda eklendiğinde açık anahtar
- * karşılaştırması yapılmaz, `HMAC-SHA-256(fingerprintKey, rawKey)` karşılaştırılır.
+ * Secret fingerprint: when the same raw key is added on two devices the plain key is
+ * not compared, `HMAC-SHA-256(fingerprintKey, rawKey)` is compared.
  */
 export async function keyFingerprint(fingerprintKey, rawKey) {
   if (!fingerprintKey) throw new Error('fingerprint_key_missing')
@@ -263,7 +265,7 @@ export async function keyFingerprint(fingerprintKey, rawKey) {
   return computeKeyFingerprint(fingerprintKey, ham)
 }
 
-/** Aynı parmak izine sahip mevcut kaydı bulur (mükerrer eklemeyi engeller). */
+/** Finds the existing record with the same fingerprint (prevents duplicate insertion). */
 export function findDuplicateKey(fingerprint, kayitlar) {
   if (!fingerprint) return null
   for (const kayit of kayitlar || []) {
@@ -272,7 +274,7 @@ export function findDuplicateKey(fingerprint, kayitlar) {
   return null
 }
 
-/** Sağlayıcı havuzunun özeti (arayüz rozetleri için). */
+/** Summary of the provider pool (for the UI badges). */
 export function summarizePool(kayitlar, { now = Date.now() } = {}) {
   const ozet = {
     total: 0,
@@ -294,7 +296,7 @@ export function summarizePool(kayitlar, { now = Date.now() } = {}) {
   return ozet
 }
 
-/** Katmanın tanıtımı (test ve dokümantasyon). */
+/** Introduction of the layer (tests and documentation). */
 export function describeKeyHealth() {
   return {
     healths: Object.values(KEY_HEALTH),

@@ -256,8 +256,9 @@ export async function processAttachmentFile(file) {
       throw new AttachmentValidationError('attachment_invalid', 'The DOCX file is invalid or corrupted.')
     }
   } else if (mimeType === 'application/vnd.ms-excel') {
-    // Guvenlik: emekli BIFF (.xls) bicimi yalniz savunmasiz kutuphane ile
-    // okunabiliyordu; kullaniciya donusturme yolu gosterilir (.doc ornegi gibi).
+    // Security: the retired BIFF (.xls) format could only be read with an
+    // unpatched library; the user is shown a conversion path (like the .doc
+    // example).
     throw new AttachmentValidationError('spreadsheet_legacy_unsupported', 'Legacy .xls files are not supported. Save the workbook as .xlsx and try again.')
   } else if (
     mimeType.includes('spreadsheetml.sheet')

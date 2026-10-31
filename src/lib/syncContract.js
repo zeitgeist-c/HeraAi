@@ -1,53 +1,52 @@
 /**
- * HeraAi 1.10.0 — eşitleme sözleşmesi (Aşama 2).
+ * HeraAi 1.10.0 - sync contract (Stage 2).
  *
- * Hangi `chrome.storage.local` anahtarının buluta gittiğini, hangisinin yalnız
- * cihazda kaldığını ve eşitlenen her verinin nasıl birleştirileceğini tek yerde
- * tanımlar. Sonraki aşamalar (bulut veri modeli, şifreleme, eşitleme motoru)
- * yalnızca bu tabloyu okur; sınıflandırma kararı başka bir dosyada tekrarlanmaz.
+ * Defines in one place which `chrome.storage.local` key goes to the cloud, which stays
+ * only on the device, and how each synced piece of data is merged. Later stages
+ * (cloud data model, encryption, sync engine) read only this table; the
+ * classification decision is not repeated in another file.
  *
- * Gizlilik: eşitlenen her yük istemci tarafında şifrelenir; sunucu yalnızca
- * opak kimlikler ve sürüm damgaları görür. İstatistikler hiçbir koşulda sohbet
- * metni, URL veya dosya içeriği taşımaz.
+ * Privacy: every synced payload is encrypted on the client; the server sees only
+ * opaque ids and version stamps. Statistics never carry chat text, URLs or file content.
  *
- * Sınıflandırılmamış bir anahtar `EXCLUDED` sayılır — yeni bir ayar eklerken
- * buraya satır eklenmeden hiçbir şey buluta gitmez (güvenli varsayılan).
+ * An unclassified key is treated as `EXCLUDED` - when adding a new setting nothing
+ * goes to the cloud without a row here (safe default).
  */
 
 export const SYNC_SCHEMA_VERSION = 1
 
-/** Veri sınıfları. */
+/** Data classes. */
 export const SYNC_CLASS = {
-  /** Tek değerlik ayar; son yazan kazanır. */
+  /** Single-value setting; the last writer wins. */
   SETTING: 'setting',
-  /** Kimlikli kayıt koleksiyonu; kayıt bazında birleştirilir. */
+  /** Identified record collection; merged record by record. */
   ENTITY: 'entity',
-  /** Sayaç ağacı; toplanarak birleştirilir. */
+  /** Counter tree; merged by summing. */
   STATS: 'stats',
-  /** Yalnız bu cihazda kalır. */
+  /** Stays on this device only. */
   LOCAL_ONLY: 'local_only',
-  /** Eşitlenmez; eski/artık veri veya cihaz altyapısı. */
+  /** Not synced; legacy/obsolete data or device infrastructure. */
   EXCLUDED: 'excluded',
 }
 
-/** Birleştirme stratejileri. */
+/** Merge strategies. */
 export const MERGE_STRATEGY = {
-  /** Aynı anahtar için en yeni `updatedAt` kazanır. */
+  /** The newest `updatedAt` wins for the same key. */
   LAST_WRITE_WINS: 'last_write_wins',
-  /** Kayıt kimliği bazında birleşim; silmeler tombstone ile taşınır. */
+  /** Union by record id; deletions are carried as tombstones. */
   ENTITY_UNION: 'entity_union',
-  /** Günlük sayaçlar toplanır; kimlik listeleri birleşir. */
+  /** Daily counters are summed; id lists are united. */
   STATS_SUM: 'stats_sum',
-  /** Birleştirme yok. */
+  /** No merge. */
   NONE: 'none',
 }
 
 /**
- * Sözleşme tablosu: anahtar -> { class, merge, tombstone, notes }.
- * `notes` yalnızca bakım için açıklamadır; davranışı değiştirmez.
+ * Contract table: key -> { class, merge, tombstone, notes }.
+ * `notes` is a maintenance description only; it does not change behaviour.
  */
 const CONTRACT = {
-  // ---- Eşitlenen ayarlar (tek değer) ----
+  // ---- Synced settings (single value) ----
   theme: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
   customPrimaryColor: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
   language: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
@@ -59,29 +58,30 @@ const CONTRACT = {
   selectedProvider: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
   modelSelectionMode: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS },
 
-  // Aşama 9-10'da eklenecek ayarlar; anahtar adları burada sabitlenir ki
-  // eşitleme motoru yazıldığında sözleşme değişmesin.
+  // Settings to be added in stages 9-10; the key names are pinned here
+  // so the contract
+  // does not change when the sync engine is written.
   apiKeyUsageMode: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS, notes: 'primary | balanced_rotation' },
   apiKeyWarningThresholds: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS, notes: 'Kota/uyarı eşikleri' },
   localOnlyChatDefault: { class: SYNC_CLASS.SETTING, merge: MERGE_STRATEGY.LAST_WRITE_WINS, notes: 'Yeni sohbetin varsayılan eşitleme politikası' },
 
-  // ---- Eşitlenen koleksiyonlar (kayıt bazlı) ----
+  // ---- Synced collections (per record) ----
   sessions: { class: SYNC_CLASS.ENTITY, merge: MERGE_STRATEGY.ENTITY_UNION, tombstone: true, notes: 'id bazlı; mesajlar kaydın içinde' },
   geminiApiKeys: { class: SYNC_CLASS.ENTITY, merge: MERGE_STRATEGY.ENTITY_UNION, tombstone: true, notes: 'ham anahtar şifreli taşınır' },
   tavilyApiKeys: { class: SYNC_CLASS.ENTITY, merge: MERGE_STRATEGY.ENTITY_UNION, tombstone: true },
   openRouterApiKeys: { class: SYNC_CLASS.ENTITY, merge: MERGE_STRATEGY.ENTITY_UNION, tombstone: true },
   ollamaApiKeys: { class: SYNC_CLASS.ENTITY, merge: MERGE_STRATEGY.ENTITY_UNION, tombstone: true },
 
-  // ---- Eşitlenen istatistikler ----
+  // ---- Synced statistics ----
   stats: { class: SYNC_CLASS.STATS, merge: MERGE_STRATEGY.STATS_SUM, notes: 'recentFinalizedIds birleşim, lastActive max' },
 
-  // ---- Yalnız cihazda ----
+  // ---- Device only ----
   activeSessionId: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Açık sohbet seçimi cihaza özel' },
   selectedText: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Bağlam menüsü aktarımı' },
   pendingPageUrl: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Bağlam menüsü aktarımı' },
   activeGeneration: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Canlı üretim durumu' },
 
-  // Aşama 6-8 altyapısı; hepsi cihaza özel.
+  // Stage 6-8 infrastructure; all of it is device specific.
   syncLease: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Eşitleme kilidi' },
   syncQueue: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Çevrimdışı kuyruk' },
   syncPullCursor: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Son çekme imleci' },
@@ -92,14 +92,14 @@ const CONTRACT = {
   composerMaxHeight: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Yazı alanı yükseklik tercihi; cihaza özel' },
   deviceCryptoKey: { class: SYNC_CLASS.LOCAL_ONLY, merge: MERGE_STRATEGY.NONE, notes: 'Cihaza özel sarma anahtarı' },
 
-  // ---- Eşitlenmeyen (eski/artık) ----
+  // ---- Not synced (legacy/obsolete) ----
   chatHistory: { class: SYNC_CLASS.EXCLUDED, merge: MERGE_STRATEGY.NONE, notes: 'v1 kalıntısı; sessions içine göç edip silinir' },
 }
 
 /**
- * Eşitlenen sohbet kaydının alan sözleşmesi (Aşama 3'te bulut belgesine
- * dönüştürülür). `importExport.js` şemasıyla aynıdır; orada olmayan alan
- * eklenirse dışa aktarma ve eşitleme ayrışır.
+ * Field contract of the synced chat record (converted to a cloud document in stage
+ * 3). It matches the `importExport.js` schema; if a field missing there is added,
+ * export and sync diverge.
  */
 export const SESSION_FIELD_CONTRACT = {
   identity: ['id', 'createdAt', 'updatedAt'],
@@ -108,7 +108,7 @@ export const SESSION_FIELD_CONTRACT = {
   context: ['activeAttachmentIds', 'activeWebUrls'],
 }
 
-/** Eşitlenen mesajın alan sözleşmesi. */
+/** Field contract of the synced message. */
 export const MESSAGE_FIELD_CONTRACT = {
   identity: ['id', 'role'],
   body: ['content', 'displayContent'],
@@ -118,8 +118,9 @@ export const MESSAGE_FIELD_CONTRACT = {
 }
 
 /**
- * Ek dosya politikası: mesaj yalnızca metadata taşır, ikili veri ayrı eşitlenir.
- * `maxSyncBytes` üstündeki ekler buluta gönderilmez ve cihazda kalır.
+ * Attachment policy: the message carries only metadata, binary data is synced
+ * separately. Attachments above `maxSyncBytes` are not sent to the cloud and stay on the
+ * device.
  */
 export const ATTACHMENT_SYNC_POLICY = {
   metadataSynced: true,
@@ -129,69 +130,69 @@ export const ATTACHMENT_SYNC_POLICY = {
   missingMetadata: ['id', 'name', 'mimeType', 'size', 'kind', 'availability'],
 }
 
-/** Kaydın sınıfını döndürür; bilinmeyen anahtar güvenli varsayılanla EXCLUDED olur. */
+/** Returns the record's class; an unknown key becomes EXCLUDED with the safe default. */
 export function classifyStorageKey(key) {
   const entry = CONTRACT[key]
   return entry ? entry.class : SYNC_CLASS.EXCLUDED
 }
 
-/** Kaydın birleştirme stratejisini döndürür. */
+/** Returns the record's merge strategy. */
 export function getMergeStrategy(key) {
   const entry = CONTRACT[key]
   return entry ? entry.merge : MERGE_STRATEGY.NONE
 }
 
-/** Kayıt silmeleri tombstone ile mi taşınır? */
+/** Are record deletions carried as tombstones? */
 export function usesTombstone(key) {
   return CONTRACT[key]?.tombstone === true
 }
 
-/** Anahtar buluta gidiyor mu? */
+/** Does the key go to the cloud? */
 export function isSyncedKey(key) {
   const cls = classifyStorageKey(key)
   return cls === SYNC_CLASS.SETTING || cls === SYNC_CLASS.ENTITY || cls === SYNC_CLASS.STATS
 }
 
-/** Anahtar yalnız bu cihazda mı kalıyor? */
+/** Does the key stay on this device only? */
 export function isLocalOnlyKey(key) {
   return classifyStorageKey(key) === SYNC_CLASS.LOCAL_ONLY
 }
 
-/** Verilen sınıftaki tüm anahtarlar. */
+/** All keys in the given class. */
 export function getKeysByClass(syncClass) {
   return Object.keys(CONTRACT).filter(key => CONTRACT[key].class === syncClass)
 }
 
-/** Eşitlenen anahtarların tamamı (ayar + koleksiyon + istatistik). */
+/** All synced keys (setting + collection + statistic). */
 export function getSyncedKeys() {
   return Object.keys(CONTRACT).filter(isSyncedKey)
 }
 
-/** Buluta hiç gitmeyen anahtarlar (cihaza özel + hariç tutulan). */
+/** Keys that never go to the cloud (device only + excluded). */
 export function getNonSyncedKeys() {
   return Object.keys(CONTRACT).filter(key => !isSyncedKey(key))
 }
 
 /**
- * Aşama 9/10'da yazılacak çalışma modları. Burada sabitlenir ki anahtar
- * kullanım modu eşitleme sözleşmesinin dışında kalmasın.
+ * Usage modes to be written in stage 9/10. Pinned here so the key usage mode does
+ * not stay outside the sync contract.
  */
 export const API_KEY_USAGE_MODES = Object.freeze(['primary', 'balanced_rotation'])
 
-/** Yazılabilir bir mod değerini doğrular; geçersizse `primary` döner. */
+/** Validates a writable mode value; returns `primary` when invalid. */
 export function normalizeApiKeyUsageMode(value) {
   return API_KEY_USAGE_MODES.includes(value) ? value : 'primary'
 }
 
-/** Sohbet bazlı eşitleme politikası; bilinmeyen değer `synced` olur. */
+/** Per-chat sync policy; an unknown value becomes `synced`. */
 export const SESSION_SYNC_POLICIES = Object.freeze(['synced', 'local_only'])
 
-/** Yazılabilir bir politika değerini doğrular. */
+/** Validates a writable policy value. */
 export function normalizeSessionSyncPolicy(value) {
   return SESSION_SYNC_POLICIES.includes(value) ? value : 'synced'
 }
 
-/** Sözleşmenin özeti (teşhis ve testler için). */
+/** Summary of the contract (for diagnostics and tests). */
 export function describeSyncContract() {
   return {
     schemaVersion: SYNC_SCHEMA_VERSION,

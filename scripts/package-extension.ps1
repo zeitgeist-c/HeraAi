@@ -14,8 +14,8 @@ $version = [string]$manifest.version
 if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
   throw "Invalid extension version in ${manifestPath}: $version"
 }
-# Paket kapisi (AUD-HERAAI-002): kaynak package/manifest, build manifesti,
-# ZIP adi ve tag birlikte eslesmeli. Ayrismayi paketlemeden once yakala.
+# Package gate (AUD-HERAAI-002): source package/manifest, build manifest,
+# ZIP name and tag must agree. Catch drift before packaging.
 $pkgVersion = (Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json).version
 $srcManifest = (Get-Content -LiteralPath (Join-Path $repoRoot 'manifest.json') -Raw | ConvertFrom-Json).version
 if ($version -ne $pkgVersion -or $version -ne $srcManifest) {
@@ -76,8 +76,8 @@ if ($getFileHash) {
 }
 Write-Host "SHA-256 $hashValue"
 
-# sha256sum uyumlu yan dosya (LF satır sonu, iki boşluk ayırıcı) — denetim notu:
-# 1.10.18'e kadar elle üretiliyordu, artık paketleme adımı kendisi yazıyor.
+# sha256sum-compatible sidecar file (LF line endings, two-space separator) — audit note:
+# it was produced by hand until 1.10.18; the packaging step now writes it itself.
 $sidecarPath = "$zipPath.sha256"
 $sidecarLine = "$hashValue  $([System.IO.Path]::GetFileName($zipPath))`n"
 [System.IO.File]::WriteAllText($sidecarPath, $sidecarLine, [System.Text.Encoding]::ASCII)

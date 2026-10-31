@@ -12,10 +12,6 @@ import { GalleryLightbox } from './ImageLightbox'
 
 const COPY_TIMEOUT_MS = 2000
 const RETRY_MENU_ESTIMATED_HEIGHT_PX = 226
-// Kullanıcı mesajı bu yükseklikten sonra kısaltılır: 12 satır × leading-relaxed
-// (1.625 × 14px) ≈ 273px. Kısa mesajda ölçüm taşma bulmaz, düğme hiç çıkmaz.
-const USER_MESSAGE_MAX_HEIGHT_PX = 273
-
 async function copyText(text, { onSuccess, successMessage, errorMessage }) {
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable')
@@ -92,16 +88,17 @@ const ChatMessage = ({
   const { t } = useTranslation()
   const isBot = message.role === 'model'
   const visibleContent = getMessageDisplayContent(message)
-  // content her zaman dizge olmayabilir (bozuk içe aktarma, eşitlenen eski sürüm
-  // kaydı, elle düzenlenmiş depo). ReactMarkdown dizge olmayan children'da
-  // fırlatır ve tüm panel ErrorBoundary'ye düşerdi.
+  // content is not always a string (broken import, synced older version record,
+  // hand-edited storage). ReactMarkdown throws on non-string children and the
+  // whole panel would fall into the ErrorBoundary.
   const contentText = typeof message.content === 'string' ? message.content : ''
   const [copied, setCopied] = useState(false)
   const [retryMenuOpen, setRetryMenuOpen] = useState(false)
   const [retryMenuPlacement, setRetryMenuPlacement] = useState('up')
-  // Kullanıcı mesajı kısaltma: yalnız görünüm — gönderilen/kaydedilen metin aynı kalır.
-  // Elle seçim yoksa arama sonucu gelen mesaj açık kabul edilir (eşleşme gizli kalmasın).
-  // Mesaj kimliği ebeveynin key'inde olduğundan başka mesaja geçince durum kendiliğinden sıfırlanır.
+  // User message truncation: display only - the sent/stored text stays the same. Without a manual
+  // choice a message arriving from search is treated as open (a match must not stay hidden). Since
+  // the message id lives in the parent's key, the state resets by itself when another message is
+  // shown.
   const [userManualChoice, setUserManualChoice] = useState(null)
   const [userCollapsible, setUserCollapsible] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(null)

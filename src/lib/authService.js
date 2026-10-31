@@ -10,7 +10,7 @@ import { getFirebaseAuth, getGoogleOAuthClientId, isFirebaseConfigured } from '.
 const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const AUTH_SCOPE = 'openid email profile'
 
-/** Arayuzun kullaniciya gosterebilecegi sinirli hata kodlari. */
+/** Limited set of error codes the UI may show to the user. */
 export const AUTH_ERROR_CODES = new Set([
   'firebase_not_configured',
   'google_oauth_not_configured',
@@ -95,10 +95,9 @@ export function isGoogleSignInConfigured() {
 }
 
 /**
- * Google OAuth kimlik akisi:
- * launchWebAuthFlow ile id_token alinir, state ve nonce dogrulanir ve
- * Firebase oturumu signInWithCredential ile acilir. Sifre hicbir asamada
- * HeraAi tarafinda tutulmaz.
+ * Google OAuth identity flow: launchWebAuthFlow obtains the id_token, state and nonce are
+ * verified and the Firebase session is opened with signInWithCredential. The password is never
+ * held on the HeraAi side at any stage.
  */
 export async function signInWithGoogle() {
   if (!isFirebaseConfigured()) throw authError('firebase_not_configured')

@@ -59,8 +59,8 @@ function statusPillClasses(status) {
   return 'bg-secondary text-muted-foreground border-border'
 }
 
-// "Son kullanım" satırı tarih + saat gösterir; saat olmadan aynı gün içindeki
-// anahtar rotasyonu panelden izlenemiyordu.
+// The "last used" row shows date + time; without the time the key rotation
+// within the same day could not be followed from the panel.
 function formatLastUsed(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -128,16 +128,17 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const handleLanguageChange = (langCode) => {
     setSelectedLanguage(langCode)
     i18n.changeLanguage(langCode)
-    // Dil seçimi Kaydet beklemeden kalıcı olur: depo güncellenince App'in
-    // storage dinleyicisi appConfig.language'ı da tazeler, yeniden açılışta
-    // eski dile dönülmez.
+    // The language choice is persisted without waiting for Save: when
+    // storage is updated App's storage listener also refreshes
+    // appConfig.language, so the old language does not come back on reopen.
     chrome.storage.local.set({ language: langCode })
   }
 
   useEffect(() => {
     async function load() {
-      // Kasa erişilemezse (ör. sekme kapanırken IndexedDB kesilirse) arayüz
-      // çökmemeli: liste boş kalır, hata konsola düşer.
+      // If the vault is unreachable (e.g. IndexedDB is cut while the tab
+      // closes) the UI must not crash: the list stays empty and the error
+      // goes to the console.
       try {
         setGeminiKeys(await getKeys('gemini'))
         setTavilyKeys(await getKeys('tavily'))
@@ -299,8 +300,8 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     }
 
     chrome.storage.local.set(newConfig, () => {
-      // Yazım hatası (ör. kota) sessizce yutulmaz: aksi halde "kaydedildi"
-      // denip ayar eski değerde kalırdı.
+      // A write error (e.g. quota) is not swallowed silently: otherwise it
+      // would say "saved" while the setting stayed at the old value.
       if (chrome.runtime?.lastError) {
         console.error('Settings save failed', chrome.runtime.lastError)
         notifyError(t('setup.api.save_failed'))

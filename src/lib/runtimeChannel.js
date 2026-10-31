@@ -1,20 +1,20 @@
 /**
- * Panel ile arka plan servisi arasindaki mesaj kanali.
+ * Message channel between the panel and the background service.
  *
- * Chrome servis calisanini kapattiginda kanal duser ve lastError'a ham
- * Ingilizce metinler duser ("The message port closed before a response was
+ * When Chrome shuts the service worker down the channel drops and raw English
+ * texts land in lastError ("The message port closed before a response was
  * received.", "Could not establish connection. Receiving end does not
- * exist."). Bu metinler kullaniciya gosterilmez: hata, arayuzde karsiligi
- * olan sinirli bir kod kumesine indirgenir.
+ * exist."). Those texts are not shown to the user: the error is reduced to a
+ * limited set of codes that have a UI translation.
  */
 
 /** Kanal koptugunda kullanilan kod (locale: setup.sync.errors.sync_channel_lost). */
 export const SYNC_CHANNEL_LOST = 'sync_channel_lost'
 
 /**
- * Arayuzde metni bulunan kodlar. Listede olmayan bir kod ham metin olarak
- * gosterilmez, sync_failed'a duser; yeni bir kod eklerken iki locale
- * dosyasina da karsiligini yazmak gerekir.
+ * Codes that have UI text. A code not on the list is not shown as raw text, it falls
+ * back to sync_failed; when adding a code its translation must be written into both
+ * locale files.
  */
 export const KNOWN_SYNC_ERROR_CODES = new Set([
   // Servis/kanal
@@ -60,8 +60,8 @@ export function isChannelLossMessage(message) {
 }
 
 /**
- * Ham hata -> arayuzde metni olan kod. Kanal kopmasi kendi koduna iner,
- * taninmayan her sey sync_failed olur: ekrana ham Chrome metni cikmaz.
+ * Raw error -> a code that has UI text. A channel drop maps to its own code, anything
+ * unrecognized becomes sync_failed: no raw Chrome text reaches the screen.
  */
 export function describeRuntimeError(error) {
   const code = typeof error === 'string' ? error : String(error?.code || '')
@@ -93,9 +93,9 @@ export function sendRuntimeMessage(message) {
 const wait = delayMs => new Promise(resolve => setTimeout(resolve, delayMs))
 
 /**
- * Kanal kopmasindan sonra isin gercekten tamamlanip tamamlanmadigini sorar:
- * her tur taze bir mesajla durum okur (servis uyanir, sonuc kalicidir).
- * Sorgu sirasinda kanal yine kopabilir; sonraki turda yeniden denenir.
+ * Asks whether the work really completed after a channel drop: each round reads the
+ * status with a fresh message (the service wakes up, the result is durable). The
+ * channel may drop again during the query; it is retried on the next round.
  */
 export async function pollForResult({ check, attempts = 4, delayMs = 800, waitFn = wait }) {
   const total = Math.max(1, Number(attempts) || 1)

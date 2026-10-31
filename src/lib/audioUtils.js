@@ -82,9 +82,10 @@ export async function recordedBlobToWav(blob, {
   }
 }
 
-// Uzun dikte kayitlarini modele parca parca gondermek icin: 44 baytlik WAV
-// basligini koruyup PCM verisini sabit uzunlukta dilimlere boler. Boylece her
-// istek kucuk kalir ve tek bir 5xx/400 tum dikteyi oldurmez.
+// To send long dictation recordings to the model piece by piece: keeps the
+// 44-byte WAV header and splits the PCM data into fixed-length slices. That
+// keeps every request small and a single 5xx/400 does not kill the whole
+// dictation.
 export function splitWavIntoChunks(wavBytes, {
   sampleRate = DICTATION_SAMPLE_RATE,
   chunkSeconds = DICTATION_CHUNK_SECONDS,

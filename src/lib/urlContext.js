@@ -21,8 +21,9 @@ function isPrivateIpv4(hostname) {
     || parts[0] === 0
 }
 
-// ::ffff:127.0.0.1 ve hex esdegeri (::ffff:7f00:1) gibi IPv4'e eslenmis
-// IPv6 literalleri ozel aga gider; cozup IPv4 kurallariyla karsilastiririz.
+// IPv6 literals mapped to IPv4 such as ::ffff:127.0.0.1 and its hex form
+// (::ffff:7f00:1) go to the private network; we resolve them and compare
+// with the IPv4 rules.
 function isPrivateMappedIpv6(host) {
   const match = /^::ffff:(.+)$/.exec(host)
   if (!match) return false
@@ -40,7 +41,8 @@ function isPrivateMappedIpv6(host) {
 }
 
 function isPrivateHostname(hostname) {
-  // Sondaki nokta (localhost.) tarayicida ayni adrese cozulur; once temizle.
+  // The trailing dot (localhost.) resolves to the same address in the
+  // browser; strip it first.
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
   const isIpv6Literal = host.includes(':')
   return host === 'localhost'

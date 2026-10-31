@@ -35,7 +35,8 @@ function formatDate(value) {
   }
 }
 
-// Katlanır başlık için kısa biçim: "23.09 23:42" (dar side panelde tam tarih taşıyor).
+// Short format for the collapsible header: "23.09 23:42" (the full date overflows in
+// the narrow side panel).
 function formatCompactDateTime(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -55,9 +56,11 @@ function SyncPanel() {
   const [busy, setBusy] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
   const [labelDraft, setLabelDraft] = useState('')
-  // Cihaz listesi kapalı başlar (kullanıcı kararı): panel kısa kalır, liste tıklayınca açılır.
+  // The device list starts collapsed (user decision): the panel stays short and the list opens
+  // on click.
   const [devicesExpanded, setDevicesExpanded] = useState(false)
-  // Otomatik eşitleme: aralık + bugünkü kota kullanımı (cihaza özel ayar).
+  // Automatic sync: interval + today's quota usage (device specific
+  // setting).
   const [autoSettings, setAutoSettings] = useState(null)
   const backupInputRef = useRef(null)
   const renameInputRef = useRef(null)
@@ -76,12 +79,14 @@ function SyncPanel() {
       const autoResponse = await sendRuntimeMessage({ type: 'SYNC_GET_AUTO_SETTINGS' })
       if (autoResponse?.ok) setAutoSettings(autoResponse)
     } catch {
-      // Ayar okunamazsa panel çalışmaya devam eder; varsayılan aralık geçerli olur.
+      // If the setting cannot be read the panel keeps working; the default interval
+      // applies.
     }
     return response.status
   }, [])
 
-  // Bulut durumu okunamasa bile Firebase oturumunu ayrı kanaldan doğrula.
+  // Even if the cloud status cannot be read, verify the Firebase session
+  // on a separate channel.
   const refreshWithFeedback = useCallback(() => {
     refresh().catch(async error => {
       const errorCode = describeRuntimeError(error)
@@ -92,7 +97,8 @@ function SyncPanel() {
           return
         }
       } catch {
-        // Auth sorgusu da ulaşılmazsa yalnız doğrulanamayan durum gösterilir.
+        // If the auth query is unreachable too, only the unverifiable state
+        // is shown.
       }
       setStatus({ signedIn: false, state: 'error', lastError: errorCode })
     })
@@ -106,8 +112,8 @@ function SyncPanel() {
     if (renamingId) renameInputRef.current?.focus()
   }, [renamingId])
 
-  // Hata kodu -> arayüz metni. Ham Chrome metinleri koda indirgendiği için
-  // ekrana yalnızca iki dilde karşılığı yazılmış cümleler çıkar.
+  // Error code -> UI text. Raw Chrome texts are reduced to a code, so only
+  // sentences that have a translation in both languages reach the screen.
   const syncErrorMessage = code => t(`setup.sync.errors.${code}`, { defaultValue: '' })
     || t('setup.sync.error', { code })
 
@@ -127,9 +133,10 @@ function SyncPanel() {
     }
   }
 
-  // Google girişi: panel, giriş penceresi açıkken mesaj kanalına bağlı beklemez.
-  // Kanal koparsa (Chrome arka plan servisini kapatmış olabilir) girişin gerçekten
-  // tamamlanıp tamamlanmadığı taze bir oturum sorgusuyla doğrulanır.
+  // Google sign-in: the panel does not wait tied to the message channel while the
+  // sign-in window is open. If the channel drops (Chrome may have closed the
+  // background service) whether the sign-in really completed is verified with a
+  // fresh session query.
   const handleSignIn = async () => {
     setBusy('signin')
     const showSignedIn = async user => {
@@ -190,9 +197,10 @@ function SyncPanel() {
     t('setup.sync.signed_out'),
   )
 
-  // Şifreli alan kurulumu: kanal koptuğunda alan gerçekten oluşmuş olabilir ama
-  // kurtarma kodu panele ulaşmaz. Kod yalnızca yanıtla gösterildiği için
-  // kullanıcıya yeni kod oluşturması açıkça söylenir.
+  // Encrypted space setup: when the channel drops the space may really have
+  // been created but the recovery code does not reach the panel. Since the code
+  // is shown only with the response, the user is plainly told to create a new
+  // code.
   const handleInitialize = async () => {
     setBusy('initialize')
     try {
@@ -230,8 +238,9 @@ function SyncPanel() {
     t('setup.sync.linked'),
   )
 
-  // Şimdi eşitle: kanal koptuğunda eşitleme servis tarafında tamamlanmış olabilir.
-  // Son eşitleme damgası ilerlediyse iş başarılı sayılır, kullanıcı boşuna tekrar basmaz.
+  // Sync now: when the channel drops the sync may have completed on the service side. If
+  // the last sync stamp moved forward the work counts as successful and the user does not
+  // press again for nothing.
   const handleSync = async () => {
     const previousSyncAt = Number(status?.lastSyncAt) || 0
     setBusy('sync')
@@ -378,7 +387,7 @@ function SyncPanel() {
         t('setup.sync.backup_imported'),
       )
     } catch {
-      // Bozuk/yanlış dosyada ayrıştırıcının ham İngilizce metni gösterilmez.
+      // On a broken/wrong file the parser's raw English text is not shown.
       notifyError(t('setup.sync.errors.backup_invalid'))
     }
   }
@@ -470,12 +479,14 @@ function SyncPanel() {
 
   const syncBlocked = Number(status.blockedUntil) > Date.now()
   const deviceDisabled = status.deviceDisabled === true
-  // "Bu cihaz" her zaman en üstte; diğerleri mevcut sırasını korur (sort kararlı).
+  // "This device" is always on top; the others keep their current order (stable
+  // sort).
   const visibleDevices = devices
     .filter(device => !device.revokedAt)
     .sort((a, b) => Number(b.id === status.deviceId) - Number(a.id === status.deviceId))
   const disabledDeviceCount = visibleDevices.filter(device => device.disabledAt).length
-  // Başlıkta hesabın en son eşitlenme zamanı: cihazların en yeni lastSyncedAt değeri.
+  // Last sync time of the account in the header: the newest lastSyncedAt among the
+  // devices.
   const latestDeviceSyncAt = visibleDevices.reduce((latest, device) => {
     const value = Number(device.lastSyncedAt) || 0
     return value > latest ? value : latest

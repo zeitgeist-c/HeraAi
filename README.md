@@ -4,7 +4,7 @@
 
 **Every model you have keys for, in a panel beside the page you are reading.**
 
-HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Ollama Cloud, searches the web through Tavily, crops a region off your screen, attaches files and speaks its answers. API keys are encrypted and kept in an IndexedDB vault on your device. Optional Google sign-in syncs end-to-end encrypted data through Firebase/Firestore.
+HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Ollama Cloud, searches the web through Tavily, crops a region off your screen, attaches files and takes voice input. API keys are encrypted and kept in an IndexedDB vault on your device. Optional Google sign-in syncs end-to-end encrypted data through Firebase/Firestore.
 
 ![HeraAi · Chat](./docs/screenshots/00-ana-sohbet.png)
 
@@ -20,7 +20,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
   - [4. Model picker](#4-model-picker)
   - [5. My models](#5-my-models)
   - [6. General settings](#6-general-settings)
-- [Install](#install)
+- [Install](#build-from-source)
 - [Providers and models](#providers-and-models)
 - [Key handling](#key-handling)
 - [Privacy and the optional cloud](#privacy-and-the-optional-cloud)
@@ -35,7 +35,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
 | Capability | Detail |
 |---|---|
 | **Side panel** | stays open beside the page; does not cover what you are reading |
-| **Three providers** | Gemini (5 models), OpenRouter Free (2 models), Ollama Cloud (Nemotron 3 Ultra, GPT-OSS 120B) |
+| **Three providers** | Gemini (5 models), OpenRouter Free (3 models), Ollama Cloud (GPT-OSS 120B, Nemotron 3 Super, Gemma 4 31B) |
 | **Streaming chat** | SSE for Gemini and OpenRouter, NDJSON for Ollama |
 | **Vision input** | images and PDF pages inline, plus screen-region capture |
 | **URL context** | reads a public page directly instead of scraping it |
@@ -44,7 +44,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
 | **Model catalogue** | fetch the models your own keys can see and choose which appear in the chat picker |
 | **Local vault** | keys encrypted in IndexedDB on the device |
 | **Optional sync** | Google sign-in, end-to-end encrypted, through Firebase/Firestore |
-| **Bilingual UI** | Turkish and English, light / dark / system |
+| **Interface** | 13 languages, light / dark / system |
 
 ---
 
@@ -57,7 +57,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
 The main surface, sized for a side panel.
 
 - **Header** — session title, rename, search inside the chat, export as Markdown, copy the whole chat, open in a full page, new chat, and the *more* menu.
-- **Welcome state** — `Hello, how can I help you?` with three starter cards: **Web research** (Tavily), **Select from screen** (crop a region and ask about it), **Attach file** (image, PDF, document or text).
+- **Welcome state** — `Hello, how can I help?` with three starter cards: **Web research** (Tavily), **Select from screen** (crop a region and ask about it), **Attach file** (image, PDF, document or text).
 - **Composer** — the message box, plus tools for attach, voice input, screen-region capture, OCR from an attached image, translate the selection, and the send button.
 - **Footer** — the active model pill (`Gemini 3.1 Flash Lite` with a `GEMINI` tag), and the standing note that AI can be wrong and important facts should be checked.
 
@@ -111,11 +111,11 @@ The note above the list is honest: *"Being listed is not a guarantee of access o
 
 ![General settings](./docs/screenshots/05-genel-ayarlar.png)
 
-- **API key usage** — `Use primary keys` (primary keys only) or `Use keys in rotation` (rotate through all keys).
+- **API key usage** — `Use primary keys` (primary keys only) or `Rotate healthy keys` (rotate through all keys).
 - **Appearance** — `System default`, `Light theme`, `Dark theme`, plus an accent colour picker.
 - **Language** — Turkish or English for the whole interface.
 - **Show sources** — whether a research answer renders its source cards.
-- **System prompt** — the base instruction sent with every conversation (`You are a general-purpose AI assistant…`). Editing it changes the assistant's default behaviour for your account, not for anyone else.
+- **System prompt** — the base instruction sent with every conversation (Turkish by default; you can replace it with your own). Editing it changes the assistant's default behaviour for your account, not for anyone else.
 
 `Save and continue` applies the changes.
 
@@ -127,7 +127,7 @@ The note above the list is honest: *"Being listed is not a guarantee of access o
 |---|---|---|---|
 | **Gemini** | 5 (3.1 Flash Lite → 3.8 Flash) | SSE | yes, images and PDF pages |
 | **OpenRouter Free** | 2 | SSE | yes |
-| **Ollama Cloud** | Nemotron 3 Ultra, GPT-OSS 120B | NDJSON | no |
+| **Ollama Cloud** | GPT-OSS 120B, Nemotron 3 Super, Gemma 4 31B | NDJSON | no |
 
 Plus **Tavily** for web search and page extraction, used when URL context cannot reach a page.
 
@@ -157,7 +157,7 @@ npm run package        # build + zip the extension for the store
 Then load the built folder as an unpacked extension:
 
 1. `chrome://extensions` → enable **Developer mode**.
-2. `Load unpacked` → pick `dist/` (or `.tools/public-build/`).
+2. `Load unpacked` → pick `dist/`.
 3. Open the side panel from the toolbar.
 
 Tests:

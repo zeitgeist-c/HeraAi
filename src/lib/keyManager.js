@@ -1,13 +1,12 @@
 /**
- * HeraAi 1.10.0 — API anahtarı yöneticisi (Aşama 6).
+ * HeraAi 1.10.0 - API key manager (Stage 6).
  *
- * 1.9.4'te anahtarlar `chrome.storage.local` içinde açık metin duruyordu.
- * Artık tek kaynak şifreli kasadır (`keyVault`); bu modül yalnızca çağrıları
- * kasaya yönlendiren ince bir katmandır, böylece arayüz kodu değişmeden
- * güvenli depoya geçilmiştir.
+ * In 1.9.4 keys sat in plain text inside `chrome.storage.local`. The encrypted vault
+ * (`keyVault`) is the single source now; this module is only a thin layer that
+ * forwards the calls to the vault, so the UI code moved to secure storage unchanged.
  *
- * `getKeys` maskeli metadata döner; ham anahtar yalnızca istek anında
- * `resolveKeysForRequest` / `getRawKey` ile çözülür.
+ * `getKeys` returns masked metadata; the raw key is resolved only at request time
+ * with `resolveKeysForRequest` / `getRawKey`.
  */
 
 import { getDefaultVault } from './keyVault'

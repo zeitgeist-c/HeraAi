@@ -1,26 +1,26 @@
 /**
- * HeraAi 1.10.0 — istemci tarafı şifreleme ve anahtar yönetimi (Aşama 4).
+ * HeraAi 1.10.0 - client-side encryption and key management (Stage 4).
  *
- * Anahtar hiyerarşisi (plan §8):
+ * Key hierarchy (plan section 8):
  *
- *   Kurtarma kodu (160-bit) ──PBKDF2-SHA-256(600k, 128-bit salt)──▶ kurtarma
- *        sarmalama anahtarı ──AES-256-GCM──▶ recoveryEnvelope
+ * Recovery code (160-bit) --PBKDF2-SHA-256(600k, 128-bit salt)--> recovery
+ * wrapping key --AES-256-GCM--> recoveryEnvelope
  *
- *   Bulut ana sırrı (256-bit, HKDF) ──HKDF-SHA-256(info)──▶ görev anahtarları
- *        ├─ dataEncryptionKey  (AES-GCM) ayar/sohbet/mesaj
- *        ├─ hmacIdKey          (HMAC)    opak belge kimliği
- *        ├─ fingerprintKey     (HMAC)    yinelenen API anahtarı parmak izi
- *        └─ backupKey          (AES-GCM) çevrimdışı yedek dosyası
+ * Cloud master secret (256-bit, HKDF) --HKDF-SHA-256(info)--> task keys
+ * |- dataEncryptionKey  (AES-GCM) settings/chat/message
+ * |- hmacIdKey          (HMAC)    opaque document id
+ * |- fingerprintKey     (HMAC)    duplicate API key fingerprint
+ * `- backupKey          (AES-GCM) offline backup file
  *
- *   Bulut ana sırrı ayrıca her cihazın yerel anahtarıyla sarmalanır
- *   (`deviceMasterKeyEnvelope`); cihaz anahtarı `extractable: false` üretilir ve
- *   cihazdan dışarı çıkmaz.
+ * The cloud master secret is also wrapped with each device's local key
+ * (`deviceMasterKeyEnvelope`); the device key is generated with `extractable: false`
+ * and never leaves the device.
  *
- * Tüm şifreleme AES-256-GCM'dir, her kayıt için 96-bit taze nonce kullanılır ve
- * yük; `ownerUid|opaqueEntityId|entityType|vN` biçimindeki AAD'ye bağlanır —
- * şifreli metin başka bir belgeye kopyalanırsa çözme anında başarısız olur.
+ * Every ciphertext is AES-256-GCM with a fresh 96-bit nonce per record, and the
+ * payload is bound to the AAD `ownerUid|opaqueEntityId|entityType|vN` - if the
+ * ciphertext is copied into another document decryption fails at once.
  *
- * Kurtarma kodu ve ana sır sunucuya asla açık halde gönderilmez.
+ * The recovery code and the master secret are never sent to the server in the clear.
  */
 
 import { CLOUD_SCHEMA_VERSION, CRYPTO_VERSION } from './syncModel'
@@ -34,10 +34,10 @@ export const RECOVERY_CODE_GROUP_SIZE = 4
 export const RECOVERY_CODE_LENGTH = RECOVERY_CODE_GROUPS * RECOVERY_CODE_GROUP_SIZE
 export const RECOVERY_CODE_MIN_LENGTH = 16
 
-/** Karıştırılması kolay harfler (I/O/0/1) alfabede yok; 32 karakter = 5 bit. */
+/** Easily confused letters (I/O/0/1) are not in the alphabet; 32 characters = 5 bits. */
 export const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
-/** HKDF `info` parametreleri — sürümlenmiş sabit metinler. */
+/** HKDF `info` parameters - versioned constant strings. */
 export const HKDF_INFO = Object.freeze({
   dataEncryptionKey: 'heraai-data-encryption',
   hmacIdKey: 'heraai-opaque-id-hmac',
@@ -47,22 +47,13 @@ export const HKDF_INFO = Object.freeze({
 
 const HKDF_SALT = 'heraai-sync-v1'
 
-/** Görev anahtarlarının Web Crypto algoritma tanımları. */
+/** Web Crypto algorithm definitions of the task keys. */
 export const SUBKEY_ALGORITHMS = Object.freeze({
   dataEncryptionKey: { name: 'AES-GCM', length: 256 },
   hmacIdKey: { name: 'HMAC', hash: 'SHA-256' },
   fingerprintKey: { name: 'HMAC', hash: 'SHA-256' },
   backupKey: { name: 'AES-GCM', length: 256 },
 })
-
-export const CRYPTO_ERROR_CODES = new Set([
-  'crypto_unavailable',
-  'recovery_code_invalid',
-  'recovery_envelope_invalid',
-  'device_envelope_invalid',
-  'decrypt_failed',
-  'subkey_unknown',
-])
 
 function cryptoError(code) {
   const error = new Error(code)
@@ -88,11 +79,12 @@ export function randomBytes(length) {
   return bytes
 }
 
-/** Uint8Array veya ArrayBuffer -> base64 (Firestore'da taşınabilir metin). */
+/** Uint8Array or ArrayBuffer -> base64 (portable text in Firestore). */
 export function bytesToBase64(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
-  // Tek tek string birleştirme büyük yedeklerde O(n²) bellek kopyası üretiyordu;
-  // 32 KB'lık dilimlerle fromCharCode çağrısı aynı çıktıyı ~4x hızlı verir.
+  // Joining strings one by one produced an O(n^2) memory copy on large backups;
+  // a
+  // fromCharCode call over 32 KB slices gives the same output ~4x faster.
   const CHUNK = 0x8000
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += CHUNK) {
@@ -113,12 +105,12 @@ function toHex(buffer) {
   return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-// ---------------------------------------------------------------- cihaz anahtarı
+// ---------------------------------------------------------------- device key
 
 /**
- * Cihaz yerel anahtarı: 256-bit AES-GCM, `extractable: false`.
- * Ana sırrı sarmak/açmak ve yerel API kasasını şifrelemek için kullanılır;
- * dışa aktarılamaz ve hiçbir zaman buluta gitmez.
+ * Device local key: 256-bit AES-GCM, `extractable: false`.
+ * Used to wrap/unwrap the master secret and to encrypt the local API vault; it cannot
+ * be exported and never goes to the cloud.
  */
 export async function generateDeviceKey() {
   return subtle().generateKey(
@@ -128,23 +120,24 @@ export async function generateDeviceKey() {
   )
 }
 
-// ---------------------------------------------------------- bulut ana sırrı
+// ---------------------------------------------------------- cloud master
+// secret
 
-/** İlk kurulumda üretilen 256-bit rastgele ana sır baytları. */
+/** 256-bit random master secret bytes generated during first setup. */
 export function generateMasterSecretBytes() {
   return randomBytes(MASTER_SECRET_LENGTH)
 }
 
 /**
- * Baytları HKDF anahtarına aktarır. Yalnız türetim içindir: Web Crypto, HKDF
- * anahtarlarının dışa aktarılabilir olmasını yasaklar (`SyntaxError`), bu
- * yüzden ana sırrın kendisi gerektiğinde ham bayt olarak taşınır.
+ * Imports the bytes as an HKDF key. Derivation only: Web Crypto forbids HKDF keys
+ * from being extractable (`SyntaxError`), so the master secret itself is carried as
+ * raw bytes when needed.
  */
 export async function importMasterSecret(rawBytes) {
   return subtle().importKey('raw', rawBytes, 'HKDF', false, ['deriveKey', 'deriveBits'])
 }
 
-/** Cihaz anahtarıyla sarar; çıktı `devices/{deviceId}.deviceMasterKeyEnvelope`. */
+/** Wraps with the device key; output is `devices/{deviceId}.deviceMasterKeyEnvelope`. */
 export async function wrapMasterSecretForDevice(deviceKey, masterSecretBytes) {
   const nonce = randomBytes(NONCE_LENGTH)
   const wrapped = await subtle().encrypt(
@@ -160,7 +153,7 @@ export async function wrapMasterSecretForDevice(deviceKey, masterSecretBytes) {
   }
 }
 
-/** Cihaz zarfını açar ve ana sır baytlarını döndürür. */
+/** Unwraps the device envelope and returns the master secret bytes. */
 export async function unwrapMasterSecretFromDevice(deviceKey, envelope) {
   if (!envelope?.wrapped || !envelope?.nonce) throw cryptoError('device_envelope_invalid')
   try {
@@ -175,9 +168,9 @@ export async function unwrapMasterSecretFromDevice(deviceKey, envelope) {
   }
 }
 
-// ------------------------------------------------------------- görev anahtarları
+// ------------------------------------------------------------- task keys
 
-/** Tek bir görev anahtarını HKDF ile türetir. */
+/** Derives a single task key with HKDF. */
 export async function deriveSubkey(masterSecretKey, name) {
   const algorithm = SUBKEY_ALGORITHMS[name]
   if (!algorithm) throw cryptoError('subkey_unknown')
@@ -196,7 +189,7 @@ export async function deriveSubkey(masterSecretKey, name) {
   )
 }
 
-/** Tüm görev anahtarlarını tek çağrıda türetir. */
+/** Derives all task keys in one call. */
 export async function deriveSubkeys(masterSecretKey) {
   const names = Object.keys(SUBKEY_ALGORITHMS)
   const keys = await Promise.all(names.map(name => deriveSubkey(masterSecretKey, name)))
@@ -208,7 +201,8 @@ export async function deriveSubkeys(masterSecretKey) {
 /** Okunabilir 160-bit kurtarma kodu (`XXXX-XXXX-...`). */
 export function generateRecoveryCode() {
   const bytes = randomBytes(RECOVERY_CODE_LENGTH)
-  // Alfabe 32 karakter olduğu için 256 % 32 === 0 — modulo yanlılığı yok.
+  // Because the alphabet has 32 characters 256 % 32 === 0 - there is no
+  // modulo bias.
   const chars = Array.from(bytes, byte => RECOVERY_CODE_ALPHABET[byte % RECOVERY_CODE_ALPHABET.length])
   const groups = []
   for (let i = 0; i < chars.length; i += RECOVERY_CODE_GROUP_SIZE) {
@@ -217,19 +211,19 @@ export function generateRecoveryCode() {
   return groups.join('-')
 }
 
-/** Kullanıcı girişini karşılaştırılabilir hale getirir (büyük harf, ayraçsız). */
+/** Makes user input comparable (uppercase, no separators). */
 export function normalizeRecoveryCode(code) {
   return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
-/** Kapalı anahtar: yalnız alfabedeki karakterler ve yeterli uzunluk. */
+/** Closed key: only alphabet characters and sufficient length. */
 export function isValidRecoveryCode(code) {
   const normalized = normalizeRecoveryCode(code)
   if (normalized.length < RECOVERY_CODE_MIN_LENGTH) return false
   return [...normalized].every(char => RECOVERY_CODE_ALPHABET.includes(char))
 }
 
-/** Kurtarma kodundan PBKDF2 ile sarmalama anahtarı türetir. */
+/** Derives the wrapping key from the recovery code with PBKDF2. */
 export async function deriveRecoveryWrappingKey(code, salt, { iterations = PBKDF2_ITERATIONS } = {}) {
   const normalized = normalizeRecoveryCode(code)
   if (normalized.length < RECOVERY_CODE_MIN_LENGTH) throw cryptoError('recovery_code_invalid')
@@ -245,8 +239,9 @@ export async function deriveRecoveryWrappingKey(code, salt, { iterations = PBKDF
 }
 
 /**
- * Ana sırrı kurtarma koduyla şifreleyip `account/root.recoveryEnvelope` üretir.
- * `iterations` yalnız testte düşürülür; üretimde varsayılan 600.000'dir.
+ * Encrypts the master secret with the recovery code and produces
+ * `account/root.recoveryEnvelope`.
+ * `iterations` is lowered only in tests; the production default is 600,000.
  */
 export async function sealMasterSecretForRecovery(masterSecretBytes, code, { iterations = PBKDF2_ITERATIONS } = {}) {
   if (!isValidRecoveryCode(code)) throw cryptoError('recovery_code_invalid')
@@ -264,7 +259,7 @@ export async function sealMasterSecretForRecovery(masterSecretBytes, code, { ite
   }
 }
 
-/** Kurtarma zarfını açar ve ana sır baytlarını döndürür. */
+/** Unwraps the recovery envelope and returns the master secret bytes. */
 export async function openMasterSecretFromRecovery(envelope, code) {
   if (!envelope?.ciphertext || !envelope?.nonce || !envelope?.salt) {
     throw cryptoError('recovery_envelope_invalid')
@@ -290,17 +285,18 @@ export async function openMasterSecretFromRecovery(envelope, code) {
   }
 }
 
-// --------------------------------------------------------------- şifreleme
+// ---------------------------------------------------------------
+// encryption
 
 /**
- * AAD: şifreli metni sahibine ve belgesine bağlar. Kopyalanan bir yük başka
- * belgede çözülemez.
+ * AAD: binds the ciphertext to its owner and document. A copied payload cannot be
+ * decrypted in another document.
  */
 export function buildAad({ ownerUid, opaqueEntityId, entityType, schemaVersion = CLOUD_SCHEMA_VERSION }) {
   return encoder.encode([ownerUid, opaqueEntityId, entityType, `v${schemaVersion}`].join('|'))
 }
 
-/** JSON yükünü AES-256-GCM ile şifreler (taze 96-bit nonce). */
+/** Encrypts a JSON payload with AES-256-GCM (fresh 96-bit nonce). */
 export async function encryptJson(dataKey, payload, aad) {
   const nonce = randomBytes(NONCE_LENGTH)
   const plaintext = encoder.encode(JSON.stringify(payload))
@@ -312,7 +308,7 @@ export async function encryptJson(dataKey, payload, aad) {
   return { nonce: bytesToBase64(nonce), ciphertext: bytesToBase64(ciphertext) }
 }
 
-/** Şifreli yükü çözer; AAD uyuşmazlığı `decrypt_failed` üretir. */
+/** Decrypts an encrypted payload; an AAD mismatch yields `decrypt_failed`. */
 export async function decryptJson(dataKey, envelope, aad) {
   if (!envelope?.ciphertext || !envelope?.nonce) throw cryptoError('decrypt_failed')
   try {
@@ -331,7 +327,7 @@ export async function decryptJson(dataKey, envelope, aad) {
   }
 }
 
-/** Ham bayt yükünü şifreler (ek dosya parçaları). */
+/** Encrypts a raw byte payload (attachment chunks). */
 export async function encryptBytes(key, bytes, aad) {
   const nonce = randomBytes(NONCE_LENGTH)
   const ciphertext = await subtle().encrypt(
@@ -342,7 +338,7 @@ export async function encryptBytes(key, bytes, aad) {
   return { nonce: bytesToBase64(nonce), ciphertext: bytesToBase64(ciphertext) }
 }
 
-/** Şifreli bayt yükünü çözer. */
+/** Decrypts an encrypted byte payload. */
 export async function decryptBytes(key, envelope, aad) {
   if (!envelope?.ciphertext || !envelope?.nonce) throw cryptoError('decrypt_failed')
   try {
@@ -362,15 +358,15 @@ export async function decryptBytes(key, envelope, aad) {
 }
 
 /**
- * API anahtarının cihazlar arası yinelenme parmak izi. Aynı ham anahtar aynı
- * izi verir; sunucu ham değeri hiç görmez.
+ * Cross-device duplication fingerprint of an API key. The same raw key gives the same
+ * fingerprint; the server never sees the raw value.
  */
 export async function computeKeyFingerprint(fingerprintKey, rawApiKey) {
   const signature = await subtle().sign('HMAC', fingerprintKey, encoder.encode(String(rawApiKey)))
   return toHex(signature)
 }
 
-/** Şifreleme katmanının özeti (teşhis ve testler için). */
+/** Summary of the encryption layer (for diagnostics and tests). */
 export function describeCryptoLayer() {
   return {
     cryptoVersion: CRYPTO_VERSION,
