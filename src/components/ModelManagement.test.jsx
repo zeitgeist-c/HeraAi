@@ -30,7 +30,7 @@ describe('model management user flow', () => {
   it('preserves the last catalog on refresh failure', async () => {
     discoverModels.mockRejectedValue(new Error('403'))
     render(<ModelManagement />)
-    const button = screen.getByRole('button', { name: /getir|refresh/i })
+    const button = screen.getByRole('button', { name: /openrouter/i })
     await waitFor(() => expect(button).toBeEnabled())
     fireEvent.click(button)
     await screen.findByRole('alert')
@@ -39,10 +39,10 @@ describe('model management user flow', () => {
   })
   it('does not enable newly discovered models automatically', async () => {
     render(<ModelManagement />)
-    const button = screen.getByRole('button', { name: /getir|refresh/i })
+    const button = screen.getByRole('button', { name: /openrouter/i })
     await waitFor(() => expect(button).toBeEnabled())
     fireEvent.click(button)
-    await waitFor(() => expect(storage.modelPreferences.refreshedAt).toBeTruthy())
+    await waitFor(() => expect(storage.modelPreferences.refreshedAt?.openrouter).toBeTruthy())
     expect(storage.modelPreferences.enabledKeys).not.toContain(model.key)
   })
 })

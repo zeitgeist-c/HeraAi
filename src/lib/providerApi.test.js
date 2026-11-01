@@ -272,28 +272,39 @@ describe('OpenRouter provider adapter', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('validates a key with a one-token OpenRouter generation against a catalog model', async () => {
-    global.fetch.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'O' } }] }))
+  it('validates a key with a zero-cost OpenRouter auth check', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ data: { label: 'Hera', limit: 0 } }))
     await expect(testOpenRouterKey(' secret ')).resolves.toMatchObject({ success: true })
     const [url, request] = global.fetch.mock.calls[0]
-    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    expect(url).toBe('https://openrouter.ai/api/v1/auth/key')
     expect(request).toEqual(expect.objectContaining({
-      method: 'POST',
+      method: 'GET',
       headers: expect.objectContaining({ Authorization: 'Bearer secret' }),
     }))
-    expect(JSON.parse(request.body)).toMatchObject({
-      model: OPENROUTER_MODEL,
-      stream: false,
-      max_tokens: 1,
-    })
+    expect(request.body).toBeUndefined()
   })
 
-  it('rejects a malformed successful OpenRouter response without calling the key invalid', async () => {
+  it('rejects a malformed OpenRouter auth response without calling the key invalid', async () => {
     global.fetch.mockResolvedValue(jsonResponse({ unexpected: true }))
     await expect(testOpenRouterKey('secret')).resolves.toEqual({
       success: false,
       provider: 'openrouter',
       errorType: 'invalid_response',
+    })
+  })
+
+  it('maps OpenRouter auth failures to invalid and rate_limit', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ error: { message: 'Invalid API key', code: 401 } }, 401))
+    await expect(testOpenRouterKey('secret')).resolves.toEqual({
+      success: false,
+      provider: 'openrouter',
+      errorType: 'invalid',
+    })
+    global.fetch.mockResolvedValue(jsonResponse({ error: { message: 'Rate limit exceeded', code: 429 } }, 429))
+    await expect(testOpenRouterKey('secret')).resolves.toEqual({
+      success: false,
+      provider: 'openrouter',
+      errorType: 'rate_limit',
     })
   })
 })

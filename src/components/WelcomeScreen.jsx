@@ -1,8 +1,7 @@
 import { FileUp, Globe2, Scissors, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import LanguagePicker from './LanguagePicker'
 
-function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach, language = 'en', onLanguageChange }) {
+function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
   const { t } = useTranslation()
   const actions = [
     {
@@ -46,12 +45,6 @@ function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach, lan
           {t('chat.welcome_subtitle')}
         </p>
       </div>
-
-      {onLanguageChange && (
-        <div className="mb-4">
-          <LanguagePicker value={language} onChange={onLanguageChange} />
-        </div>
-      )}
 
       <div className="grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
         {actions.map(({ id, icon: Icon, title, description, action, active = false }) => (

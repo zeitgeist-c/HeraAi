@@ -166,7 +166,6 @@
       "empty_error": "Inserisci una chiave API",
       "add_failed": "Impossibile aggiungere la chiave",
       "last_used": "Ultimo utilizzo",
-      "cooldown_until": "Attesa fino a",
       "show_key": "Mostra",
       "hide_key": "Nascondi",
       "status_success": "Funzionante",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "I miei modelli",
     "description": "Recupera i cataloghi usando le tue chiavi API e scegli i modelli per la chat. La presenza nell'elenco non garantisce l'accesso o l'uso gratuito. Le scelte vengono salvate in questo browser.",
-    "refresh": "Recupera / aggiorna modelli",
     "loading": "Recupero dei modelli…",
     "search": "Cerca modelli o provider",
     "refreshed": "Ultimo aggiornamento: {{date}}",
@@ -493,8 +491,7 @@
     "save_error": "Impossibile caricare o salvare le impostazioni dei modelli.",
     "keep_one": "Mantieni selezionato almeno un modello.",
     "paid": "A pagamento",
-    "image": "Immagini",
-    "keep_other": "Mantieni selezionato almeno un modello."
+    "image": "Immagini"
   },
   "cloud_quota": {
     "owner": "Proprietario dell'account: esente dalle quote utente.",

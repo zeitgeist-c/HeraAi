@@ -318,6 +318,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
     const testing = testingKeyId === `${provider}:${key.id}`
     const minutesAgo = key.lastErrorAt ? Math.max(0, Math.floor((Date.now() - key.lastErrorAt) / 60000)) : null
     const hasCooldown = key.cooldownUntil && key.cooldownUntil > Date.now()
+    const cooldownRemainingMs = hasCooldown ? key.cooldownUntil - Date.now() : 0
 
     return (
       <div key={key.id} data-testid="api-key-row" className="rounded-lg border border-border/75 bg-gradient-to-r from-primary/[0.07] to-transparent px-2.5 py-2">
@@ -342,7 +343,7 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           <div className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground">
             {key.label && <span className="font-mono">{key.masked}</span>}
             {key.lastUsedAt && <span>{key.label ? ' · ' : ''}{t('setup.keys.last_used')}: {formatLastUsed(key.lastUsedAt)}</span>}
-            {hasCooldown && <span className="text-amber-500">{key.label || key.lastUsedAt ? ' · ' : ''}{t('setup.keys.cooldown_until')}: {new Date(key.cooldownUntil).toLocaleTimeString()}</span>}
+            {hasCooldown && <span className="text-amber-500">{key.label || key.lastUsedAt ? ' · ' : ''}{cooldownRemainingMs < 120000 ? t('setup.keys.cooldown_remaining', { seconds: Math.max(1, Math.ceil(cooldownRemainingMs / 1000)) }) : t('setup.keys.cooldown_remaining_min', { minutes: Math.max(1, Math.ceil(cooldownRemainingMs / 60000)) })}</span>}
             {minutesAgo != null && <span>{key.label || key.lastUsedAt || hasCooldown ? ' · ' : ''}{t('setup.keys.last_error', { minutes: minutesAgo })}</span>}
           </div>
           <div className="flex shrink-0 items-center gap-1">

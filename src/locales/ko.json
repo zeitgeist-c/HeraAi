@@ -166,7 +166,6 @@
       "empty_error": "API 키를 입력하세요",
       "add_failed": "키를 추가하지 못했습니다",
       "last_used": "마지막 사용",
-      "cooldown_until": "대기 종료 시각",
       "show_key": "표시",
       "hide_key": "숨기기",
       "status_success": "정상",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "내 모델",
     "description": "API 키로 카탈로그를 가져오고 채팅에 사용할 모델을 선택하세요. 목록에 있다고 해서 접근 권한이나 무료 사용이 보장되지는 않습니다. 선택 사항은 이 브라우저에 저장됩니다.",
-    "refresh": "모델 가져오기 / 새로고침",
     "loading": "모델을 가져오는 중…",
     "search": "모델 또는 공급자 검색",
     "refreshed": "마지막 새로고침: {{date}}",
