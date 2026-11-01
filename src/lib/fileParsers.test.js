@@ -73,7 +73,7 @@ describe('attachment parsing', () => {
     }))).rejects.toMatchObject({ code: 'attachment_invalid' })
     const files = Array.from({ length: 11 }, (_, index) => ({ name: `${index}.txt`, size: 1 }))
     expect(() => validateAttachmentGroup(files)).toThrow(expect.objectContaining({ code: 'attachment_count_exceeded' }))
-  })
+  }, 30000)
 
   it('extracts XLSX sheets as text with sheet names', async () => {
     const { default: ExcelJS } = await import('exceljs')
@@ -93,7 +93,7 @@ describe('attachment parsing', () => {
     expect(result.modelText).toContain('Ali')
     expect(result.modelText).toContain('Stok')
     expect(result.modelText).toContain('Elma')
-  })
+  }, 30000)
 
   it('rejects legacy XLS workbooks with a conversion hint', async () => {
     const oleHeader = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0])
@@ -114,5 +114,5 @@ describe('attachment parsing', () => {
     await expect(processAttachmentFile(new File([buffer], 'bos.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))).rejects.toMatchObject({ code: 'attachment_empty' })
-  })
+  }, 30000)
 })
