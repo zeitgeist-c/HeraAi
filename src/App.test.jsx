@@ -984,7 +984,7 @@ describe('HeraAi App', () => {
       fireEvent.click(screen.getByRole('button', { name: /General Settings|Genel Ayarlar/i }));
 
       const selects = screen.getAllByRole('combobox', { name: /Dil|Language/i });
-      // Karşılama ekranındaki ilk açılış seçici + ayarlar panelindeki seçici.
+      // Ayarlar panelindeki dil seçici (karşılama ekranındaki kaldırıldı).
       const select = selects[selects.length - 1];
       const options = within(select).getAllByRole('option');
       expect(options).toHaveLength(13);
@@ -2323,10 +2323,9 @@ describe('HeraAi App', () => {
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    // Karşılama ekranındaki tek select, ilk açılış dil seçimidir (13 dil).
+    // Karşılama ekranında dil seçici yok (kaldırıldı; dil ayarlardadır).
     const selects = document.querySelectorAll('select');
-    expect(selects).toHaveLength(1);
-    expect(within(selects[0]).getAllByRole('option')).toHaveLength(13);
+    expect(selects).toHaveLength(0);
     expect(document.querySelector('button[data-testid="model-selector"]')).toBeInTheDocument();
     expect(document.querySelector('svg.lucide-book-open')).not.toBeInTheDocument();
   });

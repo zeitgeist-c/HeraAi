@@ -166,7 +166,6 @@
       "empty_error": "Wpisz klucz API",
       "add_failed": "Nie udało się dodać klucza",
       "last_used": "Ostatnio użyty",
-      "cooldown_until": "Blokada do",
       "show_key": "Pokaż",
       "hide_key": "Ukryj",
       "status_success": "Sukces",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "Moje modele",
     "description": "Pobieraj katalogi za pomocą swoich kluczy API i wybieraj modele do czatu. Obecność na liście nie gwarantuje dostępu ani darmowego użycia. Wybory są zapisywane w tej przeglądarce.",
-    "refresh": "Pobierz / odśwież modele",
     "loading": "Pobieranie modeli…",
     "search": "Szukaj modeli lub dostawców",
     "refreshed": "Ostatnie odświeżenie: {{date}}",

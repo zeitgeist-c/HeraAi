@@ -166,7 +166,6 @@
       "empty_error": "Introduce una clave de API",
       "add_failed": "No se pudo añadir la clave",
       "last_used": "Último uso",
-      "cooldown_until": "En espera hasta",
       "show_key": "Mostrar",
       "hide_key": "Ocultar",
       "status_success": "Correcta",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "Mis modelos",
     "description": "Obtén catálogos con tus claves de API y elige modelos para el chat. Aparecer en la lista no garantiza el acceso ni el uso gratuito. Las selecciones se guardan en este navegador.",
-    "refresh": "Obtener o actualizar modelos",
     "loading": "Obteniendo modelos…",
     "search": "Buscar modelos o proveedores",
     "refreshed": "Última actualización: {{date}}",
@@ -493,8 +491,7 @@
     "save_error": "No se pudieron cargar o guardar los ajustes de modelos.",
     "keep_one": "Mantén al menos un modelo seleccionado.",
     "paid": "De pago",
-    "image": "Imágenes",
-    "keep_other": "Mantén al menos un modelo seleccionado."
+    "image": "Imágenes"
   },
   "cloud_quota": {
     "owner": "Propietario de la cuenta: exento de las cuotas de usuario.",

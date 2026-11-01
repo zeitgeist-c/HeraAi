@@ -166,7 +166,6 @@
       "empty_error": "Voer een API-sleutel in",
       "add_failed": "Sleutel toevoegen mislukt",
       "last_used": "Laatst gebruikt",
-      "cooldown_until": "Afkoeltijd tot",
       "show_key": "Tonen",
       "hide_key": "Verbergen",
       "status_success": "Geslaagd",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "Mijn modellen",
     "description": "Haal catalogi op met je API-sleutels en kies modellen voor de chat. Vermelding garandeert geen toegang of gratis gebruik. Keuzes worden in deze browser opgeslagen.",
-    "refresh": "Modellen ophalen / vernieuwen",
     "loading": "Modellen ophalen…",
     "search": "Modellen of aanbieders zoeken",
     "refreshed": "Laatst vernieuwd: {{date}}",
@@ -493,8 +491,7 @@
     "save_error": "Modelinstellingen konden niet worden geladen of opgeslagen.",
     "keep_one": "Houd minstens één model geselecteerd.",
     "paid": "Betaald",
-    "image": "Afbeeldingen",
-    "keep_other": "Houd minstens één model geselecteerd."
+    "image": "Afbeeldingen"
   },
   "cloud_quota": {
     "owner": "Accounteigenaar: vrijgesteld van gebruikersquota.",

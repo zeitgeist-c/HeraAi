@@ -166,7 +166,6 @@
       "empty_error": "Veuillez saisir une clé API",
       "add_failed": "Échec de l'ajout de la clé",
       "last_used": "Dernière utilisation",
-      "cooldown_until": "En pause jusqu'à",
       "show_key": "Afficher",
       "hide_key": "Masquer",
       "status_success": "Réussite",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "Mes modèles",
     "description": "Récupérez les catalogues avec vos clés API et choisissez des modèles pour la conversation. Leur présence dans la liste ne garantit ni l'accès ni une utilisation gratuite. Les choix sont enregistrés dans ce navigateur.",
-    "refresh": "Récupérer / actualiser les modèles",
     "loading": "Récupération des modèles…",
     "search": "Rechercher des modèles ou des fournisseurs",
     "refreshed": "Dernière actualisation : {{date}}",
@@ -493,8 +491,7 @@
     "save_error": "Impossible de charger ou d'enregistrer les paramètres des modèles.",
     "keep_one": "Gardez au moins un modèle sélectionné.",
     "paid": "Payant",
-    "image": "Images",
-    "keep_other": "Gardez au moins un modèle sélectionné."
+    "image": "Images"
   },
   "cloud_quota": {
     "owner": "Propriétaire du compte : exempté des quotas utilisateur.",

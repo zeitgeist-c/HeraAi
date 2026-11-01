@@ -85,3 +85,17 @@ export function mergeDiscoveryResults(results) {
   }
   return [...models.values()]
 }
+
+export function isFreeModel(model) {
+  if (typeof model?.modelId === 'string' && model.modelId.endsWith(':free')) return true
+  const pricing = model?.pricing
+  if (pricing && (pricing.prompt != null || pricing.completion != null)) {
+    return Number(pricing.prompt) === 0 && Number(pricing.completion) === 0
+  }
+  return false
+}
+
+export function isPaidModel(model) {
+  const pricing = model?.pricing
+  return Boolean(pricing && (Number(pricing.prompt) > 0 || Number(pricing.completion) > 0))
+}

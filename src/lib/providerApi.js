@@ -445,31 +445,23 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
   yield { event: 'error', data: { code: lastError.code || 'generation_failed' } }
 }
 
+// Key validation must not spend quota or burn rate-limit budget: GET
+// /auth/key only checks the key itself, unlike a chat completion.
 export async function testOpenRouterKey(key) {
   try {
-    const request = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: 'POST',
+    const request = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/auth/key`, {
+      method: 'GET',
       headers: {
         Authorization: `Bearer ${String(key || '').trim()}`,
-        'Content-Type': 'application/json',
         'X-OpenRouter-Title': 'HeraAi',
       },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [{ role: 'user', content: 'OK' }],
-        stream: false,
-        max_tokens: 1,
-      }),
     })
     try {
       if (!request.response.ok) throw await errorFromResponse(request.response)
       const data = await request.response.json()
-      if (data?.error) {
-        const message = data.error?.message || String(data.error)
-        throw createProviderError(providerErrorCode(Number(data.error?.code || 0), message), message)
-      }
-      if (!Array.isArray(data?.choices) || !data.choices[0]?.message) {
-        throw createProviderError('invalid_response', 'Invalid OpenRouter test response')
+      // Unknown shapes must never mark a working key invalid or rate-limited.
+      if (!data || typeof data !== 'object' || typeof data.data === 'undefined') {
+        throw createProviderError('invalid_response', 'Invalid OpenRouter key check response')
       }
       return { success: true, provider: 'openrouter' }
     } finally {

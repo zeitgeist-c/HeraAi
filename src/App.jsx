@@ -53,8 +53,9 @@ import {
 } from './lib/messageDisplay'
 import i18n from './i18n'
 import { recordGenerationResults, recordPromptStarted, recordToolUsage } from './lib/stats'
-import { resolveKeysForRequest } from './lib/keyManager'
+import { getRawKey, resolveKeysForRequest } from './lib/keyManager'
 import { transcribeAudio } from './lib/voiceApi'
+import { appendLiveText, LiveTranscriber, supportsLiveDictation } from './lib/liveTranscribe'
 import { resolveSystemInstructionConfig } from './lib/systemInstruction'
 import {
   requestsPreviousImage,
@@ -572,6 +573,10 @@ function App() {
   const dictationTimerRef = useRef(null)
   const dictationLimitRef = useRef(null)
   const dictationAbortRef = useRef(null)
+  const dictationLiveRef = useRef(null)
+  const dictationBaseInputRef = useRef('')
+  const dictationFinalsRef = useRef('')
+  const dictationLiveErrorRef = useRef(false)
   const dictationStartEpochRef = useRef(0)
   const micPermissionCancelRef = useRef(null)
   const hasImageAttachment = attachments.some(att => (
@@ -3351,6 +3356,10 @@ function App() {
     dictationRecorderRef.current = null
     dictationChunksRef.current = []
     dictationShouldTranscribeRef.current = false
+    dictationLiveRef.current = null
+    dictationBaseInputRef.current = ''
+    dictationFinalsRef.current = ''
+    dictationLiveErrorRef.current = false
     dictationPhaseRef.current = 'idle'
     setDictationPhase('idle')
     setDictationSeconds(0)
@@ -3405,6 +3414,44 @@ function App() {
     }
   }, [focusComposer, reportVoiceKeyStatus, resetDictation, t])
 
+  const stopLiveDictation = useCallback(async (commit = true) => {
+    const transcriber = dictationLiveRef.current
+    if (!transcriber) return
+    dictationLiveRef.current = null
+    dictationPhaseRef.current = 'transcribing'
+    setDictationPhase('transcribing')
+    try { await transcriber.finish() } catch { /* ignored */ }
+    // Araya yeni bir dikte girdiyse ortak akışa ve kutuya dokunulmaz.
+    if (dictationLiveRef.current !== null) return
+    releaseDictationStream()
+    try {
+      const baseInput = dictationBaseInputRef.current
+      const finals = dictationFinalsRef.current
+      if (!commit || !String(finals).trim()) {
+        setInput(baseInput)
+        if (commit) notifyError(t(dictationLiveErrorRef.current ? 'chat.voice_failed' : 'chat.voice_empty'))
+      } else {
+        setInput(appendToInputValue(baseInput, finals))
+        await recordToolUsage('voice')
+        if (dictationLiveErrorRef.current) notifyError(t('chat.voice_partial'))
+      }
+      window.requestAnimationFrame(() => focusComposer())
+    } finally {
+      if (dictationLiveRef.current === null) resetDictation()
+    }
+  }, [focusComposer, releaseDictationStream, resetDictation, t])
+
+  const abortLiveDictation = useCallback(async () => {
+    const transcriber = dictationLiveRef.current
+    dictationLiveRef.current = null
+    if (!transcriber) return
+    try { await transcriber.abort() } catch { /* ignored */ }
+    if (dictationLiveRef.current !== null) return
+    releaseDictationStream()
+    setInput(dictationBaseInputRef.current)
+    resetDictation()
+  }, [releaseDictationStream, resetDictation])
+
   const stopDictationRecording = useCallback((shouldTranscribe = true) => {
     const recorder = dictationRecorderRef.current
     if (!recorder || recorder.state === 'inactive') {
@@ -3420,6 +3467,56 @@ function App() {
     recorder.stop()
   }, [clearDictationTimers, resetDictation])
 
+  // Anlık dikte: anahtarlar sırayla denenir, ilk bağlanan kazanır. Bağlantı
+  // kurulamazsa false döner ve çağıran toplu yönteme düşer.
+  const beginLiveDictation = useCallback(async ({ stream, keys, startEpoch }) => {
+    dictationBaseInputRef.current = composerInputRef.current?.value ?? ''
+    dictationFinalsRef.current = ''
+    dictationLiveErrorRef.current = false
+    for (const entry of keys) {
+      if (startEpoch !== dictationStartEpochRef.current) return false
+      let raw = null
+      try { raw = await getRawKey('gemini', entry.id) } catch { continue }
+      if (!raw) continue
+      const transcriber = new LiveTranscriber({
+        onInterim: interim => {
+          if (dictationPhaseRef.current !== 'streaming') return
+          setInput(appendLiveText(appendLiveText(dictationBaseInputRef.current, dictationFinalsRef.current), interim))
+        },
+        onFinal: text => {
+          if (dictationPhaseRef.current !== 'streaming') return
+          dictationFinalsRef.current = appendLiveText(dictationFinalsRef.current, text)
+          setInput(appendLiveText(dictationBaseInputRef.current, dictationFinalsRef.current))
+        },
+        onError: () => { dictationLiveErrorRef.current = true },
+      })
+      try {
+        await transcriber.start({ apiKey: raw, stream })
+      } catch { continue }
+      if (startEpoch !== dictationStartEpochRef.current) {
+        await transcriber.abort()
+        return false
+      }
+      reportVoiceKeyStatus({ keyId: entry.id, status: 'success' })
+      dictationLiveRef.current = transcriber
+      dictationStreamRef.current = stream
+      dictationPhaseRef.current = 'streaming'
+      setDictationPhase('streaming')
+      setDictationSeconds(0)
+      const startedAt = Date.now()
+      dictationTimerRef.current = window.setInterval(() => {
+        setDictationSeconds(Math.floor((Date.now() - startedAt) / 1000))
+      }, 250)
+      dictationLimitRef.current = window.setTimeout(() => {
+        notifyError(t('chat.voice_max_duration', { seconds: DICTATION_MAX_DURATION_MS / 1000 }))
+        if (dictationPhaseRef.current === 'streaming') void stopLiveDictation(true)
+        else stopDictationRecording(true)
+      }, DICTATION_MAX_DURATION_MS)
+      return true
+    }
+    return false
+  }, [reportVoiceKeyStatus, stopDictationRecording, stopLiveDictation, t])
+
   const cancelDictation = useCallback(() => {
     dictationStartEpochRef.current += 1
     micPermissionCancelRef.current?.()
@@ -3428,9 +3525,13 @@ function App() {
       stopDictationRecording(false)
       return
     }
+    if (dictationPhaseRef.current === 'streaming') {
+      void abortLiveDictation()
+      return
+    }
     dictationAbortRef.current?.abort()
     resetDictation()
-  }, [resetDictation, stopDictationRecording])
+  }, [abortLiveDictation, resetDictation, stopDictationRecording])
 
   const requestMicrophonePermission = useCallback(async () => {
     try {
@@ -3519,6 +3620,15 @@ function App() {
         stream.getTracks().forEach(track => track.stop())
         return
       }
+      // Anlık dikte önce denenir; olmazsa aynı akışla toplu yönteme düşülür.
+      if (supportsLiveDictation()) {
+        const liveStarted = await beginLiveDictation({ stream, keys: resolution.keys, startEpoch })
+        if (liveStarted) return
+        if (startEpoch !== dictationStartEpochRef.current) {
+          stream.getTracks().forEach(track => track.stop())
+          return
+        }
+      }
       const preferredMime = MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : undefined
       const recorder = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream)
       dictationStreamRef.current = stream
@@ -3568,13 +3678,14 @@ function App() {
       resetDictation()
       notifyError(error?.name === 'NotAllowedError' ? t('chat.voice_permission_denied') : t('chat.voice_error'))
     }
-  }, [isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, t])
+  }, [beginLiveDictation, isGenerating, processDictation, releaseDictationStream, requestMicrophonePermission, resetDictation, stopDictationRecording, t])
 
   const handleDictationToggle = useCallback(() => {
+    if (dictationPhaseRef.current === 'streaming') { void stopLiveDictation(true); return }
     if (dictationPhaseRef.current === 'recording') stopDictationRecording(true)
     else if (['requesting', 'transcribing'].includes(dictationPhaseRef.current)) cancelDictation()
     else void startDictation()
-  }, [cancelDictation, startDictation, stopDictationRecording])
+  }, [cancelDictation, startDictation, stopDictationRecording, stopLiveDictation])
 
   useEffect(() => {
     const handleVoiceVisibility = () => {
@@ -4750,15 +4861,6 @@ function App() {
               focusComposer()
             }}
             onAttach={() => fileInputRef.current?.click()}
-            language={appConfig?.language || i18n.language || 'en'}
-            onLanguageChange={(langCode) => {
-              i18n.changeLanguage(langCode)
-              try {
-                chrome.storage.local.set({ language: langCode })
-              } catch (error) {
-                console.error('Language persist failed', error)
-              }
-            }}
           />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-5 pb-8">
@@ -4862,6 +4964,7 @@ function App() {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={t('chat.placeholder')}
+            readOnly={dictationPhase === 'streaming'}
             disabled={false}
             data-composer-scroll="true"
             className="hera-composer-input min-h-[66px] w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-2 pt-3 text-[14px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
@@ -4890,14 +4993,14 @@ function App() {
               </button>
               <button
                 type="button"
-                title={dictationPhase === 'recording'
+                title={['recording', 'streaming'].includes(dictationPhase)
                   ? t('chat.tooltips.stop_recording')
                   : dictationPhase === 'requesting'
                     ? t('chat.tooltips.requesting_microphone')
                     : dictationPhase === 'transcribing'
                     ? t('chat.tooltips.cancel_transcription')
                     : t('chat.tooltips.voice_input')}
-                aria-label={dictationPhase === 'recording'
+                aria-label={['recording', 'streaming'].includes(dictationPhase)
                   ? t('chat.tooltips.stop_recording')
                   : dictationPhase === 'requesting'
                     ? t('chat.tooltips.requesting_microphone')
@@ -4911,13 +5014,18 @@ function App() {
               >
                 {['requesting', 'transcribing'].includes(dictationPhase)
                   ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : dictationPhase === 'recording'
+                  : ['recording', 'streaming'].includes(dictationPhase)
                     ? <Square className="h-3.5 w-3.5 fill-current" />
                     : <Mic className="h-4 w-4" />}
               </button>
-              {dictationPhase === 'recording' && (
+              {['recording', 'streaming'].includes(dictationPhase) && (
                 <span className="shrink-0 px-1 text-[10px] font-medium tabular-nums text-destructive">
                   {String(Math.floor(dictationSeconds / 60)).padStart(2, '0')}:{String(dictationSeconds % 60).padStart(2, '0')}
+                </span>
+              )}
+              {dictationPhase === 'streaming' && (
+                <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
+                  {t('chat.voice_live')}
                 </span>
               )}
               <button

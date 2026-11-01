@@ -166,7 +166,6 @@
       "empty_error": "Bitte geben Sie einen API-Schlüssel ein",
       "add_failed": "Schlüssel konnte nicht hinzugefügt werden",
       "last_used": "Zuletzt verwendet",
-      "cooldown_until": "Gesperrt bis",
       "show_key": "Anzeigen",
       "hide_key": "Verbergen",
       "status_success": "Erfolgreich",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "Meine Modelle",
     "description": "Rufen Sie Kataloge mit Ihren API-Schlüsseln ab und wählen Sie Modelle für den Chat. Ein Eintrag garantiert weder Zugriff noch kostenlose Nutzung. Die Auswahl wird in diesem Browser gespeichert.",
-    "refresh": "Modelle abrufen / aktualisieren",
     "loading": "Modelle werden abgerufen…",
     "search": "Modelle oder Anbieter suchen",
     "refreshed": "Letzte Aktualisierung: {{date}}",
@@ -493,8 +491,7 @@
     "save_error": "Modelleinstellungen konnten nicht geladen oder gespeichert werden.",
     "keep_one": "Mindestens ein Modell muss ausgewählt bleiben.",
     "paid": "Kostenpflichtig",
-    "image": "Bilder",
-    "keep_other": "Mindestens ein Modell muss ausgewählt bleiben."
+    "image": "Bilder"
   },
   "cloud_quota": {
     "owner": "Kontoinhaber: von Nutzerkontingenten ausgenommen.",

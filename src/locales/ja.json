@@ -166,7 +166,6 @@
       "empty_error": "API キーを入力してください",
       "add_failed": "キーを追加できませんでした",
       "last_used": "最終使用",
-      "cooldown_until": "クールダウン終了",
       "show_key": "表示",
       "hide_key": "非表示",
       "status_success": "成功",
@@ -485,7 +484,6 @@
   "models_panel": {
     "title": "マイモデル",
     "description": "API キーを使ってカタログを取得し、チャット用のモデルを選択します。一覧に表示されても、アクセスや無料利用が保証されるものではありません。選択内容はこのブラウザに保存されます。",
-    "refresh": "モデルを取得 / 更新",
     "loading": "モデルを取得しています…",
     "search": "モデルまたはプロバイダーを検索",
     "refreshed": "最終更新: {{date}}",
