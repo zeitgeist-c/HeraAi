@@ -62,6 +62,40 @@ vi.mock('./lib/voiceApi', () => ({
   transcribeAudio: vi.fn(),
 }));
 
+const liveHarness = vi.hoisted(() => ({
+  forceLive: false,
+  callbacks: null,
+  finishCalls: 0,
+  finishGate: null,
+}));
+
+vi.mock('./lib/liveTranscribe', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    supportsLiveDictation: () => liveHarness.forceLive || actual.supportsLiveDictation(),
+    LiveTranscriber: class {
+      constructor(callbacks) { liveHarness.callbacks = callbacks; }
+      async start() { return { sampleRate: 16000 }; }
+      async finish() { liveHarness.finishCalls += 1; await liveHarness.finishGate; }
+      async abort() {}
+    },
+  };
+});
+
+function resetLiveHarness() {
+  liveHarness.forceLive = false;
+  liveHarness.callbacks = null;
+  liveHarness.finishCalls = 0;
+  liveHarness.finishGate = null;
+}
+
+function openLiveFinishGate() {
+  let release;
+  liveHarness.finishGate = new Promise(resolve => { release = resolve; });
+  return release;
+}
+
 async function* mockStream(events) {
   for (const evt of events) {
     yield evt;
@@ -6159,6 +6193,145 @@ describe('HeraAi App', () => {
     ));
     expect(voiceApi.transcribeAudio).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    resetLiveHarness();
+  });
+
+  async function startLiveDictationFlow() {
+    liveHarness.forceLive = true;
+    const releaseFinish = openLiveFinishGate();
+    await seedVaultKeys('gemini', [{ id: 'g1', key: 'secret', isPrimary: true }]);
+    const tracks = [{ stop: vi.fn() }];
+    global.MediaRecorder = global.MediaRecorder || class LiveTestMediaRecorder {};
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockResolvedValue({ state: 'granted' }) },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) },
+    });
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
+    const textarea = document.querySelector('textarea');
+    fireEvent.change(textarea, { target: { value: 'Existing draft' } });
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i })).toBeInTheDocument());
+    return { textarea, releaseFinish, tracks };
+  }
+
+  it('keeps a live final transcript that arrives while stopping', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    const { textarea, releaseFinish } = await startLiveDictationFlow();
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    await waitFor(() => expect(liveHarness.finishCalls).toBe(1));
+    await act(async () => { liveHarness.callbacks.onFinal('merhaba dünya'); });
+    releaseFinish();
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft\nmerhaba dünya'));
+    expect(toastError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/Anlaşılır bir konuşma|No intelligible speech/i),
+      expect.anything(),
+    );
+    expect(voiceApi.transcribeAudio).not.toHaveBeenCalled();
+    resetLiveHarness();
+  });
+
+  it('commits the shown interim text once when stopping with no final', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    const { textarea, releaseFinish } = await startLiveDictationFlow();
+    await act(async () => { liveHarness.callbacks.onInterim('kısmi metin'); });
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft kısmi metin'));
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    releaseFinish();
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft\nkısmi metin'));
+    expect(toastError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/Anlaşılır bir konuşma|No intelligible speech/i),
+      expect.anything(),
+    );
+    resetLiveHarness();
+  });
+
+  it('does not duplicate words when a final follows its interim', async () => {
+    const { textarea, releaseFinish } = await startLiveDictationFlow();
+    await act(async () => { liveHarness.callbacks.onInterim('merhaba'); });
+    await act(async () => { liveHarness.callbacks.onFinal('merhaba dünya'); });
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    releaseFinish();
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft\nmerhaba dünya'));
+    resetLiveHarness();
+  });
+
+  it('warns on empty live dictation when nothing was heard', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    const { textarea, releaseFinish } = await startLiveDictationFlow();
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    releaseFinish();
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/Anlaşılır bir konuşma|No intelligible speech/i),
+      expect.anything(),
+    ));
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft'));
+    resetLiveHarness();
+  });
+
+  it('ignores stale live events after a completed stop', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    const { textarea, releaseFinish } = await startLiveDictationFlow();
+    const staleCallbacks = liveHarness.callbacks;
+    await act(async () => { staleCallbacks.onFinal('kapanış metni'); });
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    await waitFor(() => expect(liveHarness.finishCalls).toBe(1));
+    releaseFinish();
+    await waitFor(() => expect(textarea).toHaveValue('Existing draft\nkapanış metni'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    fireEvent.change(textarea, { target: { value: 'Kullanıcı taslağı' } });
+    await act(async () => { staleCallbacks.onFinal('geç kalmış metin'); });
+    await act(async () => { staleCallbacks.onInterim('geç kalmış taslak'); });
+    expect(textarea).toHaveValue('Kullanıcı taslağı');
+    expect(toastError).not.toHaveBeenCalled();
+    resetLiveHarness();
+  });
+
+  it('ignores a stale live error once a new session runs cleanly', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    const first = await startLiveDictationFlow();
+    const staleCallbacks = liveHarness.callbacks;
+    await act(async () => { staleCallbacks.onError(new Error('boom')); });
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    first.releaseFinish();
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/dönüştürülemedi|transcribed/i),
+      expect.anything(),
+    ));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(liveHarness.callbacks).not.toBe(staleCallbacks));
+    const secondCallbacks = liveHarness.callbacks;
+    await act(async () => { secondCallbacks.onFinal('temiz metin'); });
+    await act(async () => { staleCallbacks.onError(new Error('geç kalmış hata')); });
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    await waitFor(() => expect(first.textarea).toHaveValue('Existing draft\ntemiz metin'));
+    expect(toastError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/çevrilemedi|fully transcribed/i),
+      expect.anything(),
+    );
+    resetLiveHarness();
+  });
+
+  it('ignores late events from a previous live session', async () => {
+    const first = await startLiveDictationFlow();
+    const staleCallbacks = liveHarness.callbacks;
+    await act(async () => { staleCallbacks.onFinal('ilk metin'); });
+    fireEvent.click(screen.getByRole('button', { name: /Stop Recording|Kaydı Durdur/i }));
+    await waitFor(() => expect(liveHarness.finishCalls).toBe(1));
+    first.releaseFinish();
+    await waitFor(() => expect(first.textarea).toHaveValue('Existing draft\nilk metin'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Voice Input|Sesli Giriş/i }));
+    await waitFor(() => expect(liveHarness.callbacks).not.toBe(staleCallbacks));
+    await act(async () => { staleCallbacks.onFinal('sızıntı metni'); });
+    await act(async () => { staleCallbacks.onInterim('sızıntı taslak'); });
+    expect(first.textarea.value).not.toMatch(/sızıntı/);
+    resetLiveHarness();
   });
 
   it('recovers to idle when stopping dictation with no active recorder', async () => {

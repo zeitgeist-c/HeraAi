@@ -576,6 +576,8 @@ function App() {
   const dictationLiveRef = useRef(null)
   const dictationBaseInputRef = useRef('')
   const dictationFinalsRef = useRef('')
+  const dictationInterimRef = useRef('')
+  const dictationLiveTokenRef = useRef(null)
   const dictationLiveErrorRef = useRef(false)
   const dictationStartEpochRef = useRef(0)
   const micPermissionCancelRef = useRef(null)
@@ -3359,6 +3361,8 @@ function App() {
     dictationLiveRef.current = null
     dictationBaseInputRef.current = ''
     dictationFinalsRef.current = ''
+    dictationInterimRef.current = ''
+    dictationLiveTokenRef.current = null
     dictationLiveErrorRef.current = false
     dictationPhaseRef.current = 'idle'
     setDictationPhase('idle')
@@ -3416,22 +3420,23 @@ function App() {
 
   const stopLiveDictation = useCallback(async (commit = true) => {
     const transcriber = dictationLiveRef.current
-    if (!transcriber) return
+    const stoppingToken = dictationLiveTokenRef.current
+    if (!transcriber || !stoppingToken) return
     dictationLiveRef.current = null
     dictationPhaseRef.current = 'transcribing'
     setDictationPhase('transcribing')
     try { await transcriber.finish() } catch { /* ignored */ }
-    // Araya yeni bir dikte girdiyse ortak akışa ve kutuya dokunulmaz.
-    if (dictationLiveRef.current !== null) return
+    // İptal, yeni oturum ya da tamamlanmış oturum araya girdiyse dokunulmaz.
+    if (stoppingToken.epoch !== dictationStartEpochRef.current || stoppingToken !== dictationLiveTokenRef.current || dictationLiveRef.current !== null) return
     releaseDictationStream()
     try {
       const baseInput = dictationBaseInputRef.current
-      const finals = dictationFinalsRef.current
-      if (!commit || !String(finals).trim()) {
+      const heard = appendLiveText(dictationFinalsRef.current, dictationInterimRef.current)
+      if (!commit || !String(heard).trim()) {
         setInput(baseInput)
         if (commit) notifyError(t(dictationLiveErrorRef.current ? 'chat.voice_failed' : 'chat.voice_empty'))
       } else {
-        setInput(appendToInputValue(baseInput, finals))
+        setInput(appendToInputValue(baseInput, heard))
         await recordToolUsage('voice')
         if (dictationLiveErrorRef.current) notifyError(t('chat.voice_partial'))
       }
@@ -3472,23 +3477,30 @@ function App() {
   const beginLiveDictation = useCallback(async ({ stream, keys, startEpoch }) => {
     dictationBaseInputRef.current = composerInputRef.current?.value ?? ''
     dictationFinalsRef.current = ''
+    dictationInterimRef.current = ''
     dictationLiveErrorRef.current = false
     for (const entry of keys) {
       if (startEpoch !== dictationStartEpochRef.current) return false
       let raw = null
       try { raw = await getRawKey('gemini', entry.id) } catch { continue }
       if (!raw) continue
+      const sessionToken = { epoch: startEpoch }
       const transcriber = new LiveTranscriber({
         onInterim: interim => {
-          if (dictationPhaseRef.current !== 'streaming') return
-          setInput(appendLiveText(appendLiveText(dictationBaseInputRef.current, dictationFinalsRef.current), interim))
+          if (sessionToken !== dictationLiveTokenRef.current) return
+          dictationInterimRef.current = typeof interim === 'string' ? interim : ''
+          setInput(appendLiveText(appendLiveText(dictationBaseInputRef.current, dictationFinalsRef.current), dictationInterimRef.current))
         },
         onFinal: text => {
-          if (dictationPhaseRef.current !== 'streaming') return
+          if (sessionToken !== dictationLiveTokenRef.current) return
+          dictationInterimRef.current = ''
           dictationFinalsRef.current = appendLiveText(dictationFinalsRef.current, text)
           setInput(appendLiveText(dictationBaseInputRef.current, dictationFinalsRef.current))
         },
-        onError: () => { dictationLiveErrorRef.current = true },
+        onError: () => {
+          if (sessionToken !== dictationLiveTokenRef.current) return
+          dictationLiveErrorRef.current = true
+        },
       })
       try {
         await transcriber.start({ apiKey: raw, stream })
@@ -3499,6 +3511,7 @@ function App() {
       }
       reportVoiceKeyStatus({ keyId: entry.id, status: 'success' })
       dictationLiveRef.current = transcriber
+      dictationLiveTokenRef.current = sessionToken
       dictationStreamRef.current = stream
       dictationPhaseRef.current = 'streaming'
       setDictationPhase('streaming')
