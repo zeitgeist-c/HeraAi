@@ -1,6 +1,11 @@
-export const SYSTEM_INSTRUCTION_DEFAULT_VERSION = 2
+export const SYSTEM_INSTRUCTION_DEFAULT_VERSION = 3
 
-export const DEFAULT_SYSTEM_INSTRUCTION = `Sen genel amaçlı bir yapay zekâ asistanısın. Amacın, kullanıcının asıl ihtiyacını anlayarak doğru, açık, faydalı ve göreve uygun yanıtlar üretmektir.
+export const DEFAULT_SYSTEM_INSTRUCTION = ''
+
+// The v2 default (shipped up to 1.12.6) is kept ONLY so a migration can tell
+// an untouched install (still carrying the v2 default verbatim) apart from a
+// user-written instruction. Never render or ship this text as the default.
+const V2_DEFAULT_SYSTEM_INSTRUCTION = `Sen genel amaçlı bir yapay zekâ asistanısın. Amacın, kullanıcının asıl ihtiyacını anlayarak doğru, açık, faydalı ve göreve uygun yanıtlar üretmektir.
 
 YAKLAŞIM
 
@@ -35,6 +40,7 @@ ANLATIM
 // an untouched install (still carrying the old default verbatim) apart from a
 // user-written instruction. Never render or ship this text as the default.
 export const LEGACY_DEFAULT_SYSTEM_INSTRUCTIONS = [
+  V2_DEFAULT_SYSTEM_INSTRUCTION,
   `Sen genel amaçlı, yüksek kaliteli bir yapay zeka asistanısın.
 
 Amacın, kullanıcının isteğini doğru anlamak ve göreve uygun şekilde mümkün olan en doğru, açık, faydalı ve verimli yanıtı üretmektir.
