@@ -458,7 +458,6 @@ async function enqueueAllKeys(runtime) {
     gemini: 'geminiApiKeys',
     tavily: 'tavilyApiKeys',
     openrouter: 'openRouterApiKeys',
-    ollama: 'ollamaApiKeys',
   }
   for (const provider of PROVIDERS) {
     for (const key of await runtime.vault.listKeys(provider)) {

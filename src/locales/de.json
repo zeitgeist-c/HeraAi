@@ -222,8 +222,6 @@
     "welcome_title": "Hallo, wie kann ich helfen?",
     "welcome_subtitle": "Stellen Sie eine Frage, wählen Sie einen Bereich auf dem Bildschirm aus oder hängen Sie eine Datei an.",
     "welcome_actions": {
-      "research_title": "Web-Recherche",
-      "research_description": "Sucht automatisch, wenn die Antwort aktuelle Informationen benötigt",
       "crop_title": "Vom Bildschirm auswählen",
       "crop_description": "Bereich ausschneiden und fragen",
       "crop_cancel_title": "Auswahl abbrechen",

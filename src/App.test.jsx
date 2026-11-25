@@ -41,13 +41,14 @@ vi.mock('./lib/api', () => ({
   testKey: vi.fn(),
   classifyNeedsWebSearch: vi.fn(async () => ({ needsSearch: null })),
   MODELS: [
-    'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite',
     'gemini-3.6-flash',
-    'gemini-3.7-flash',
-    'gemini-3.8-flash',
+    'gemini-4-hydrogen',
+    'nvidia/nemotron-3.5-lightning:free',
+    'nvidia/nemotron-3.5-super-vl:free',
+    'inclusionai/ling-3.2-flash:free',
   ],
-  DEFAULT_MODEL: 'gemini-3.1-flash-lite',
+  DEFAULT_MODEL: 'gemini-3.5-flash-lite',
 }));
 
 vi.mock('./lib/audioUtils', async (importOriginal) => {
@@ -204,7 +205,6 @@ function openSettingsPanel() {
 const PROVIDER_TITLE_PATTERNS = [
   /Gemini API (Keys|Anahtarları)/i,
   /OpenRouter API (Keys|Anahtarları)/i,
-  /Ollama \((No Image Support|Görsel Desteklemez)\) API (Keys|Anahtarları)/i,
   /Tavily (Search API Keys|Arama API Anahtarları)/i,
 ];
 
@@ -245,7 +245,6 @@ describe('HeraAi App', () => {
     geminiApiKeys: 'gemini',
     tavilyApiKeys: 'tavily',
     openRouterApiKeys: 'openrouter',
-    ollamaApiKeys: 'ollama',
   };
 
   const KEY_METADATA_FIELDS = [
@@ -2709,7 +2708,8 @@ describe('HeraAi App', () => {
     });
     await waitFor(() => expect(screen.getAllByTitle(/screenshot-/)).toHaveLength(2));
 
-    const translateButton = Array.from(document.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-languages'));
+    const composer = document.querySelector('textarea').closest('.hera-surface');
+    const translateButton = Array.from(composer.querySelectorAll('button')).find(btn => btn.querySelector('svg.lucide-languages'));
     fireEvent.click(translateButton);
 
     expect(await screen.findByText('Translated all crops', {}, { timeout: 3000 })).toBeInTheDocument();
@@ -3253,11 +3253,11 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
     const nameInputs = Array.from(document.querySelectorAll('input[maxlength="60"]'));
-    expect(nameInputs).toHaveLength(4);
+    expect(nameInputs).toHaveLength(3);
     expect(nameInputs.every(input => input.type === 'text')).toBe(true);
   });
 
@@ -3270,7 +3270,7 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
     const geminiInput = document.querySelectorAll('input[type="password"]')[0];
@@ -3312,7 +3312,6 @@ describe('HeraAi App', () => {
       'false',
       'false',
       'false',
-      'false',
     ]);
     // Kapalı kartın içeriği DOM'da hiç bulunmaz; `hidden` özniteliği tek başına
     // yetmiyordu (display sınıfı onu ezip paneli açık bırakıyordu).
@@ -3336,7 +3335,6 @@ describe('HeraAi App', () => {
     const expectedLinks = [
       ['https://aistudio.google.com/api-keys', /Gemini/i],
       ['https://openrouter.ai/settings/keys', /OpenRouter/i],
-      ['https://ollama.com/settings/keys', /Ollama/i],
       ['https://app.tavily.com/home', /Tavily/i],
     ];
     for (const [href, label] of expectedLinks) {
@@ -3360,14 +3358,14 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
-    const tavilyInput = document.querySelectorAll('input[type="password"]')[3];
+    const tavilyInput = document.querySelectorAll('input[type="password"]')[2];
     fireEvent.change(tavilyInput, { target: { value: 'tvly-test-key-abcdefg1234' } });
 
     const addButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.textContent?.match(/Add Key|Anahtar Ekle/i));
-    fireEvent.click(addButtons[3]);
+    fireEvent.click(addButtons[2]);
 
     await waitFor(() => {
       expect(kasaOku('tavily')).toHaveLength(1);
@@ -3435,7 +3433,7 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
     const testAllBtn = await waitFor(() => {
@@ -3476,7 +3474,7 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
     const keyRows = () => Array.from(document.querySelectorAll('span.font-mono'));
@@ -3525,7 +3523,7 @@ describe('HeraAi App', () => {
     expandProviderCards();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('input[type="password"]').length).toBe(4);
+      expect(document.querySelectorAll('input[type="password"]').length).toBe(3);
     });
 
     const geminiInput = document.querySelectorAll('input[type="password"]')[0];
@@ -3557,7 +3555,7 @@ describe('HeraAi App', () => {
     expect(nameInputs[0]).toHaveValue('');
   });
 
-  it('renders the provider-grouped model selector with the 11 supported model ids', async () => {
+  it('renders the provider-grouped model selector with the 6 supported model ids', async () => {
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -3569,42 +3567,33 @@ describe('HeraAi App', () => {
     fireEvent.click(modelSelect);
     const listbox = screen.getByRole('listbox');
     fireEvent.click(screen.getByText('OpenRouter'));
-    fireEvent.click(screen.getByText(/Ollama/));
     const optionValues = Array.from(listbox.querySelectorAll('[data-model-id]')).map(opt => opt.dataset.modelId);
     expect(optionValues).toEqual([
-      'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.8-flash',
-      'google/gemma-4-26b-a4b-it:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
+      'gemini-4-hydrogen',
       'nvidia/nemotron-3.5-lightning:free',
-      'gpt-oss:120b',
-      'nemotron-3-super',
-      'gemma4:31b',
+      'nvidia/nemotron-3.5-super-vl:free',
+      'inclusionai/ling-3.2-flash:free',
     ]);
     expect(listbox.querySelector('[data-model-id="auto"]')).not.toBeInTheDocument();
     expect(screen.getByText('Gemini')).toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
-    expect(screen.getByText('Ollama')).toBeInTheDocument();
+    expect(screen.queryByText('Ollama')).not.toBeInTheDocument();
     expect(Array.from(listbox.querySelectorAll('[data-model-id]'))
-      .filter(option => option.dataset.modelId === 'nvidia/nemotron-3-super-120b-a12b:free')
-      .map(option => option.textContent)).toEqual(['Nemotron 3 Super 120B']);
+      .filter(option => option.dataset.modelId === 'nvidia/nemotron-3.5-super-vl:free')
+      .map(option => option.textContent)).toEqual(['Nemotron 3.5 Super VL📷']);
     expect(Array.from(listbox.querySelectorAll('[data-model-id]')).slice(-3).map(option => option.textContent)).toEqual([
-      'GPT-OSS 120B',
-      'Nemotron 3 Super',
-      'Gemma 4 31B',
+      'Nemotron 3.5 Lightning',
+      'Nemotron 3.5 Super VL📷',
+      'Ling 3.2 Flash📷',
     ]);
     const rowText = (id) => listbox.querySelector(`[data-model-id="${id}"]`).textContent;
-    expect(rowText('gpt-oss:120b')).toBe('GPT-OSS 120B');
-    // Ollama yolu görsel kabul etmiyor; katalog da 📷 rozetini göstermez.
-    expect(rowText('gemma4:31b')).toBe('Gemma 4 31B');
-    expect(rowText('google/gemma-4-26b-a4b-it:free')).toBe('Gemma 4 26B📷');
+    expect(rowText('nvidia/nemotron-3.5-super-vl:free')).toBe('Nemotron 3.5 Super VL📷');
+    expect(rowText('inclusionai/ling-3.2-flash:free')).toBe('Ling 3.2 Flash📷');
     expect(rowText('nvidia/nemotron-3.5-lightning:free')).toBe('Nemotron 3.5 Lightning');
-    expect(rowText('nvidia/nemotron-3-super-120b-a12b:free')).toBe('Nemotron 3 Super 120B');
-    expect(rowText('gemini-3.1-flash-lite')).toBe('Gemini 3.1 Flash Lite📷');
-    expect(rowText('gemini-3.8-flash')).toBe('Gemini 3.8 Flash📷');
+    expect(rowText('gemini-3.5-flash-lite')).toBe('Gemini 3.5 Flash Lite📷');
+    expect(rowText('gemini-4-hydrogen')).toBe('Gemini 4 Hydrogen📷');
     // Model satırları yalnızca isim + görüntü simgesi taşır; amaç etiketleri kaldırıldı.
     expect(listbox.textContent).not.toMatch(/Quick drafts|Daily chat|Balanced|Docs & images|Most capable|Fast & visual|Code & images|Code & analysis|General chat|Smartest|Strong & visual/)
   });
@@ -3618,10 +3607,10 @@ describe('HeraAi App', () => {
     const listbox = screen.getByRole('listbox');
     fireEvent.click(screen.getByText('OpenRouter'));
     const rowText = id => listbox.querySelector(`[data-model-id="${id}"]`)?.textContent || '';
-    expect(rowText('gemini-3.1-flash-lite')).toContain('📷');
+    expect(rowText('gemini-3.5-flash-lite')).toContain('📷');
     expect(rowText('nvidia/nemotron-3.5-lightning:free')).not.toContain('📷');
-    expect(rowText('google/gemma-4-26b-a4b-it:free')).toContain('📷');
-    expect(rowText('nvidia/nemotron-3-super-120b-a12b:free')).not.toContain('📷');
+    expect(rowText('nvidia/nemotron-3.5-super-vl:free')).toContain('📷');
+    expect(rowText('inclusionai/ling-3.2-flash:free')).toContain('📷');
   });
 
   it('collapses provider groups in the model selector independently', async () => {
@@ -3631,12 +3620,12 @@ describe('HeraAi App', () => {
 
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
     const listbox = screen.getByRole('listbox');
-    expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="gemini-4-hydrogen"]')).toBeInTheDocument();
     expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('OpenRouter'));
     expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).toBeInTheDocument();
-    expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="gemini-4-hydrogen"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('OpenRouter'));
     expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).not.toBeInTheDocument();
@@ -3650,14 +3639,14 @@ describe('HeraAi App', () => {
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
     fireEvent.click(screen.getByText('OpenRouter'));
     const listbox = screen.getByRole('listbox');
-    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3-super-120b-a12b:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-super-vl:free"]')).toBeInTheDocument();
     expect(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-lightning:free"]')).toBeInTheDocument();
-    expect(listbox.querySelector('[data-model-id="google/gemma-4-26b-a4b-it:free"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="inclusionai/ling-3.2-flash:free"]')).toBeInTheDocument();
 
-    fireEvent.click(listbox.querySelector('[data-model-id="nvidia/nemotron-3-super-120b-a12b:free"]'));
+    fireEvent.click(listbox.querySelector('[data-model-id="nvidia/nemotron-3.5-super-vl:free"]'));
     await waitFor(() => expect(
       document.querySelector('button[data-testid="model-selector"]'),
-    ).toHaveTextContent('Nemotron 3 Super 120B'));
+    ).toHaveTextContent('Nemotron 3.5 Super VL'));
   });
 
   it('collapses the selected model group too', async () => {
@@ -3667,13 +3656,13 @@ describe('HeraAi App', () => {
 
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
     const listbox = screen.getByRole('listbox');
-    expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="gemini-4-hydrogen"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Gemini'));
-    expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).not.toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="gemini-4-hydrogen"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Gemini'));
-    expect(listbox.querySelector('[data-model-id="gemini-3.8-flash"]')).toBeInTheDocument();
+    expect(listbox.querySelector('[data-model-id="gemini-4-hydrogen"]')).toBeInTheDocument();
   });
 
   it('closes the model selector with a second toggle click', async () => {
@@ -3694,11 +3683,11 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     const modelSelect = document.querySelector('button[data-testid="model-selector"]');
-    expect(modelSelect.textContent).toBe('Gemini 3.1 Flash Lite');
+    expect(modelSelect.textContent).toBe('Gemini 3.5 Flash Lite');
     await waitFor(() => expect(currentStorage.modelSelectionMode).toBe('manual'));
   });
 
-  it('TC-MODELS-01 restores a personal API catalog and hides unselected models', async () => {
+  it('TC-MODELS-01 ignores a stored personal API catalog and shows the fixed catalog', async () => {
     currentStorage.modelPreferences = {
       models: [{ key: 'openrouter:personal/model', provider: 'openrouter', modelId: 'personal/model', label: 'Personal model', capabilities: {}, sourceKeyIds: ['key1'] }],
       enabledKeys: ['openrouter:personal/model'],
@@ -3707,25 +3696,25 @@ describe('HeraAi App', () => {
     currentStorage.selectedModel = 'personal/model';
     render(<App />);
     const selector = await screen.findByTestId('model-selector');
-    await waitFor(() => expect(selector).toHaveTextContent('Personal model'));
+    await waitFor(() => expect(selector).toHaveTextContent('Gemini 3.5 Flash Lite'));
     fireEvent.click(selector);
-    expect(screen.getByRole('option', { name: 'Personal model' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Personal model' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /Gemini 3.1/ })).not.toBeInTheDocument();
   });
 
   it('restores a persisted manual model selection', async () => {
-    currentStorage.selectedModel = 'gemini-3.7-flash';
+    currentStorage.selectedModel = 'gemini-3.6-flash';
     currentStorage.selectedProvider = 'gemini';
     currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
-    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.7 Flash');
+    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.6 Flash');
   });
 
   it('does not offer an automatic selection in the selector', async () => {
-    currentStorage.selectedModel = 'gemini-3.7-flash';
+    currentStorage.selectedModel = 'gemini-3.6-flash';
     currentStorage.selectedProvider = 'gemini';
     currentStorage.modelSelectionMode = 'manual';
     render(<App />);
@@ -3737,7 +3726,7 @@ describe('HeraAi App', () => {
   });
 
   it('migrates a stored automatic selection to manual', async () => {
-    currentStorage.selectedModel = 'gemini-3.7-flash';
+    currentStorage.selectedModel = 'gemini-3.6-flash';
     currentStorage.selectedProvider = 'gemini';
     currentStorage.modelSelectionMode = 'auto';
     render(<App />);
@@ -3745,7 +3734,7 @@ describe('HeraAi App', () => {
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     await waitFor(() => expect(currentStorage.modelSelectionMode).toBe('manual'));
-    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.7 Flash');
+    expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.6 Flash');
   });
 
   it('migrates a provider-less legacy Gemini selection once', async () => {
@@ -3759,30 +3748,30 @@ describe('HeraAi App', () => {
     });
   });
 
-  it('migrates a retired MiniMax selection to the Ollama default', async () => {
+  it('migrates a retired MiniMax selection to the Gemini default', async () => {
     currentStorage.selectedProvider = 'ollama';
     currentStorage.selectedModel = 'minimax-m3';
     currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
     await waitFor(() => expect(currentStorage).toMatchObject({
-      selectedProvider: 'ollama',
-      selectedModel: 'gemma4:31b',
+      selectedProvider: 'gemini',
+      selectedModel: 'gemini-3.5-flash-lite',
     }));
-    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemma 4 31B'));
+    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.5 Flash Lite'));
   });
 
-  it('migrates a retired Nemotron 3 Ultra selection to Gemma 4 31B', async () => {
+  it('migrates a retired Nemotron 3 Ultra selection to Gemini 3.5 Flash Lite', async () => {
     currentStorage.selectedProvider = 'ollama';
     currentStorage.selectedModel = 'nemotron-3-ultra';
     currentStorage.modelSelectionMode = 'manual';
     render(<App />);
 
     await waitFor(() => expect(currentStorage).toMatchObject({
-      selectedProvider: 'ollama',
-      selectedModel: 'gemma4:31b',
+      selectedProvider: 'gemini',
+      selectedModel: 'gemini-3.5-flash-lite',
     }));
-    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemma 4 31B'));
+    await waitFor(() => expect(document.querySelector('button[data-testid="model-selector"]')).toHaveTextContent('Gemini 3.5 Flash Lite'));
   });
 
   it('removes retired MiniMax provenance from stored sessions without deleting answers', async () => {
@@ -3821,14 +3810,14 @@ describe('HeraAi App', () => {
 
   it.each([
     ['nvidia/nemotron-3.5-lightning:free', 'openrouter'],
-    ['nemotron-3-super', 'ollama'],
-    ['gpt-oss:120b', 'ollama'],
+    ['nvidia/nemotron-3.5-super-vl:free', 'openrouter'],
+    ['inclusionai/ling-3.2-flash:free', 'openrouter'],
   ])('persists provider and model together when selecting %s', async (modelId, providerId) => {
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
 
     fireEvent.click(document.querySelector('button[data-testid="model-selector"]'));
-    fireEvent.click(screen.getByText(providerId === 'openrouter' ? 'OpenRouter' : /Ollama/));
+    fireEvent.click(screen.getByText('OpenRouter'));
     fireEvent.click(document.querySelector(`[data-model-id="${modelId}"]`));
 
     await waitFor(() => expect(currentStorage).toMatchObject({
@@ -3845,34 +3834,34 @@ describe('HeraAi App', () => {
 
     const modelSelect = document.querySelector('button[data-testid="model-selector"]');
     fireEvent.click(modelSelect);
-    fireEvent.click(document.querySelector('[data-model-id="gemini-3.7-flash"]'));
+    fireEvent.click(document.querySelector('[data-model-id="gemini-3.6-flash"]'));
 
-    expect(modelSelect.textContent).toBe('Gemini 3.7 Flash');
+    expect(modelSelect.textContent).toBe('Gemini 3.6 Flash');
 
     const input = document.querySelector('textarea') || screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'hello with custom model' } });
     fireEvent.click(getSendButton());
 
     await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
-    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.7-flash');
+    expect(api.streamChat.mock.calls[0][4]).toBe('gemini-3.6-flash');
     const answer = await screen.findByText('ok');
-    expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.7 Flash');
+    expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.6 Flash');
     await waitFor(() => expect(currentStorage.sessions.some(session => (
-      session.messages?.some(message => message.role === 'model' && message.model === 'gemini-3.7-flash')
+      session.messages?.some(message => message.role === 'model' && message.model === 'gemini-3.6-flash')
     ))).toBe(true));
 
-    expect(currentStorage.selectedModel).toBe('gemini-3.7-flash');
+    expect(currentStorage.selectedModel).toBe('gemini-3.6-flash');
   });
 
   it('retries the same question with a one-off model without changing the composer model', async () => {
     currentStorage = {
       theme: 'light',
-      selectedModel: 'gemini-3.1-flash-lite',
+      selectedModel: 'gemini-3.5-flash-lite',
       modelSelectionMode: 'manual',
     };
     api.streamChat
-      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.1' } }]))
-      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.5 Lite' } }]));
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from 3.5' } }]))
+      .mockImplementationOnce(() => mockStream([{ event: 'chunk', data: { text: 'Answer from Lightning' } }]));
 
     render(<App />);
     await waitFor(() => expect(document.querySelector('textarea')).toBeInTheDocument());
@@ -3880,41 +3869,36 @@ describe('HeraAi App', () => {
     fireEvent.change(document.querySelector('textarea'), { target: { value: 'Compare this question' } });
     fireEvent.click(getSendButton());
 
-    const firstAnswer = await screen.findByText('Answer from 3.1');
+    const firstAnswer = await screen.findByText('Answer from 3.5');
     const assistantMessage = firstAnswer.closest('[data-testid="assistant-message"]');
     const retryButton = assistantMessage.querySelector('button[aria-haspopup="dialog"]');
     fireEvent.click(retryButton);
 
     const retryDialog = screen.getByRole('dialog', { name: /Try again with a model|Model ile yeniden dene/i });
     expect(Array.from(retryDialog.querySelectorAll('[data-retry-model]')).map(button => button.dataset.retryModel)).toEqual([
-      'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.8-flash',
-      'google/gemma-4-26b-a4b-it:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
+      'gemini-4-hydrogen',
       'nvidia/nemotron-3.5-lightning:free',
-      'gpt-oss:120b',
-      'nemotron-3-super',
-      'gemma4:31b',
+      'nvidia/nemotron-3.5-super-vl:free',
+      'inclusionai/ling-3.2-flash:free',
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3.5 Lightning' }));
 
-    expect(await screen.findByText('Answer from 3.5 Lite')).toBeInTheDocument();
+    expect(await screen.findByText('Answer from Lightning')).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(2);
     expect(api.streamChat.mock.calls[1][0].map(message => message.content)).toEqual(['Compare this question']);
-    expect(api.streamChat.mock.calls[1][4]).toBe('gemini-3.5-flash-lite');
+    expect(api.streamChat.mock.calls[1][4]).toBe('nvidia/nemotron-3.5-lightning:free');
 
     const startMessages = global.chrome.runtime.sendMessage.mock.calls
       .map(([message]) => message)
       .filter(message => message?.type === 'HERA_GENERATION_START');
-    expect(startMessages.at(-1).model).toBe('gemini-3.5-flash-lite');
-    expect(document.querySelector('button[data-testid="model-selector"]').textContent).toBe('Gemini 3.1 Flash Lite');
-    expect(currentStorage.selectedModel).toBe('gemini-3.1-flash-lite');
-    expect(screen.getByText('Answer from 3.1')).toBeInTheDocument();
-    expect(within(screen.getByText('Answer from 3.1').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.1 Flash Lite');
-    expect(within(screen.getByText('Answer from 3.5 Lite').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.5 Flash Lite');
+    expect(startMessages.at(-1).model).toBe('nvidia/nemotron-3.5-lightning:free');
+    expect(document.querySelector('button[data-testid="model-selector"]').textContent).toBe('Gemini 3.5 Flash Lite');
+    expect(currentStorage.selectedModel).toBe('gemini-3.5-flash-lite');
+    expect(screen.getByText('Answer from 3.5')).toBeInTheDocument();
+    expect(within(screen.getByText('Answer from 3.5').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Gemini 3.5 Flash Lite');
+    expect(within(screen.getByText('Answer from Lightning').closest('[data-testid="assistant-message"]')).getByTestId('message-model')).toHaveTextContent('Nemotron 3.5 Lightning');
     expect(screen.getAllByTestId('user-message').filter(element => (
       element.textContent.includes('Compare this question')
     ))).toHaveLength(2);
@@ -3936,12 +3920,12 @@ describe('HeraAi App', () => {
       expect(startMessage).toBeDefined();
     });
     expect(startMessage.selectionMode).toBe('manual');
-    expect(startMessage.model).toBe('gemini-3.1-flash-lite');
+    expect(startMessage.model).toBe('gemini-3.5-flash-lite');
     expect(startMessage.selectionReasonCode).toBeUndefined();
 
     const answer = await screen.findByText('Hello from AI');
     expect(within(answer.closest('[data-testid="assistant-message"]')).getByTestId('message-model'))
-      .toHaveTextContent('Gemini 3.1 Flash Lite');
+      .toHaveTextContent('Gemini 3.5 Flash Lite');
   });
 
   it('blocks a PDF retry before starting OpenRouter generation', async () => {
@@ -3970,7 +3954,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old PDF answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemma 4 26B' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3.5 Lightning' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /PDF attachments are supported only|PDF ekleri yalnızca/i,
@@ -3982,7 +3966,7 @@ describe('HeraAi App', () => {
     ))).toBe(false);
   });
 
-  it('blocks an image retry before starting a text-only Ollama model', async () => {
+  it('blocks an image retry before starting a text-only OpenRouter model', async () => {
     const toastError = vi.spyOn(toast, 'error');
     currentStorage = {
       theme: 'light',
@@ -4008,7 +3992,7 @@ describe('HeraAi App', () => {
     render(<App />);
     const oldAnswer = await screen.findByText('Old image answer');
     fireEvent.click(oldAnswer.closest('[data-testid="assistant-message"]').querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'GPT-OSS 120B' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nemotron 3.5 Lightning' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(
       /selected model accepts text only|Seçili model yalnızca metin/i,
@@ -4045,7 +4029,7 @@ describe('HeraAi App', () => {
     const oldAnswer = await screen.findByText('First old answer');
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+    fireEvent.click(document.querySelector('[data-retry-model="gemini-3.5-flash-lite"]'));
 
     expect(await screen.findByText('First retried answer')).toBeInTheDocument();
     expect(screen.getByText('First old answer')).toBeInTheDocument();
@@ -4095,7 +4079,7 @@ describe('HeraAi App', () => {
     const oldAnswer = await screen.findByText('Older research answer');
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+    fireEvent.click(document.querySelector('[data-retry-model="gemini-3.5-flash-lite"]'));
 
     expect(await screen.findByText('Fresh research answer')).toBeInTheDocument();
     expect(api.streamResearch).toHaveBeenCalledTimes(1);
@@ -4146,7 +4130,7 @@ describe('HeraAi App', () => {
     const oldAnswer = await screen.findByText('Older vision answer');
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+    fireEvent.click(document.querySelector('[data-retry-model="gemini-3.5-flash-lite"]'));
 
     expect(await screen.findByText('Fresh vision answer')).toBeInTheDocument();
     expect(api.streamVision).toHaveBeenCalledTimes(1);
@@ -4209,7 +4193,7 @@ describe('HeraAi App', () => {
 
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.5 Flash Lite' }));
+    fireEvent.click(document.querySelector('[data-retry-model="gemini-3.5-flash-lite"]'));
 
     expect(await screen.findByText('Retried text answer')).toBeInTheDocument();
     expect(api.streamChat).toHaveBeenCalledTimes(1);
@@ -4388,7 +4372,7 @@ describe('HeraAi App', () => {
         sessionId,
         userMessageId: 'user-persisted',
         assistantMessageId: 'assistant-persisted',
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         mode: 'chat',
         status: 'completed',
         revision: 7,
@@ -4419,7 +4403,7 @@ describe('HeraAi App', () => {
     const terminal = {
       jobId: 'terminal-retry-job', requestId: 'terminal-retry-job', sessionId,
       userMessageId: 'terminal-retry-user', assistantMessageId: 'terminal-retry-answer',
-      model: 'gemini-3.1-flash-lite', provider: 'gemini', mode: 'chat',
+      model: 'gemini-3.5-flash-lite', provider: 'gemini', mode: 'chat',
       status: 'completed', revision: 1, content: 'Previous answer', sources: [],
       startedAt: Date.now(), updatedAt: Date.now(),
     };
@@ -4465,7 +4449,7 @@ describe('HeraAi App', () => {
       sessionId: oldSessionId,
       userMessageId: 'ack-old-user',
       assistantMessageId: 'ack-old-assistant',
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       mode: 'chat',
       status: 'completed',
       revision: 7,
@@ -4480,7 +4464,7 @@ describe('HeraAi App', () => {
       sessionId: replacementSessionId,
       userMessageId: 'ack-replacement-user',
       assistantMessageId: 'ack-replacement-assistant',
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       mode: 'chat',
       status: 'running',
       revision: 3,
@@ -4561,7 +4545,7 @@ describe('HeraAi App', () => {
       sessionId,
       userMessageId: 'revision-user',
       assistantMessageId: 'revision-assistant',
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       mode: 'chat',
       status: 'running',
       revision: 0,
@@ -6399,7 +6383,7 @@ describe('HeraAi App', () => {
     const oldAnswer = await screen.findByText('Old answer');
     const assistantMessage = oldAnswer.closest('[data-testid="assistant-message"]');
     fireEvent.click(assistantMessage.querySelector('button[aria-haspopup="dialog"]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.7 Flash' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 3.6 Flash' }));
 
     let retryStart;
     await waitFor(() => {
@@ -6409,7 +6393,7 @@ describe('HeraAi App', () => {
           && message?.requestMessages?.some(item => item.content === 'Original question'));
       expect(retryStart).toBeDefined();
     });
-    expect(retryStart.model).toBe('gemini-3.7-flash');
+    expect(retryStart.model).toBe('gemini-3.6-flash');
     expect(retryStart.selectionMode).toBe('manual');
   });
 
@@ -6442,7 +6426,7 @@ describe('HeraAi App', () => {
     expect(currentStorage.stats.lifetime.prompts).toBe(1);
     const rows = Object.values(currentStorage.stats.lifetime.models);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ modelId: 'gemini-3.1-flash-lite', attempts: 1, successes: 1 });
+    expect(rows[0]).toMatchObject({ modelId: 'gemini-3.5-flash-lite', attempts: 1, successes: 1 });
     expect(rows[0].successDurationMs).toBeGreaterThanOrEqual(0);
     expect(currentStorage.stats.lifetime.successDurationMs).toBe(rows[0].successDurationMs);
   });
@@ -6463,7 +6447,7 @@ describe('HeraAi App', () => {
       revision: 1,
       content: '',
       sources: [],
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       provider: 'gemini',
       startedAt,
       updatedAt: Date.now(),

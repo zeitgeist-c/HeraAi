@@ -222,8 +222,6 @@
     "welcome_title": "こんにちは。何をお手伝いしましょうか？",
     "welcome_subtitle": "質問する、画面上の範囲を選択する、ファイルを添付する、いずれかから始められます。",
     "welcome_actions": {
-      "research_title": "ウェブ調査",
-      "research_description": "回答に最新情報が必要なときに自動で検索します",
       "crop_title": "画面から選択",
       "crop_description": "範囲を切り取って質問",
       "crop_cancel_title": "選択をキャンセル",

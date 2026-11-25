@@ -58,9 +58,6 @@ function ornekVeri() {
       { id: 't1', key: 'tvly-tavily-anahtar-12345', masked: 'tvly...2345', isPrimary: true, createdAt: 1500 },
     ],
     [LEGACY_STORAGE_KEYS.openrouter]: [],
-    [LEGACY_STORAGE_KEYS.ollama]: [
-      { id: 'o1', key: 'ollama-anahtar-123456789', masked: 'olla...6789', isPrimary: true, createdAt: 1200 },
-    ],
   }
 }
 
@@ -74,7 +71,7 @@ describe('v194Migration okuma ve plan', () => {
     expect(sonuc.gemini).toEqual([])
     expect(sonuc.tavily).toEqual([])
     expect(sonuc.openrouter).toEqual([])
-    expect(sonuc.ollama).toEqual([])
+    expect(sonuc.ollama).toBeUndefined()
   })
 
   it('plan saglayici bazinda sayim uretir ve anahtarlari kirpar', () => {
@@ -103,10 +100,10 @@ describe('v194Migration goc akisi', () => {
 
     const sonuc = await migrateLegacyKeys({ storage, vault, now: 777 })
 
-    expect(sonuc.migrated).toBe(4)
+    expect(sonuc.migrated).toBe(3)
     expect(sonuc.skipped).toBe(0)
     expect(sonuc.backupWritten).toBe(true)
-    expect(sonuc.verified).toBe(4)
+    expect(sonuc.verified).toBe(3)
 
     // Açık alanlar silindi, damga yazıldı.
     for (const alan of Object.values(LEGACY_STORAGE_KEYS)) {
@@ -123,7 +120,6 @@ describe('v194Migration goc akisi', () => {
     ])
     expect(gemini.keys[0].isPrimary).toBe(true)
     expect((await vault.resolveKeysForRequest('tavily')).keys).toHaveLength(1)
-    expect((await vault.resolveKeysForRequest('ollama')).keys).toHaveLength(1)
   })
 
   it('goc sirasindaki gecici geri donus yedegi basaridan sonra silinir', async () => {
@@ -170,7 +166,7 @@ describe('v194Migration goc akisi', () => {
 
     const sonuc = await migrateLegacyKeys({ storage, vault, now: 777 })
 
-    expect(sonuc.migrated).toBe(3)
+    expect(sonuc.migrated).toBe(2)
     expect(sonuc.skipped).toBe(1)
     expect(storage.veri[MIGRATION_FLAG]).toBe(777)
   })
@@ -199,14 +195,13 @@ describe('v194Migration geri donus', () => {
           gemini: legacy[LEGACY_STORAGE_KEYS.gemini],
           tavily: legacy[LEGACY_STORAGE_KEYS.tavily],
           openrouter: legacy[LEGACY_STORAGE_KEYS.openrouter],
-          ollama: legacy[LEGACY_STORAGE_KEYS.ollama],
         },
       },
     })
 
     const sonuc = await restoreLegacyKeysFromBackup({ storage })
 
-    expect(sonuc.restored).toBe(4)
+    expect(sonuc.restored).toBe(3)
     expect(storage.veri[LEGACY_STORAGE_KEYS.gemini]).toHaveLength(2)
     expect(storage.veri[LEGACY_STORAGE_KEYS.gemini][0].key).toBe('AIza-gemini-ana-1234567890')
     expect(storage.veri[LEGACY_STORAGE_KEYS.tavily]).toHaveLength(1)

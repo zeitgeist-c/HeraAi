@@ -113,14 +113,14 @@ describe('keyManager (sifreli kasa uzerinden)', () => {
       expect(entry.masked).toBe('tvly...AbC3')
     })
 
-    it('keeps OpenRouter and Ollama keys in separate provider pools', async () => {
+    it('keeps OpenRouter and Tavily keys in separate provider pools', async () => {
       await addKey('openrouter', '«redacted:sk-…»')
-      await addKey('ollama', 'ollama-abcdefghijklm5678')
+      await addKey('tavily', 'tvly-abcdefghijklm5678')
 
       expect(await getKeys('openrouter')).toHaveLength(1)
-      expect(await getKeys('ollama')).toHaveLength(1)
+      expect(await getKeys('tavily')).toHaveLength(1)
       expect((await resolveKeysForRequest('openrouter')).keys[0].key).toBe('«redacted:sk-…»')
-      expect((await resolveKeysForRequest('ollama')).keys[0].key).toBe('ollama-abcdefghijklm5678')
+      expect((await resolveKeysForRequest('tavily')).keys[0].key).toBe('tvly-abcdefghijklm5678')
       expect(await getKeys('openrouter')).toEqual([
         expect.not.objectContaining({ key: expect.anything() }),
       ])

@@ -155,15 +155,13 @@ describe('keyVault saglayici havuzu izolasyonu', () => {
     await vault.addKey('gemini', 'AIza-gemini-anahtari-123456')
     await vault.addKey('tavily', 'tvly-tavily-anahtari-1234')
     await vault.addKey('openrouter', 'sk-or-openrouter-12345678')
-    await vault.addKey('ollama', 'ollama-anahtari-1234567890')
 
     expect((await vault.resolveKeysForRequest('gemini')).keys[0].key).toBe('AIza-gemini-anahtari-123456')
     expect((await vault.resolveKeysForRequest('tavily')).keys[0].key).toBe('tvly-tavily-anahtari-1234')
     expect((await vault.resolveKeysForRequest('openrouter')).keys[0].key).toBe('sk-or-openrouter-12345678')
-    expect((await vault.resolveKeysForRequest('ollama')).keys[0].key).toBe('ollama-anahtari-1234567890')
 
     const sayim = await vault.countKeys()
-    expect(sayim).toEqual({ gemini: 1, tavily: 1, openrouter: 1, ollama: 1 })
+    expect(sayim).toEqual({ gemini: 1, tavily: 1, openrouter: 1 })
   })
 
   it('ayni saglayici icinde cooldown yalnizca kendi havuzunu etkiler', async () => {

@@ -5,6 +5,24 @@ import manifest from '../../manifest.json';
 
 export const CHANGELOG = Object.freeze([
 {
+  version: '1.12.8',
+  date: '2026-11-25',
+  changes: {
+    tr: [
+      'Sabit 6 model: Gemini 3.5, 3.6, Hydrogen ile Lightning, Super VL, Ling 3.2; Ollama ve emekli modeller kaldirildi',
+      'Ayarlardaki Modeller sekmesi kaldirildi; secim yok, katalog sabit',
+      'Karsilama ekrani 2x2 oldu: Cevir ve Ozetle eklendi, Web Arastirmasi kaldirildi',
+      'Dolu veya yavas modelde istek otomatik yedek modele gecer',
+    ],
+    en: [
+      'Fixed 6-model catalog: Gemini 3.5, 3.6, Hydrogen plus Lightning, Super VL, Ling 3.2; Ollama and retired models removed',
+      'Settings Models tab removed; no selection, fixed catalog',
+      'Welcome screen is now 2x2: Translate and Summarize added, Web Research removed',
+      'Busy or slow models automatically fall back to the next backup model',
+    ],
+  },
+},
+{
   version: '1.12.0',
   date: '2026-10-25',
   changes: {

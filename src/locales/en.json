@@ -224,8 +224,6 @@
     "welcome_title": "Hello, how can I help?",
     "welcome_subtitle": "Ask a question, select an area from your screen, or attach a file to get started.",
     "welcome_actions": {
-      "research_title": "Web research",
-      "research_description": "Searches automatically when the answer needs current info",
       "crop_title": "Select from screen",
       "crop_description": "Crop an area and ask",
       "crop_cancel_title": "Cancel selection",

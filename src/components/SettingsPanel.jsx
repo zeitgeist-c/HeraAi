@@ -24,13 +24,11 @@ import i18n from '../i18n'
 import { testKey } from '../lib/api'
 import { getKeys, addKey, removeKey, setPrimary, getRawKey, updateKeyMetadata } from '../lib/keyManager'
 import SyncPanel from './SyncPanel'
-import ModelManagement from './ModelManagement'
 
 
 const KEY_PROVIDERS = [
   { id: 'gemini', keyUrl: 'https://aistudio.google.com/api-keys' },
   { id: 'openrouter', keyUrl: 'https://openrouter.ai/settings/keys' },
-  { id: 'ollama', keyUrl: 'https://ollama.com/settings/keys' },
   { id: 'tavily', keyUrl: 'https://app.tavily.com/home' },
 ]
 
@@ -106,23 +104,19 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
   const [geminiKeys, setGeminiKeys] = useState([])
   const [tavilyKeys, setTavilyKeys] = useState([])
   const [openRouterKeys, setOpenRouterKeys] = useState([])
-  const [ollamaKeys, setOllamaKeys] = useState([])
   const [newGeminiKey, setNewGeminiKey] = useState('')
   const [newTavilyKey, setNewTavilyKey] = useState('')
   const [newOpenRouterKey, setNewOpenRouterKey] = useState('')
-  const [newOllamaKey, setNewOllamaKey] = useState('')
   const [newKeyLabels, setNewKeyLabels] = useState({
     gemini: '',
     tavily: '',
     openrouter: '',
-    ollama: '',
   })
   const [testingKeyId, setTestingKeyId] = useState(null)
   const [testingAllProvider, setTestingAllProvider] = useState(null)
   const [showGeminiInput, setShowGeminiInput] = useState(false)
   const [showTavilyInput, setShowTavilyInput] = useState(false)
   const [showOpenRouterInput, setShowOpenRouterInput] = useState(false)
-  const [showOllamaInput, setShowOllamaInput] = useState(false)
   const [expandedProviders, setExpandedProviders] = useState([])
 
   const handleLanguageChange = (langCode) => {
@@ -143,7 +137,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
         setGeminiKeys(await getKeys('gemini'))
         setTavilyKeys(await getKeys('tavily'))
         setOpenRouterKeys(await getKeys('openrouter'))
-        setOllamaKeys(await getKeys('ollama'))
       } catch (error) {
         console.error('key_vault_load_failed', error)
       }
@@ -156,7 +149,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       if (provider === 'gemini') setGeminiKeys(await getKeys('gemini'))
       else if (provider === 'tavily') setTavilyKeys(await getKeys('tavily'))
       else if (provider === 'openrouter') setOpenRouterKeys(await getKeys('openrouter'))
-      else if (provider === 'ollama') setOllamaKeys(await getKeys('ollama'))
     } catch (error) {
       console.error('key_vault_refresh_failed', error)
     }
@@ -167,7 +159,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       gemini: newGeminiKey,
       tavily: newTavilyKey,
       openrouter: newOpenRouterKey,
-      ollama: newOllamaKey,
     }
     const rawKey = rawKeys[provider] || ''
     if (!rawKey.trim()) {
@@ -180,7 +171,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       if (provider === 'gemini') setNewGeminiKey('')
       else if (provider === 'tavily') setNewTavilyKey('')
       else if (provider === 'openrouter') setNewOpenRouterKey('')
-      else if (provider === 'ollama') setNewOllamaKey('')
       setNewKeyLabels(current => ({ ...current, [provider]: '' }))
       await refreshKeys(provider)
     } catch (err) {
@@ -267,7 +257,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       gemini: geminiKeys,
       tavily: tavilyKeys,
       openrouter: openRouterKeys,
-      ollama: ollamaKeys,
     }[provider] || []
     if (keysList.length === 0) return
     setTestingAllProvider(provider)
@@ -398,7 +387,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       gemini: [geminiKeys, newGeminiKey, setNewGeminiKey, showGeminiInput, setShowGeminiInput],
       tavily: [tavilyKeys, newTavilyKey, setNewTavilyKey, showTavilyInput, setShowTavilyInput],
       openrouter: [openRouterKeys, newOpenRouterKey, setNewOpenRouterKey, showOpenRouterInput, setShowOpenRouterInput],
-      ollama: [ollamaKeys, newOllamaKey, setNewOllamaKey, showOllamaInput, setShowOllamaInput],
     }[provider]
     const [keysList, inputValue, setInputValue, showInput, setShowInput] = providerState
     const testingAll = testingAllProvider === provider
@@ -492,7 +480,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
       gemini: geminiKeys,
       tavily: tavilyKeys,
       openrouter: openRouterKeys,
-      ollama: ollamaKeys,
     }[provider] || []
     const isExpanded = expandedProviders.includes(provider)
     const headingId = `provider-heading-${provider}`
@@ -563,13 +550,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('models')}
-            className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'models' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> {t('models_panel.title')}
-          </button>
-          <button
-            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors ${activeTab === 'settings' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
@@ -592,8 +572,6 @@ function SettingsPanel({ onSave, currentConfig, onClose, currentModel }) {
               </div>
             </div>
           )}
-
-          {activeTab === 'models' && <ModelManagement />}
 
           {activeTab === 'settings' && (
             <div className="hera-fade-in flex flex-col gap-5">

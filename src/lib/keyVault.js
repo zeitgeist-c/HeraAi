@@ -25,7 +25,7 @@ import { decryptJson, encryptJson, generateDeviceKey } from './syncCrypto'
 import { isKeyUsable } from './keyHealth'
 import { KEY_USAGE_MODE, orderKeysForRequest } from './keyRotation'
 
-export const PROVIDERS = Object.freeze(['gemini', 'tavily', 'openrouter', 'ollama'])
+export const PROVIDERS = Object.freeze(['gemini', 'tavily', 'openrouter'])
 
 /** Id of the device key inside the meta store. */
 export const DEVICE_KEY_ID = 'deviceCryptoKey'

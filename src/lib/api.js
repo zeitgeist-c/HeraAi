@@ -7,7 +7,7 @@ import {
   getModelDescriptor,
   modelAllowsKey,
 } from './models.js'
-import { streamRemoteProvider, testOllamaKey, testOpenRouterKey } from './providerApi.js'
+import { streamRemoteProvider, testOpenRouterKey } from './providerApi.js'
 import { classifyWithGemmaRouter as classifyWithGemmaRouterImpl, classifyNeedsWebSearch as classifyNeedsWebSearchImpl } from './autoRouter.js'
 
 export { DEFAULT_MODEL, MODEL_CAPABILITIES, MODELS }
@@ -18,8 +18,7 @@ const GEMINI_REASONING_REQUEST_TIMEOUT_MS = 180000
 const GEMINI_STREAM_IDLE_TIMEOUT_MS = 180000
 const GEMINI_REASONING_MODELS = new Set([
   'gemini-3.6-flash',
-  'gemini-3.7-flash',
-  'gemini-3.8-flash',
+  'gemini-4-hydrogen',
 ])
 const TAVILY_TIMEOUT_MS = 15000
 const TAVILY_EXTRACT_TIMEOUT_MS = 30000
@@ -28,7 +27,7 @@ const TAVILY_EXTRACT_TOTAL_MAX_CHARS = 750000
 const RESEARCH_CONTEXT_TURNS = 6
 const RESEARCH_CONTEXT_MAX_CHARS = 2200
 const RESEARCH_QUERY_MAX_CHARS = 240
-const GEMINI_TEST_MODEL = 'gemini-3.1-flash-lite'
+const GEMINI_TEST_MODEL = 'gemini-3.5-flash-lite'
 
 function createAbortError() {
   const err = new Error('Request aborted')
@@ -352,7 +351,7 @@ function normalizeTextMessages(messages) {
 
 const GEMINI_LITE_FALLBACK_MODELS = Object.freeze([
   'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
 ])
 const GEMINI_MODEL_FALLBACKABLE = new Set([
   'quota_exceeded',
@@ -1277,7 +1276,6 @@ export async function testKey(provider, key, _model = DEFAULT_MODEL) {
   }
 
   if (provider === 'openrouter') return testOpenRouterKey(normalizedKey)
-  if (provider === 'ollama') return testOllamaKey(normalizedKey)
 
   return { success: false, provider, errorType: 'invalid' }
 }

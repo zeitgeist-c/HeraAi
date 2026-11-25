@@ -222,8 +222,6 @@
     "welcome_title": "你好，需要什么帮助？",
     "welcome_subtitle": "提出问题、从屏幕中选择区域，或附加文件即可开始。",
     "welcome_actions": {
-      "research_title": "网页研究",
-      "research_description": "当回答需要最新信息时会自动搜索",
       "crop_title": "从屏幕选择",
       "crop_description": "截取一块区域并提问",
       "crop_cancel_title": "取消选择",

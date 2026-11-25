@@ -33,7 +33,7 @@ describe('retired model migration', () => {
       id: 's1',
       messages: [
         { role: 'model', content: 'Old', model: 'minimax-m3' },
-        { role: 'model', content: 'Current', model: 'nemotron-3-super', provider: 'ollama' },
+        { role: 'model', content: 'Current', model: 'gemini-3.6-flash', provider: 'gemini' },
       ],
     }]
 
@@ -41,7 +41,7 @@ describe('retired model migration', () => {
     expect(result.changed).toBe(true)
     expect(result.sessions[0].messages).toEqual([
       { role: 'model', content: 'Old' },
-      { role: 'model', content: 'Current', model: 'nemotron-3-super', provider: 'ollama' },
+      { role: 'model', content: 'Current', model: 'gemini-3.6-flash', provider: 'gemini' },
     ])
     expect(sanitizeRetiredModelMessages(result.sessions[0].messages).changed).toBe(false)
   })

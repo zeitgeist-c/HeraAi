@@ -224,8 +224,6 @@
     "welcome_title": "Merhaba, nasıl yardımcı olabilirim?",
     "welcome_subtitle": "Bir soru sorun, ekranınızdan bir alan seçin veya bir dosya ekleyerek başlayın.",
     "welcome_actions": {
-      "research_title": "Web araştırması",
-      "research_description": "Güncel sorularda otomatik arar",
       "crop_title": "Ekrandan seç",
       "crop_description": "Bir alan kırpıp sor",
       "crop_cancel_title": "Seçimi iptal et",

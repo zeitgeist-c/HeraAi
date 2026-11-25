@@ -12,8 +12,6 @@
 import { getDefaultVault } from './keyVault'
 import { createStorageAdapter, migrateLegacyKeys } from './v194Migration'
 
-export { PROVIDERS } from './keyVault'
-
 async function getReadyVault() {
   const vault = await getDefaultVault()
   const storage = createStorageAdapter()

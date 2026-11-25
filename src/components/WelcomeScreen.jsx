@@ -1,15 +1,22 @@
-import { FileUp, Globe2, Scissors, Sparkles } from 'lucide-react'
+import { FileUp, Languages, Scissors, Sparkles, TextAlignStart } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
+function WelcomeScreen({ onCrop, isCropActive = false, onTranslate, onSummarize, onAttach }) {
   const { t } = useTranslation()
   const actions = [
     {
-      id: 'research',
-      icon: Globe2,
-      title: t('chat.welcome_actions.research_title'),
-      description: t('chat.welcome_actions.research_description'),
-      action: onResearch,
+      id: 'translate',
+      icon: Languages,
+      title: t('chat.prompts.translate'),
+      description: t('chat.quick_actions.translate_tooltip'),
+      action: onTranslate,
+    },
+    {
+      id: 'summarize',
+      icon: TextAlignStart,
+      title: t('chat.prompts.summarize'),
+      description: t('chat.quick_actions.summarize_tooltip'),
+      action: onSummarize,
     },
     {
       id: 'crop',
@@ -46,7 +53,7 @@ function WelcomeScreen({ onCrop, isCropActive = false, onResearch, onAttach }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2">
         {actions.map(({ id, icon: Icon, title, description, action, active = false }) => (
           <button
             key={id}

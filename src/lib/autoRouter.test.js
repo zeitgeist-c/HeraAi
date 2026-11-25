@@ -294,9 +294,9 @@ describe('local fallback provider fairness and need signals', () => {
       text: '```js\nconst a = 1\n``` bu ne yapar?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Katalog 24.09.2026'da yenilendi: kodlama puanı 5 olan tek model
-      // Gemini 3.8 Flash; OpenRouter tarafinda yavas kademe kalmadi.
-      modelKey: 'gemini:gemini-3.8-flash',
+      // Katalog Kasim 2026'da sabitlendi: kodlama puani en yuksek hizli
+      // modellerden Nemotron 3.5 Super VL (Q4) one cikiyor.
+      modelKey: 'openrouter:nvidia/nemotron-3.5-super-vl:free',
       reasonCode: 'coding',
     })
   })
@@ -306,8 +306,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'X ve Y yaklaşımlarını karşılaştır, neden biri daha iyi? Hangisini seçmeliyim?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Nemotron 3 Super 120B (Q4, orta hız) kalite barajını geçen en hızlı model.
-      modelKey: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
+      // Kalite barajini gecen en hizli model Super VL.
+      modelKey: 'openrouter:nvidia/nemotron-3.5-super-vl:free',
       reasonCode: 'complex_reasoning',
     })
   })
@@ -317,8 +317,8 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'Fotoğraf makinesi nasıl çalışır? Özetle anlat.',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      // Gemma 4 26B (hızlı) gpt-oss ile eşit puanda ve katalogda önde.
-      modelKey: 'openrouter:google/gemma-4-26b-a4b-it:free',
+      // Hizli kademede baraji gecen ilk model Lightning.
+      modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free',
       reasonCode: 'fast',
     })
   })
@@ -328,30 +328,28 @@ describe('local fallback provider fairness and need signals', () => {
       text: 'Merhaba, nasılsın?',
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'gemini:gemini-3.1-flash-lite',
+      modelKey: 'gemini:gemini-3.5-flash-lite',
       reasonCode: 'fast',
     })
   })
 
   it('routes hard image questions to a quality-gated image model', () => {
-    // Kural: kalite barajını geçen adaylar arasından en HIZLI olan seçilir.
-    // Orta hızda görsel destekli OpenRouter modeli kalmadı; barajı geçen
-    // yavaş modeller arasında katalogda önde olan Gemini 3.8 Flash kazanır.
+    // Gorsel destekli ve kaliteli: Super VL.
     expect(selectLocalFallback({
       text: 'Bu iki grafiği karşılaştır, neden farklı? Hangisi doğru?',
       mimeTypes: ['image/png'],
       candidates: MODEL_CATALOG,
     })).toMatchObject({
-      modelKey: 'gemini:gemini-3.8-flash',
+      modelKey: 'openrouter:nvidia/nemotron-3.5-super-vl:free',
       reasonCode: 'vision',
     })
   })
 
   it('does not promote length alone past the medium floor', () => {
     expect(selectLocalFallback({ text: 'm'.repeat(299), candidates: MODEL_CATALOG }).modelKey)
-      .toBe('gemini:gemini-3.1-flash-lite')
+      .toBe('gemini:gemini-3.5-flash-lite')
     expect(selectLocalFallback({ text: 'm'.repeat(1501), candidates: MODEL_CATALOG }))
-      .toMatchObject({ modelKey: 'openrouter:google/gemma-4-26b-a4b-it:free', reasonCode: 'fast' })
+      .toMatchObject({ modelKey: 'openrouter:nvidia/nemotron-3.5-lightning:free', reasonCode: 'fast' })
   })
 })
 

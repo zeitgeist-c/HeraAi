@@ -222,8 +222,6 @@
     "welcome_title": "Hallo, hoe kan ik helpen?",
     "welcome_subtitle": "Stel een vraag, selecteer een gebied op je scherm of voeg een bestand toe om te beginnen.",
     "welcome_actions": {
-      "research_title": "Webonderzoek",
-      "research_description": "Zoekt automatisch wanneer het antwoord actuele informatie nodig heeft",
       "crop_title": "Selecteren op scherm",
       "crop_description": "Snijd een gebied uit en stel je vraag",
       "crop_cancel_title": "Selectie annuleren",

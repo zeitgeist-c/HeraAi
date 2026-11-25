@@ -6,7 +6,7 @@
 
 HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Ollama Cloud, searches the web through Tavily, crops a region off your screen, attaches files and takes voice input. API keys are encrypted and kept in an IndexedDB vault on your device. Optional Google sign-in syncs end-to-end encrypted data through Firebase/Firestore.
 
-![HeraAi · Chat](./docs/screenshots/00-ana-sohbet.png)
+![HeraAi · Chat](./docs/screenshots/00-main-chat.png)
 
 ---
 
@@ -18,8 +18,7 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
   - [2. Setup — API keys](#2-setup--api-keys)
   - [3. Main screen and menu](#3-main-screen-and-menu)
   - [4. Model picker](#4-model-picker)
-  - [5. My models](#5-my-models)
-  - [6. General settings](#6-general-settings)
+  - [5. General settings](#5-general-settings)
 - [Install](#build-from-source)
 - [Providers and models](#providers-and-models)
 - [Key handling](#key-handling)
@@ -52,20 +51,20 @@ HeraAi lives in Chrome's Side Panel. It talks to Gemini, OpenRouter Free and Oll
 
 ### 1. Chat
 
-![Chat](./docs/screenshots/00-ana-sohbet.png)
+![Chat](./docs/screenshots/00-main-chat.png)
 
 The main surface, sized for a side panel.
 
 - **Header** — session title, rename, search inside the chat, export as Markdown, copy the whole chat, open in a full page, new chat, and the *more* menu.
 - **Welcome state** — `Hello, how can I help?` with three starter cards: **Web research** (Tavily), **Select from screen** (crop a region and ask about it), **Attach file** (image, PDF, document or text).
 - **Composer** — the message box, plus tools for attach, voice input, screen-region capture, OCR from an attached image, translate the selection, and the send button.
-- **Footer** — the active model pill (`Gemini 3.1 Flash Lite` with a `GEMINI` tag), and the standing note that AI can be wrong and important facts should be checked.
+- **Footer** — the active model pill (`Gemini 3.5 Flash Lite` with a `GEMINI` tag), and the standing note that AI can be wrong and important facts should be checked.
 
 The panel is deliberately narrow: one column, one composer, no sidebars competing for space.
 
 ### 2. Setup — API keys
 
-![Setup · API keys](./docs/screenshots/01-kurulum-api.png)
+![Setup · API keys](./docs/screenshots/01-setup-api.png)
 
 First launch asks for keys, one row per provider: **Gemini**, **OpenRouter**, **Ollama (no vision support)**, **Tavily search**.
 
@@ -75,7 +74,7 @@ Nothing else works before this step — the app does not ship with a key and doe
 
 ### 3. Main screen and menu
 
-![Main screen and menu](./docs/screenshots/02-ana-ekran-menu.png)
+![Main screen and menu](./docs/screenshots/02-main-screen-menu.png)
 
 The *more* menu, opened from the header:
 
@@ -91,31 +90,21 @@ The *more* menu, opened from the header:
 
 ### 4. Model picker
 
-![Model picker](./docs/screenshots/03-model-secici.png)
+![Model picker](./docs/screenshots/03-model-picker.png)
 
 The pill at the bottom opens the picker. Models are grouped by provider — `GEMINI` first, then `OPENROUTER`, then `OLLAMA` — and each entry shows the model name and whether it accepts images (the camera icon).
 
-Choosing a model changes the active provider for the next message. The picker only lists models you enabled in *My models*, so it stays short.
+Choosing a model changes the active provider for the next message.
 
-### 5. My models
+### 5. General settings
 
-![My models](./docs/screenshots/04-modellerim.png)
-
-The catalogue view, inside Setup.
-
-`Fetch / refresh models` asks each provider what your keys can actually see, then lists the result with a checkbox per model: name, provider and API identifier (`gemini-3.5-flash-lite`, `google/gemma-4-26b-a4b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`), plus a camera mark for vision.
-
-The note above the list is honest: *"Being listed is not a guarantee of access or free use."* Appearing in the catalogue does not mean the account can use it or that it stays free. Choices are saved to this browser only.
-
-### 6. General settings
-
-![General settings](./docs/screenshots/05-genel-ayarlar.png)
+![General settings](./docs/screenshots/05-general-settings.png)
 
 - **API key usage** — `Use primary keys` (primary keys only) or `Rotate healthy keys` (rotate through all keys).
 - **Appearance** — `System default`, `Light theme`, `Dark theme`, plus an accent colour picker.
 - **Language** — Turkish or English for the whole interface.
 - **Show sources** — whether a research answer renders its source cards.
-- **System prompt** — the base instruction sent with every conversation (Turkish by default; you can replace it with your own). Editing it changes the assistant's default behaviour for your account, not for anyone else.
+- **System prompt** — the base instruction sent with every conversation (empty by default; you write your own). Editing it changes the assistant's default behaviour for your account, not for anyone else.
 
 `Save and continue` applies the changes.
 

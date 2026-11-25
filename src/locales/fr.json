@@ -222,8 +222,6 @@
     "welcome_title": "Bonjour, comment puis-je vous aider ?",
     "welcome_subtitle": "Posez une question, sélectionnez une zone de votre écran ou joignez un fichier pour commencer.",
     "welcome_actions": {
-      "research_title": "Recherche web",
-      "research_description": "Recherche automatiquement lorsque la réponse nécessite des informations actuelles",
       "crop_title": "Sélectionner à l'écran",
       "crop_description": "Recadrez une zone et posez votre question",
       "crop_cancel_title": "Annuler la sélection",

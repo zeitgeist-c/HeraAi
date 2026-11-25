@@ -87,7 +87,6 @@ async function selectStream(payload, signal, engines) {
   const requestOptions = {
     systemInstruction: payload.systemInstruction || '',
     language: payload.language || 'tr',
-    ...(payload.modelPreferences ? { restrictModelSelection: true } : {}),
     fallbackGeminiKeys: Array.isArray(payload.fallbackGeminiKeys) ? payload.fallbackGeminiKeys : [],
   }
 

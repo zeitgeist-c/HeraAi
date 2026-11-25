@@ -1,14 +1,29 @@
 export const PROVIDERS = Object.freeze({
   GEMINI: 'gemini',
   OPENROUTER: 'openrouter',
-  OLLAMA: 'ollama',
 })
 
-export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+export const DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 export const DEFAULT_PROVIDER = PROVIDERS.GEMINI
-export const DEFAULT_OLLAMA_MODEL = 'gemma4:31b'
 export const AUTO_MODEL_KEY = 'auto'
-export const RETIRED_MODEL_IDS = Object.freeze(['minimax-m3', 'minimax-m3:cloud', 'nemotron-3-ultra', 'qwen/qwen3.8-27b:free', 'nex-agi/nex-n2.5-pro:free'])
+// Older ids this system no longer offers. Sessions that still carry one fall
+// back to the default instead of failing; see resolveModelSelection and
+// modelMigration.
+export const RETIRED_MODEL_IDS = Object.freeze([
+  'minimax-m3',
+  'minimax-m3:cloud',
+  'nemotron-3-ultra',
+  'qwen/qwen3.8-27b:free',
+  'nex-agi/nex-n2.5-pro:free',
+  'gemini-3.1-flash-lite',
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
+  'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'gpt-oss:120b',
+  'nemotron-3-super',
+  'gemma4:31b',
+])
 
 const geminiModel = (modelId, label, speed, routing = {}) => ({
   key: `${PROVIDERS.GEMINI}:${modelId}`,
@@ -24,39 +39,13 @@ const geminiModel = (modelId, label, speed, routing = {}) => ({
   },
 })
 
+// Fixed catalog (Kasim 2026 dogrulamasi). Bu liste elle degisir; ayarlarda
+// model secimi yok. Aylik kontrol yeni/olen modelleri raporlar, degisiklik
+// onayla uygulanir.
 export const MODEL_CATALOG = Object.freeze([
-  geminiModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', 'fast', { quality: 1, coding: 1 }),
   geminiModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite', 'fast', { quality: 2, coding: 2 }),
   geminiModel('gemini-3.6-flash', 'Gemini 3.6 Flash', 'medium', { quality: 3, coding: 3 }),
-  geminiModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'slow', { quality: 4, coding: 4 }),
-  geminiModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'slow', { quality: 5, coding: 5 }),
-  {
-    key: `${PROVIDERS.OPENROUTER}:google/gemma-4-26b-a4b-it:free`,
-    provider: PROVIDERS.OPENROUTER,
-    modelId: 'google/gemma-4-26b-a4b-it:free',
-    label: 'Gemma 4 26B',
-    speed: 'fast',
-    routing: { quality: 3, coding: 3 },
-    capabilities: {
-      supportsImage: true,
-      supportsPdf: false,
-      supportsUrlContext: false,
-    },
-  },
-  {
-    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3-super-120b-a12b:free`,
-    provider: PROVIDERS.OPENROUTER,
-    modelId: 'nvidia/nemotron-3-super-120b-a12b:free',
-    label: 'Nemotron 3 Super 120B',
-    speed: 'medium',
-    routing: { quality: 4, coding: 4 },
-    capabilities: {
-      // The OpenRouter list shows this model as text-input only.
-      supportsImage: false,
-      supportsPdf: false,
-      supportsUrlContext: false,
-    },
-  },
+  geminiModel('gemini-4-hydrogen', 'Gemini 4 Hydrogen', 'slow', { quality: 5, coding: 4 }),
   {
     key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3.5-lightning:free`,
     provider: PROVIDERS.OPENROUTER,
@@ -65,54 +54,34 @@ export const MODEL_CATALOG = Object.freeze([
     speed: 'fast',
     routing: { quality: 3, coding: 3 },
     capabilities: {
-      // The OpenRouter list shows this model as text-input only.
+      // Akil yuruterek cevap verir; kisa token limiti cevabi keser.
       supportsImage: false,
       supportsPdf: false,
       supportsUrlContext: false,
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:gpt-oss:120b`,
-    provider: PROVIDERS.OLLAMA,
-    modelId: 'gpt-oss:120b',
-    label: 'GPT-OSS 120B',
-    labelKey: 'chat.model_labels.gpt_oss_120b',
-    speed: 'fast',
-    routing: { quality: 3, coding: 3 },
-    capabilities: {
-      supportsImage: false,
-      supportsPdf: false,
-      supportsUrlContext: false,
-    },
-  },
-  {
-    key: `${PROVIDERS.OLLAMA}:nemotron-3-super`,
-    provider: PROVIDERS.OLLAMA,
-    modelId: 'nemotron-3-super',
-    label: 'Nemotron 3 Super',
-    labelKey: 'chat.model_labels.nemotron_3_super',
+    key: `${PROVIDERS.OPENROUTER}:nvidia/nemotron-3.5-super-vl:free`,
+    provider: PROVIDERS.OPENROUTER,
+    modelId: 'nvidia/nemotron-3.5-super-vl:free',
+    label: 'Nemotron 3.5 Super VL',
     speed: 'medium',
     routing: { quality: 4, coding: 4 },
     capabilities: {
-      supportsImage: false,
+      supportsImage: true,
       supportsPdf: false,
       supportsUrlContext: false,
     },
   },
   {
-    key: `${PROVIDERS.OLLAMA}:gemma4:31b`,
-    provider: PROVIDERS.OLLAMA,
-    modelId: 'gemma4:31b',
-    label: 'Gemma 4 31B',
-    speed: 'slow',
-    routing: { quality: 5, coding: 5 },
+    key: `${PROVIDERS.OPENROUTER}:inclusionai/ling-3.2-flash:free`,
+    provider: PROVIDERS.OPENROUTER,
+    modelId: 'inclusionai/ling-3.2-flash:free',
+    label: 'Ling 3.2 Flash',
+    speed: 'fast',
+    routing: { quality: 2, coding: 2 },
     capabilities: {
-      // The Ollama path does not accept image attachments (providerApi:
-      // image_not_supported);
-      // the catalog reflects that so the picker shows no camera badge and the
-      // automatic
-      // router does not pick this model for image requests.
-      supportsImage: false,
+      supportsImage: true,
       supportsPdf: false,
       supportsUrlContext: false,
     },
@@ -134,21 +103,12 @@ export const MODEL_CAPABILITIES = Object.freeze(Object.fromEntries(
   MODEL_CATALOG.map(model => [model.modelId, Object.freeze({ ...model.capabilities })]),
 ))
 
-// Each extension context loads its own preferences before resolving requests.
+// Fixed catalog: user preferences no longer select models. The argument is
+// accepted so older call sites keep working, but the runtime catalog is
+// always the fixed list above.
 let runtimeCatalog = MODEL_CATALOG
-export function configureModelCatalog(preferences) {
-  if (!preferences || !Array.isArray(preferences.enabledKeys)) {
-    runtimeCatalog = MODEL_CATALOG
-    return runtimeCatalog
-  }
-  const entries = new Map(MODEL_CATALOG.map(model => [model.key, model]))
-  for (const model of preferences.models || []) {
-    if (!Object.values(PROVIDERS).includes(model?.provider)
-      || typeof model.modelId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]{0,199}$/.test(model.modelId)) continue
-    const key = `${model.provider}:${model.modelId}`
-    entries.set(key, { ...model, key })
-  }
-  runtimeCatalog = [...new Set(preferences.enabledKeys)].map(key => entries.get(key)).filter(Boolean)
+export function configureModelCatalog() {
+  runtimeCatalog = MODEL_CATALOG
   return runtimeCatalog
 }
 
@@ -211,9 +171,6 @@ export function getOpenRouterFallbackModel(modelId, { hasImage = false } = {}) {
 }
 
 export function resolveModelSelection(provider, modelId) {
-  if (provider === PROVIDERS.OLLAMA && isRetiredModelId(modelId)) {
-    return getModelDescriptor(DEFAULT_OLLAMA_MODEL, PROVIDERS.OLLAMA) || runtimeCatalog[0] || null
-  }
   const exact = getModelDescriptor(modelId, provider)
   if (exact) return exact
   const legacy = getModelDescriptor(modelId)

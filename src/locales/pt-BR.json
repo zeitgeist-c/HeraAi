@@ -222,8 +222,6 @@
     "welcome_title": "Olá, como posso ajudar?",
     "welcome_subtitle": "Faça uma pergunta, selecione uma área da sua tela ou anexe um arquivo para começar.",
     "welcome_actions": {
-      "research_title": "Pesquisa na web",
-      "research_description": "Pesquisa automaticamente quando a resposta precisa de informações atuais",
       "crop_title": "Selecionar da tela",
       "crop_description": "Recorte uma área e pergunte",
       "crop_cancel_title": "Cancelar seleção",

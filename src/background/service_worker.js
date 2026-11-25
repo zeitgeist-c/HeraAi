@@ -2,7 +2,6 @@ import { resolveKeysForRequest, updateKeyMetadata } from '../lib/keyManager.js';
 import {
   configureModelCatalog,
   getRuntimeModelCatalog,
-  getModelDescriptor,
   PROVIDERS,
   getProviderForModel,
 } from '../lib/models.js';
@@ -55,7 +54,7 @@ const OFFSCREEN_COMMAND_RETRY_DELAYS_MS = [25, 75, 150];
 const HEARTBEAT_STALE_AFTER_MS = 45_000;
 const ACTIVE_GENERATION_STATUSES = new Set(['queued', 'running']);
 const ACKNOWLEDGEABLE_STATUSES = new Set(['completed', 'cancelled', 'error', 'interrupted']);
-const VALID_KEY_PROVIDERS = new Set(['gemini', 'tavily', 'openrouter', 'ollama']);
+const VALID_KEY_PROVIDERS = new Set(['gemini', 'tavily', 'openrouter']);
 
 function compatibleAutoModels({ availableProviders, mimeTypes, mode, tavilyAvailable }) {
   const providers = new Set(availableProviders || []);
@@ -253,7 +252,6 @@ function withoutSensitiveGenerationData(generation) {
     tavilyKeys: _tavilyKeys,
     providerKeys: _providerKeys,
     openRouterKeys: _openRouterKeys,
-    ollamaKeys: _ollamaKeys,
     keysForGemini: _keysForGemini,
     keysForTavily: _keysForTavily,
     geminiApiKeys: _geminiApiKeys,
@@ -698,12 +696,8 @@ async function handleGenerationStart(message) {
   }
 
   let startMessage = message;
-  if (modelSettings.modelPreferences && message.selectionMode !== 'auto'
-    && !getModelDescriptor(message.model, message.provider)) {
-    return { ok: false, errorCode: 'model_not_selected' };
-  }
   if (message.selectionMode === 'auto') {
-    const providerIds = [PROVIDERS.GEMINI, PROVIDERS.OPENROUTER, PROVIDERS.OLLAMA];
+    const providerIds = [PROVIDERS.GEMINI, PROVIDERS.OPENROUTER];
     const providerEntries = await Promise.all(providerIds.map(async providerId => ([
       providerId,
       await resolveKeysForRequest(providerId),

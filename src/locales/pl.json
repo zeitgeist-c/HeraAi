@@ -222,8 +222,6 @@
     "welcome_title": "Cześć, jak mogę pomóc?",
     "welcome_subtitle": "Zadaj pytanie, zaznacz obszar ekranu lub załącz plik, aby zacząć.",
     "welcome_actions": {
-      "research_title": "Badanie w sieci",
-      "research_description": "Wyszukuje automatycznie, gdy odpowiedź wymaga aktualnych informacji",
       "crop_title": "Zaznacz z ekranu",
       "crop_description": "Wytnij obszar i zapytaj",
       "crop_cancel_title": "Anuluj zaznaczanie",

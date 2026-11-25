@@ -2552,17 +2552,6 @@ function App() {
 
     const storageListener = (changes, namespace) => {
       if (namespace !== 'local') return
-      if (changes.modelPreferences) {
-        const catalog = configureModelCatalog(changes.modelPreferences.newValue)
-        setModelCatalog(catalog)
-        const next = resolveModelSelection(selectedProviderRef.current, selectedModelRef.current)
-        if (next) {
-          setSelectedModel(next.modelId)
-          setSelectedProvider(next.provider)
-          void chrome.storage.local.set({ selectedModel: next.modelId, selectedProvider: next.provider })
-            .catch(() => notifyError(i18n.t('models_panel.save_error')))
-        }
-      }
       if (changes.selectedText?.newValue) {
         setInput(previous => appendToInputValue(previous, changes.selectedText.newValue))
         void chrome.storage.local.remove(['selectedText'])
@@ -4870,7 +4859,12 @@ function App() {
           <WelcomeScreen
             onCrop={handleScreenshot}
             isCropActive={isCropActive}
-            onResearch={() => {
+            onTranslate={() => {
+              setInput(`${t('chat.prompts.translate')}:\n`)
+              focusComposer()
+            }}
+            onSummarize={() => {
+              setInput(`${t('chat.prompts.summarize')}:\n`)
               focusComposer()
             }}
             onAttach={() => fileInputRef.current?.click()}

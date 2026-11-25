@@ -4,10 +4,7 @@ export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 // Every OpenRouter request targets a model from the shared catalog. The
 // provider's own `openrouter/free` router is deliberately NOT used: it picks
 // a model on its own and the UI then showed ids this system never offered.
-export const OPENROUTER_MODEL = OPENROUTER_MODEL_IDS[0] || 'google/gemma-4-26b-a4b-it:free'
-export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api'
-export const OLLAMA_CLOUD_MODEL = 'gemma4:31b'
-export const OLLAMA_TEST_MODEL = 'gpt-oss:20b'
+export const OPENROUTER_MODEL = OPENROUTER_MODEL_IDS[0] || 'nvidia/nemotron-3.5-lightning:free'
 
 const REQUEST_TIMEOUT_MS = 180_000
 const STREAM_IDLE_TIMEOUT_MS = 180_000
@@ -169,7 +166,7 @@ function assertNoPdf(attachments) {
 }
 
 // Ic rol ('user' | 'model') -> OpenAI uyumlu sohbet rolu. Gemini donusturucu
-// 'model' rolunu korur; yalniz OpenRouter/Ollama donusturuculeri kullanir.
+// 'model' rolunu korur; yalniz OpenRouter donusturucu kullanir.
 function toExternalChatRole(role) {
   return role === 'model' ? 'assistant' : 'user'
 }
@@ -200,36 +197,6 @@ function toOpenRouterMessages(messages, systemInstruction, fallbackImage = null)
     result.push({
       role: toExternalChatRole(message.role),
       content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts,
-    })
-  })
-  return result
-}
-
-function toOllamaMessages(messages, systemInstruction, fallbackImage = null) {
-  const result = []
-  if (systemInstruction?.trim()) result.push({ role: 'system', content: systemInstruction.trim() })
-  const normalized = normalizedMessages(messages)
-
-  normalized.forEach((message, index) => {
-    const attachments = [...message.attachments]
-    if (index === normalized.length - 1 && fallbackImage && !attachments.some(item => item?.mimeType?.startsWith('image/'))) {
-      attachments.push({ name: 'image.png', mimeType: 'image/png', data: fallbackImage })
-    }
-    assertNoPdf(attachments)
-    if (attachments.some(attachment => attachment?.mimeType?.startsWith('image/') && attachment.data)) {
-      throw createProviderError('image_not_supported', 'The selected Ollama model accepts text only')
-    }
-    const textParts = [message.content]
-    const images = []
-    for (const attachment of attachments) {
-      const text = attachmentText(attachment)
-      if (text) textParts.push(text)
-      if (attachment?.mimeType?.startsWith('image/') && attachment.data) images.push(attachment.data)
-    }
-    result.push({
-      role: toExternalChatRole(message.role),
-      content: textParts.filter(Boolean).join('\n\n'),
-      ...(images.length > 0 ? { images } : {}),
     })
   })
   return result
@@ -303,61 +270,6 @@ async function* streamOpenRouterRequest(messages, options, key, signal, fallback
   }
 }
 
-async function* streamOllamaRequest(messages, options, key, signal, fallbackImage, modelId) {
-  const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/chat`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages: toOllamaMessages(messages, options.systemInstruction, fallbackImage),
-      stream: true,
-    }),
-  }, signal)
-
-  try {
-    if (!request.response.ok) throw await errorFromResponse(request.response)
-    if (!request.response.body?.getReader) throw createProviderError('network_error', 'Streaming response is unavailable')
-    const reader = request.response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let resolvedModel = null
-
-    const consumeLine = function* (line) {
-      const trimmed = line.trim()
-      if (!trimmed) return
-      let data
-      try {
-        data = JSON.parse(trimmed)
-      } catch (_error) {
-        throw createProviderError('generation_failed', 'Invalid Ollama stream event')
-      }
-      if (data.error) throw createProviderError(providerErrorCode(0, data.error), data.error)
-      if (data.model && data.model !== resolvedModel) {
-        resolvedModel = data.model
-        yield { event: 'model_resolved', data: { provider: 'ollama', requestedModel: modelId, resolvedModel } }
-      }
-      const text = typeof data.message?.content === 'string' ? data.message.content : ''
-      if (text) yield { event: 'chunk', data: { text } }
-    }
-
-    while (true) {
-      const { value, done } = await readStreamChunk(reader, signal, request.abort)
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() || ''
-      for (const line of lines) yield* consumeLine(line)
-    }
-    buffer += decoder.decode()
-    if (buffer.trim()) yield* consumeLine(buffer)
-  } finally {
-    request.cleanup()
-  }
-}
-
 function requestCarriesImage(messages, fallbackImage) {
   if (fallbackImage) return true
   return (Array.isArray(messages) ? messages : []).some(message => (
@@ -382,12 +294,8 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
     return
   }
 
-  const requestedModel = provider === 'ollama'
-    ? (String(model || '').trim() || OLLAMA_CLOUD_MODEL)
-    : (String(model || '').trim() || OPENROUTER_MODEL)
-  const modelAttempts = provider === 'openrouter'
-    ? buildOpenRouterModelAttempts(requestedModel, messages, fallbackImage)
-    : [requestedModel]
+  const requestedModel = String(model || '').trim() || OPENROUTER_MODEL
+  const modelAttempts = buildOpenRouterModelAttempts(requestedModel, messages, fallbackImage)
   let lastError = createProviderError('generation_failed', 'Generation failed')
   for (const [attemptIndex, attemptModel] of modelAttempts.entries()) {
     let attemptHadContent = false
@@ -396,9 +304,7 @@ export async function* streamRemoteProvider(provider, messages, options = {}, ke
     let hasContent = false
     let pendingModelEvent = null
     try {
-      const stream = provider === 'openrouter'
-        ? streamOpenRouterRequest(messages, options, entry.key.trim(), signal, fallbackImage, attemptModel)
-        : streamOllamaRequest(messages, options, entry.key.trim(), signal, fallbackImage, attemptModel)
+      const stream = streamOpenRouterRequest(messages, options, entry.key.trim(), signal, fallbackImage, attemptModel)
       for await (const event of stream) {
         if (event.event === 'model_resolved') {
           if (hasContent) yield event
@@ -469,41 +375,6 @@ export async function testOpenRouterKey(key) {
     }
   } catch (error) {
     return { success: false, provider: 'openrouter', errorType: testErrorType(error) }
-  }
-}
-
-export async function testOllamaKey(key) {
-  try {
-    const request = await fetchWithTimeout(`${OLLAMA_CLOUD_BASE_URL}/chat`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${String(key || '').trim()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: OLLAMA_TEST_MODEL,
-        messages: [{ role: 'user', content: 'OK' }],
-        stream: false,
-        think: 'low',
-        options: { num_predict: 1 },
-      }),
-    })
-    try {
-      if (!request.response.ok) throw await errorFromResponse(request.response)
-      const data = await request.response.json()
-      if (data?.error) {
-        const message = data.error?.message || String(data.error)
-        throw createProviderError(providerErrorCode(0, message), message)
-      }
-      if (!data?.message || typeof data.message !== 'object') {
-        throw createProviderError('invalid_response', 'Invalid Ollama test response')
-      }
-      return { success: true, provider: 'ollama' }
-    } finally {
-      request.cleanup()
-    }
-  } catch (error) {
-    return { success: false, provider: 'ollama', errorType: testErrorType(error) }
   }
 }
 

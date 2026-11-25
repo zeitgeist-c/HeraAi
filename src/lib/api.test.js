@@ -26,7 +26,7 @@ function geminiStream(text) {
   })()
 }
 
-function ollamaStream(text, model) {
+function openRouterStream(text, model) {
   const encoder = new TextEncoder()
   let consumed = false
   return {
@@ -38,7 +38,7 @@ function ollamaStream(text, model) {
           if (consumed) return { value: undefined, done: true }
           consumed = true
           return {
-            value: encoder.encode(`${JSON.stringify({ model, message: { content: text } })}\n`),
+            value: encoder.encode(`data: ${JSON.stringify({ model, choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`),
             done: false,
           }
         },
@@ -128,13 +128,13 @@ describe('streamResearch', () => {
       [{ id: 'g1', key: 'gemini-key' }],
       [{ id: 't1', key: 'tavily-key' }],
       undefined,
-      'gemini-3.7-flash',
+      'gemini-3.6-flash',
       { systemInstruction: '  Her zaman Turkce yanit ver.  ' },
     ))
 
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
     expect(mocks.generateContentStreamMock.mock.calls[0][0]).toEqual(expect.objectContaining({
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.6-flash',
       config: expect.objectContaining({ systemInstruction: 'Her zaman Turkce yanit ver.' }),
     }))
   })
@@ -507,7 +507,7 @@ describe('testKey (Gemini)', () => {
     await testKey('gemini', 'AIza-model-key', 'gemini-3.6-flash')
 
     expect(mocks.generateContentMock.mock.calls[0][0]).toMatchObject({
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       contents: 'OK',
       config: { maxOutputTokens: 1 },
     })
@@ -731,7 +731,7 @@ describe('streamChat fallback', () => {
     expect(events.some(e => e.event === 'error')).toBe(true)
     expect(mocks.generateContentStreamMock).toHaveBeenCalledTimes(1)
     expect(errorLog).toHaveBeenCalledExactlyOnceWith(
-      'Gemini request failed: model=gemini-3.1-flash-lite, reason=invalid_key, httpStatus=400'
+      'Gemini request failed: model=gemini-3.5-flash-lite, reason=invalid_key, httpStatus=400',
     )
     errorLog.mockRestore()
   })
@@ -789,7 +789,6 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
       'gemini-3.6-flash',
       'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
     ])
     expect(events.at(-1)).toEqual(expect.objectContaining({
       event: 'error',
@@ -815,7 +814,6 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
       'gemini-3.6-flash',
       'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
     ])
     expect(events.at(-1)).toEqual(expect.objectContaining({
       event: 'error',
@@ -827,7 +825,7 @@ describe('streamChat fallback', () => {
   it('falls back to gemini-3.5-flash-lite when the requested model hits quota', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.generateContentStreamMock
-      .mockRejectedValueOnce(Object.assign(new Error('quota exceeded for gemini-3.8-flash'), { status: 429 }))
+      .mockRejectedValueOnce(Object.assign(new Error('quota exceeded for gemini-3.6-flash'), { status: 429 }))
       .mockResolvedValueOnce(geminiStream('Lite answer'))
 
     const events = await collectEvents(streamChat(
@@ -835,17 +833,17 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-quota-key-aaaaaaaa' }],
       undefined,
-      'gemini-3.8-flash',
+      'gemini-3.6-flash',
     ))
 
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
-      'gemini-3.8-flash',
+      'gemini-3.6-flash',
       'gemini-3.5-flash-lite',
     ])
     expect(events).toContainEqual({ event: 'chunk', data: { text: 'Lite answer' } })
     expect(events).toContainEqual({
       event: 'model_resolved',
-      data: { provider: 'gemini', requestedModel: 'gemini-3.8-flash', resolvedModel: 'gemini-3.5-flash-lite' },
+      data: { provider: 'gemini', requestedModel: 'gemini-3.6-flash', resolvedModel: 'gemini-3.5-flash-lite' },
     })
     expect(events.some(event => event.event === 'error')).toBe(false)
     expect(errorLog).not.toHaveBeenCalled()
@@ -862,12 +860,12 @@ describe('streamChat fallback', () => {
       {},
       [{ id: 'g1', key: 'AIza-lite-key-aaaaaaaa' }],
       undefined,
-      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
     ))
 
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
-      'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
     ])
     expect(events.at(-1)).toEqual(expect.objectContaining({
       event: 'error',
@@ -875,11 +873,8 @@ describe('streamChat fallback', () => {
     }))
   })
 
-  it.each([
-    'gemini-3.6-flash',
-    'gemini-3.7-flash',
-    'gemini-3.8-flash',
-  ])('uses the extended startup deadline and then tries the safe lite fallbacks for %s', async model => {
+  it('uses the extended startup deadline and then tries the safe lite fallback for gemini-3.6-flash', async () => {
+    const model = 'gemini-3.6-flash'
     vi.useFakeTimers()
     try {
       const requestSignals = []
@@ -909,7 +904,6 @@ describe('streamChat fallback', () => {
       expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
         model,
         'gemini-3.5-flash-lite',
-        'gemini-3.1-flash-lite',
       ])
       expect(requestSignals.every(signal => signal.aborted)).toBe(true)
       expect(mocks.generateContentMock).not.toHaveBeenCalled()
@@ -938,7 +932,6 @@ describe('streamChat fallback', () => {
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
       'gemini-3.6-flash',
       'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
     ])
     expect(mocks.generateContentMock).not.toHaveBeenCalled()
   })
@@ -962,9 +955,9 @@ describe('streamChat fallback', () => {
 })
 
 describe('cross-provider Gemini fallback', () => {
-  const ollamaKeys = [{ id: 'o1', key: 'ollama-key' }]
+  const openRouterKeys = [{ id: 'o1', key: 'or-key' }]
   const geminiFallbackKeys = [{ id: 'g1', key: 'gemini-key' }]
-  const ollamaErrorResponse = (status, message) => ({
+  const remoteErrorResponse = (status, message) => ({
     ok: false,
     status,
     json: async () => ({ error: { message, code: status } }),
@@ -974,41 +967,41 @@ describe('cross-provider Gemini fallback', () => {
     vi.clearAllMocks()
   })
 
-  it('falls back to gemini-3.5-flash-lite when Ollama hits quota', async () => {
-    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(429, 'rate limit'))
+  it('falls back to gemini-3.5-flash-lite when OpenRouter hits quota', async () => {
+    global.fetch = vi.fn().mockResolvedValue(remoteErrorResponse(429, 'rate limit'))
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('Gemini lite answer'))
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'selam' }],
       { fallbackGeminiKeys: geminiFallbackKeys },
-      ollamaKeys,
+      openRouterKeys,
       undefined,
-      'gpt-oss:120b',
-      'ollama',
+      'nvidia/nemotron-3.5-lightning:free',
+      'openrouter',
     ))
 
-    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch).toHaveBeenCalledTimes(2)
     expect(mocks.generateContentStreamMock.mock.calls.map(([parameters]) => parameters.model)).toEqual([
       'gemini-3.5-flash-lite',
     ])
     expect(events).toContainEqual({ event: 'chunk', data: { text: 'Gemini lite answer' } })
     expect(events).toContainEqual({
       event: 'model_resolved',
-      data: { provider: 'gemini', requestedModel: 'gpt-oss:120b', resolvedModel: 'gemini-3.5-flash-lite' },
+      data: { provider: 'gemini', requestedModel: 'nvidia/nemotron-3.5-lightning:free', resolvedModel: 'gemini-3.5-flash-lite' },
     })
     expect(events.some(event => event.event === 'error')).toBe(false)
   })
 
   it('keeps the remote error when no Gemini fallback keys are available', async () => {
-    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(429, 'rate limit'))
+    global.fetch = vi.fn().mockResolvedValue(remoteErrorResponse(429, 'rate limit'))
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'selam' }],
       {},
-      ollamaKeys,
+      openRouterKeys,
       undefined,
-      'gpt-oss:120b',
-      'ollama',
+      'nvidia/nemotron-3.5-lightning:free',
+      'openrouter',
     ))
 
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'rate_limited' } })
@@ -1016,15 +1009,15 @@ describe('cross-provider Gemini fallback', () => {
   })
 
   it('does not fall back on authentication errors even with Gemini keys present', async () => {
-    global.fetch = vi.fn().mockResolvedValue(ollamaErrorResponse(401, 'unauthorized'))
+    global.fetch = vi.fn().mockResolvedValue(remoteErrorResponse(401, 'unauthorized'))
 
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'selam' }],
       { fallbackGeminiKeys: geminiFallbackKeys },
-      ollamaKeys,
+      openRouterKeys,
       undefined,
-      'gpt-oss:120b',
-      'ollama',
+      'nvidia/nemotron-3.5-lightning:free',
+      'openrouter',
     ))
 
     expect(events.at(-1)).toEqual({ event: 'error', data: { code: 'api_key_invalid' } })
@@ -1043,7 +1036,7 @@ describe('cross-provider Gemini fallback', () => {
             okunan += 1
             if (okunan === 1) {
               return {
-                value: encoder.encode(`${JSON.stringify({ model: 'gpt-oss:120b', message: { content: 'YARIM CEVAP' } })}\n`),
+                value: encoder.encode(`data: ${JSON.stringify({ model: 'nvidia/nemotron-3.5-lightning:free', choices: [{ delta: { content: 'YARIM CEVAP' } }] })}\n\n`),
                 done: false,
               }
             }
@@ -1057,10 +1050,10 @@ describe('cross-provider Gemini fallback', () => {
     const events = await collectEvents(streamChat(
       [{ role: 'user', content: 'selam' }],
       { fallbackGeminiKeys: geminiFallbackKeys },
-      ollamaKeys,
+      openRouterKeys,
       undefined,
-      'gpt-oss:120b',
-      'ollama',
+      'nvidia/nemotron-3.5-lightning:free',
+      'openrouter',
     ))
 
     expect(events).toContainEqual({ event: 'chunk', data: { text: 'YARIM CEVAP' } })
@@ -1094,20 +1087,15 @@ describe('model selection', () => {
     mocks.generateContentStreamMock.mockResolvedValue(geminiStream('ok'))
   })
 
-  it('exports the 11 supported model ids with DEFAULT_MODEL as gemini-3.1-flash-lite', () => {
-    expect(DEFAULT_MODEL).toBe('gemini-3.1-flash-lite')
+  it('exports the 6 supported model ids with DEFAULT_MODEL as gemini-3.5-flash-lite', () => {
+    expect(DEFAULT_MODEL).toBe('gemini-3.5-flash-lite')
     expect(MODELS).toEqual([
-      'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.8-flash',
-      'google/gemma-4-26b-a4b-it:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
+      'gemini-4-hydrogen',
       'nvidia/nemotron-3.5-lightning:free',
-      'gpt-oss:120b',
-      'nemotron-3-super',
-      'gemma4:31b',
+      'nvidia/nemotron-3.5-super-vl:free',
+      'inclusionai/ling-3.2-flash:free',
     ])
   })
 
@@ -1117,10 +1105,10 @@ describe('model selection', () => {
       {},
       [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
       undefined,
-      'gemini-3.7-flash',
+      'gemini-3.6-flash',
     ))
 
-    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.7-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
     expect(mocks.clientOptionsMock).toHaveBeenCalledWith({
       apiKey: 'AIza-key-aaaaaaaaaaaa',
       httpOptions: {
@@ -1130,18 +1118,18 @@ describe('model selection', () => {
   })
 
   it.each([
-    'gemma4:31b',
-    'gpt-oss:120b',
-  ])('passes the selected Ollama model %s to the direct provider request', async modelId => {
-    global.fetch = vi.fn().mockResolvedValue(ollamaStream('ok', modelId))
+    'nvidia/nemotron-3.5-lightning:free',
+    'nvidia/nemotron-3.5-super-vl:free',
+  ])('passes the selected OpenRouter model %s to the direct provider request', async modelId => {
+    global.fetch = vi.fn().mockResolvedValue(openRouterStream('ok', modelId))
 
     await collectEvents(streamChat(
       [{ role: 'user', content: 'question' }],
       {},
-      [{ id: 'o1', key: 'ollama-key' }],
+      [{ id: 'o1', key: 'or-key' }],
       undefined,
       modelId,
-      'ollama',
+      'openrouter',
     ))
 
     expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe(modelId)
@@ -1154,10 +1142,10 @@ describe('model selection', () => {
       {},
       [{ id: 'g1', key: 'AIza-key-aaaaaaaaaaaa' }],
       undefined,
-      'gemini-3.7-flash',
+      'gemini-3.6-flash',
     ))
 
-    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.7-flash')
+    expect(mocks.generateContentStreamMock.mock.calls[0][0].model).toBe('gemini-3.6-flash')
   })
 
   it('falls back to DEFAULT_MODEL when no model argument is supplied for streamChat', async () => {
@@ -1175,7 +1163,7 @@ describe('model selection', () => {
     mocks.generateContentMock.mockResolvedValue({ candidates: [{}] })
 
     await testKey('gemini', 'AIza-valid-key-12345abcde')
-    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.7-flash')
+    await testKey('gemini', 'AIza-valid-key-12345abcde', 'gemini-3.6-flash')
 
     expect(mocks.generateContentMock.mock.calls[0][0].model).toBe(DEFAULT_MODEL)
     expect(mocks.generateContentMock.mock.calls[1][0].model).toBe(DEFAULT_MODEL)

@@ -1,8 +1,8 @@
 import { GoogleGenAI } from '@google/genai'
 
-export const DICTATION_PRIMARY_MODEL = 'gemini-3.1-flash-lite'
-export const DICTATION_FALLBACK_MODEL = 'gemini-3.5-flash-lite'
-export const DICTATION_TERTIARY_MODEL = 'gemini-3.6-flash'
+export const DICTATION_PRIMARY_MODEL = 'gemini-3.5-flash-lite'
+export const DICTATION_FALLBACK_MODEL = 'gemini-3.6-flash'
+export const DICTATION_TERTIARY_MODEL = 'gemini-4-hydrogen'
 export const DICTATION_MODEL = DICTATION_PRIMARY_MODEL
 // The third model is tried only on server rejection (5xx) and invalid request
 // (400);

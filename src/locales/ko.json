@@ -222,8 +222,6 @@
     "welcome_title": "안녕하세요, 무엇을 도와드릴까요?",
     "welcome_subtitle": "질문을 하거나 화면에서 영역을 선택하거나 파일을 첨부해 시작하세요.",
     "welcome_actions": {
-      "research_title": "웹 조사",
-      "research_description": "답변에 최신 정보가 필요하면 자동으로 검색합니다",
       "crop_title": "화면에서 선택",
       "crop_description": "영역을 잘라 질문하기",
       "crop_cancel_title": "선택 취소",
